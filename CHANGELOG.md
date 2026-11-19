@@ -8,6 +8,16 @@ All notable changes to OpenDesigner are documented here.
 
 ## 2026-11-19
 
+### fix(app): /model, /effort and /mode open a chooser instead of being sent to the model
+
+**Area:** `fix(app)`
+
+**Why:** Typing `/model` sent it to the LLM as text. **Change:** commands that are settings of the session (`/model`, `/switch`, `/effort`, `/thinking`, `/mode`, `/plan`) open a list of the agent's real choices (the current one marked) and change the setting; other commands still go to the agent. The `/` button is now a settings button (⚙) with a menu of Model / Effort / Mode and the agent's command list.
+
+**Verified:** the window session passes with no QML warning. **Not verified:** by eye, and against a live agent; the choice list is fed by the same settings the row above the chat already shows.
+
+**PR:** n/a
+
 ### fix(app): modal dialogs no longer turn the window white, and the Direction picker and slash-command list behave
 
 **Area:** `fix(app)`
