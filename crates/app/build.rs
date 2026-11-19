@@ -31,6 +31,7 @@ fn main() {
             "qml/HistoryPanel.qml",
             "qml/MemoryPanel.qml",
             "qml/ConnectPanel.qml",
+            "qml/AssetPacksSection.qml",
             "qml/DirectionPicker.qml",
             "qml/Dock.qml",
             "qml/DockNode.qml",

@@ -286,6 +286,12 @@ Rectangle {
                     text: "Sounds come with their author's license. Whoever publishes the video must show the attribution the agent is given (title, author, license, link)."
                 }
 
+                AssetPacksSection {
+                    Layout.fillWidth: true
+                    editor: root.editor
+                    addedNames: root.servers.map(function(s) { return s.name })
+                    onServerAdded: root.refreshServers()
+                }
 
                 Label { text: "Teach your agents"; color: Theme.text; font.pixelSize: Theme.fontSize; font.bold: true }
                 Label {

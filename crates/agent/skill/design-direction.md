@@ -83,6 +83,32 @@ every note you acted on · `list_workspaces` / `create_workspace` for another de
 `get_playbook` for the other guides. If a tool could improve the result and you did not use it, use
 it.
 
+## Assets: icons, blobs, backgrounds, patterns
+
+Do not draw an icon, a blob or a texture by hand when a real one exists. The order is:
+`list_asset_sources` once (what exists and under which licence), `search_assets` (icons by name and
+tag, sounds, installed packs), `import_asset` (puts one in `media/` as a PNG at the size and color
+you give) and `make_asset` for what is generated from a seed: `blob`, `gradient`, `aurora` (the soft
+mesh-gradient look), `grain`, `pattern` (dots, lines, waves, grid, checker, zigzag, topo) and
+`shape`. The same seed always gives the same picture, so a look can be remade.
+
+- **One icon set per design.** Mixing line widths and corner styles is the quickest way to look
+  assembled. Lucide is built in; `list_asset_packs` has Tabler, Phosphor, Heroicons, Iconoir and
+  Bootstrap Icons, and Kenney's CC0 packs for pictures and interface sounds.
+- **Recolor to the tokens.** Pass `color` (a hex from `list_tokens`) to `import_asset` and the same
+  hexes to `make_asset`; never leave an icon in its default black on a designed surface. Import at
+  twice the size it is shown at, or more for a hero.
+- **Backgrounds**: `aurora` or `gradient` in two or three brand colors, `grain` over it for
+  texture, `blob` and `shape` for accents. Keep the contrast of text on top (`review_frame`).
+- **Packs ask the user.** `install_asset_pack` only asks; tell the user what you want it for and
+  stop until they approved it. Install what the design needs and `unload_asset_pack` when done.
+- **Licences.** Each `import_asset` answer says whether a credit line is required
+  (`attribution_required`). If it is, show the line with the finished work (a credits slide or the
+  closing message) and keep the sidecar (`media/<name>.asset.json`) with the project. Never copy
+  from a source that `list_asset_sources` lists as link only.
+- 3D models are not placeable yet. Fonts are not offered as files: use a family installed on the
+  machine or the bundled one.
+
 ## Memory across tasks
 
 `get_guidance` lists the notes earlier runs left in `.opendesigner/memory/` (`list_memory`). Read

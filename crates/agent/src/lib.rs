@@ -2,6 +2,7 @@
 //! it exposes, and the per-install token that guards it (`docs/wiki/agent-integration.md`).
 
 pub mod acp;
+pub mod assets;
 pub mod connect;
 pub mod device;
 pub mod direction;

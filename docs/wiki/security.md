@@ -100,6 +100,13 @@ Allowed destinations: the user's configured model endpoint or agent, sites the u
 - The client (`crates/agent/src/http.rs`) is a small HTTP/1.1 client: one `GET`, no cookies, no cache, a connect and a read timeout, a cap on the answer's size, and the redirect rule above. The secure channel is `rustls` with the root certificates the operating system trusts.
 - What comes back is copied into the project's `media/` folder and nothing else: no sound, no metadata and no token is sent anywhere else, and the app never uploads anything.
 
+**Asset packs** are the second thing an agent can make the app fetch, and the user decides each time ([Store Assets](./store-assets.md#asset-packs-icons-shapes-backgrounds-sounds)):
+
+- `install_asset_pack` from an agent records a request and downloads nothing. The user's click on Download in the Connect tab approves that one pack; the approval is used up by the download. No agent can approve.
+- The destinations are fixed in the code (`registry.npmjs.org` for icon sets, `kenney.nl` for Kenney packs), never an address an agent supplies. The same client rules apply: a connect and a read timeout, a cap on the size, redirects only to the same site. Kenney's download button needs the pack's page named as `Referer`; that is the only header added.
+- An archive is untrusted input: only the listed file types under the listed folders are read, every size is checked before memory is allocated (8 MB a file, 64 MB in all, 20,000 files), a path that leaves its folder is dropped, and an encrypted or zip64 member is refused. Packs live in the config folder (`asset-packs/`, at most 256 MB), never in a project; deleting one is a button or `unload_asset_pack`.
+- SVG is drawn by `resvg` without text or linked images, so an SVG cannot read a file or fetch a URL.
+
 ## Credentials
 
 - In-app chat uses agents the user has signed in to; we do not read their credentials or tokens. The chat starts only the command the user typed or picked (no shell, never from a project file or an agent), gives the agent the loopback MCP URL and its bearer token, and serves it no file or terminal capability. Note what the agent can do on its own: it runs with the user's rights in the project folder and asks permission through its own prompts, which the editor shows; the editor cannot sandbox it.
