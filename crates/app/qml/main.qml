@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Dialogs
+import QtQml
 import org.opendesigner.app
 
 ApplicationWindow {
@@ -17,6 +18,28 @@ ApplicationWindow {
     Editor { id: backend }
 
     property string tool: "select"
+    // the panels are placed by the dock (`Dock.qml`, `layout.rs`); the ones other code talks to
+    // register themselves here when they are created
+    property var canvas: null
+    property var panels: ({})
+    function zoomBy(f) { if (canvas) canvas.zoomCenter(f) }
+    function zoomTo(z) { if (canvas) canvas.zoomTo(z) }
+    function fitCanvas() { if (canvas) canvas.fit() }
+    function fitSelection() { if (canvas) canvas.fitSelection() }
+    // bring a panel into view wherever it is: show it if hidden, make its tab the active one and
+    // raise its window if it is in one
+    function showPanel(id) {
+        const w = backend.layoutReveal(id)
+        if (w > 0) for (let i = 0; i < floatingWindows.count; ++i) {
+            const fw = floatingWindows.objectAt(i)
+            if (fw && fw.windowId === w) { fw.raise(); fw.requestActivate() }
+        }
+    }
+    function focusChat() {
+        showPanel("chat")
+        focusTimer.restart()
+    }
+    Timer { id: focusTimer; interval: 80; onTriggered: { const c = win.panels.chat; if (c) c.focusInput() } }
     // what this workspace is for: the format, who chose it, and a change the agent asked for
     readonly property var brief: backend.brief && backend.brief !== "null" ? JSON.parse(backend.brief) : null
     readonly property var briefFormat: brief ? brief.format : null
@@ -70,7 +93,7 @@ ApplicationWindow {
     Shortcut { sequences: [StandardKey.Save]; onActivated: backend.saveProject() }
     Shortcut { sequences: ["Delete", "Backspace"]; enabled: win.canAct; onActivated: backend.deleteSelected() }
     Shortcut { sequences: ["Escape"]; onActivated: { win.tool = "select"; backend.select("") } }
-    Shortcut { sequence: "Return"; enabled: win.canAct && win.selectedId !== ""; onActivated: inspector.editText() }
+    Shortcut { sequence: "Return"; enabled: win.canAct && win.selectedId !== ""; onActivated: { const i = win.panels.inspector; if (i) i.editText() } }
     Shortcut { sequence: "Left"; enabled: win.canAct; onActivated: win.nudge(-1, 0) }
     Shortcut { sequence: "Right"; enabled: win.canAct; onActivated: win.nudge(1, 0) }
     Shortcut { sequence: "Up"; enabled: win.canAct; onActivated: win.nudge(0, -1) }
@@ -92,18 +115,18 @@ ApplicationWindow {
     Shortcut { sequence: "C"; enabled: win.canAct; onActivated: win.tool = "pin" }
 
     // view
-    Shortcut { sequences: [StandardKey.ZoomIn, "="]; enabled: !win.typing; onActivated: canvas.zoomCenter(1.25) }
-    Shortcut { sequences: [StandardKey.ZoomOut, "-"]; enabled: !win.typing; onActivated: canvas.zoomCenter(0.8) }
-    Shortcut { sequence: "Ctrl+0"; onActivated: canvas.zoomTo(1) }
-    Shortcut { sequence: "Shift+1"; enabled: !win.typing; onActivated: canvas.fit() }
-    Shortcut { sequence: "Shift+2"; enabled: !win.typing; onActivated: canvas.fitSelection() }
+    Shortcut { sequences: [StandardKey.ZoomIn, "="]; enabled: !win.typing; onActivated: win.zoomBy(1.25) }
+    Shortcut { sequences: [StandardKey.ZoomOut, "-"]; enabled: !win.typing; onActivated: win.zoomBy(0.8) }
+    Shortcut { sequence: "Ctrl+0"; onActivated: win.zoomTo(1) }
+    Shortcut { sequence: "Shift+1"; enabled: !win.typing; onActivated: win.fitCanvas() }
+    Shortcut { sequence: "Shift+2"; enabled: !win.typing; onActivated: win.fitSelection() }
     Shortcut { sequence: "N"; enabled: win.canAct; onActivated: win.stepFrame(1) }
     Shortcut { sequence: "Shift+N"; enabled: win.canAct; onActivated: win.stepFrame(-1) }
 
     // app
     Shortcut { sequences: [StandardKey.Open]; onActivated: openDialog.open() }
     Shortcut { sequence: "Ctrl+Shift+E"; enabled: backend.hasProject; onActivated: exportDialog.openDialog() }
-    Shortcut { sequence: "Ctrl+L"; enabled: backend.hasProject; onActivated: agent.focusChat() }
+    Shortcut { sequence: "Ctrl+L"; enabled: backend.hasProject; onActivated: win.focusChat() }
     Shortcut { sequences: ["?", "Ctrl+/"]; enabled: !win.typing; onActivated: shortcutsDialog.open() }
 
     // ---------- layout ----------
@@ -195,11 +218,18 @@ ApplicationWindow {
                 Btn { text: "Undo"; enabled: backend.canUndo; onClicked: backend.undo() }
                 Btn { text: "Redo"; enabled: backend.canRedo; onClicked: backend.redo() }
                 Rectangle { width: 1; height: 22; color: Theme.border; Layout.leftMargin: 6; Layout.rightMargin: 6 }
-                Btn { text: "−"; implicitWidth: 30; leftPadding: 0; rightPadding: 0; onClicked: canvas.zoomCenter(0.8) }
-                Label { text: Math.round(canvas.zoom * 100) + "%"; color: Theme.muted; Layout.preferredWidth: 44; horizontalAlignment: Text.AlignHCenter }
-                Btn { text: "+"; implicitWidth: 30; leftPadding: 0; rightPadding: 0; onClicked: canvas.zoomCenter(1.25) }
-                Btn { text: "Fit"; onClicked: canvas.fit() }
+                Btn { text: "−"; implicitWidth: 30; leftPadding: 0; rightPadding: 0; onClicked: win.zoomBy(0.8) }
+                Label { text: Math.round((win.canvas ? win.canvas.zoom : 1) * 100) + "%"; color: Theme.muted; Layout.preferredWidth: 44; horizontalAlignment: Text.AlignHCenter }
+                Btn { text: "+"; implicitWidth: 30; leftPadding: 0; rightPadding: 0; onClicked: win.zoomBy(1.25) }
+                Btn { text: "Fit"; onClicked: win.fitCanvas() }
                 Rectangle { width: 1; height: 22; color: Theme.border; Layout.leftMargin: 6; Layout.rightMargin: 6 }
+                Btn {
+                    text: "Layout"
+                    onClicked: layoutMenu.popup(parent, 0, parent.height)
+                    ToolTip.visible: hovered
+                    ToolTip.delay: 600
+                    ToolTip.text: "Show or hide panels, reset the arrangement. Drag a tab to move a panel; right-click a tab for more."
+                }
                 Btn { text: "Export…"; primary: true; onClicked: exportDialog.openDialog() }
                 Btn {
                     text: "⋯"
@@ -250,81 +280,164 @@ ApplicationWindow {
             }
         }
 
-        SplitView {
+        // where the panels are: side by side, stacked, as tabs, or in windows of their own
+        Item {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            orientation: Qt.Horizontal
-            handle: Rectangle { implicitWidth: 1; color: Theme.border }
-
-            LayersPanel {
-                editor: backend
-                SplitView.preferredWidth: 250
-                SplitView.minimumWidth: 180
-                SplitView.maximumWidth: 420
-            }
-
-            ColumnLayout {
-                SplitView.fillWidth: true
-                spacing: 0
-                // frame switcher
-                Rectangle {
-                    Layout.fillWidth: true
-                    implicitHeight: 34
-                    color: Theme.panel
-                    visible: win.frames.length > 0
-                    Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: Theme.border }
-                    ListView {
-                        anchors.fill: parent
-                        anchors.leftMargin: 6
-                        orientation: ListView.Horizontal
-                        model: framesModel
-                        spacing: 2
-                        clip: true
-                        delegate: Btn {
-                            required property string json
-                            readonly property var modelData: JSON.parse(json)
-                            text: modelData.name + "  " + Math.round(modelData.width) + "×" + Math.round(modelData.height)
-                            active: modelData.id === backend.activeFrame
-                            height: 34
-                            onClicked: { backend.openFrame(modelData.id); backend.select(modelData.id) }
-                        }
-                    }
-                }
-                CanvasView {
-                    id: canvas
-                    editor: backend
-                    tool: win.tool
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    onToolFinished: win.tool = "select"
-                    onRequestPin: (nodeId, x, y, w, h) => pinDialog.openFor(nodeId, x, y, w, h)
-                    onNoteClicked: id => { agent.tab = 0 }
-                }
-            }
-
-            SplitView {
-                orientation: Qt.Vertical
-                SplitView.preferredWidth: 320
-                SplitView.minimumWidth: 260
-                SplitView.maximumWidth: 520
-                handle: Rectangle { implicitHeight: 1; color: Theme.border }
-                InspectorPanel {
-                    id: inspector
-                    editor: backend
-                    SplitView.preferredHeight: 360
-                    SplitView.minimumHeight: 160
-                    onRequestPin: nodeId => pinDialog.openFor(nodeId, 0, 0, 0, 0)
-                    onRequestReplaceImage: nodeId => { imageDialog.targetId = nodeId; imageDialog.open() }
-                }
-                AgentPanel {
-                    id: agent
-                    editor: backend
-                    onToast: text => win.toast(text, false)
-                    SplitView.fillHeight: true
-                    SplitView.minimumHeight: 200
+            Repeater {
+                model: dock.layout ? [dock.mainRootId] : []
+                delegate: DockNode {
+                    required property int modelData
+                    anchors.fill: parent
+                    host: dock
+                    nodeId: modelData
+                    windowId: 0
                 }
             }
         }
+    }
+
+    // ---------- panels and windows ----------
+    // What each panel is and what it is wired to. The dock decides where each one is shown.
+    Component { id: layersPanel; LayersPanel { editor: backend } }
+    Component {
+        id: canvasPanel
+        ColumnLayout {
+            spacing: 0
+            // frame switcher
+            Rectangle {
+                Layout.fillWidth: true
+                implicitHeight: 34
+                color: Theme.panel
+                visible: win.frames.length > 0
+                Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: Theme.border }
+                ListView {
+                    anchors.fill: parent
+                    anchors.leftMargin: 6
+                    orientation: ListView.Horizontal
+                    model: framesModel
+                    spacing: 2
+                    clip: true
+                    delegate: Btn {
+                        required property string json
+                        readonly property var modelData: JSON.parse(json)
+                        text: modelData.name + "  " + Math.round(modelData.width) + "×" + Math.round(modelData.height)
+                        active: modelData.id === backend.activeFrame
+                        height: 34
+                        onClicked: { backend.openFrame(modelData.id); backend.select(modelData.id) }
+                    }
+                }
+            }
+            CanvasView {
+                id: canvasView
+                editor: backend
+                tool: win.tool
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                onToolFinished: win.tool = "select"
+                onRequestPin: (nodeId, x, y, w, h) => { win.raise(); pinDialog.openFor(nodeId, x, y, w, h) }
+                onNoteClicked: id => win.showPanel("notes")
+                Component.onCompleted: win.canvas = canvasView
+                Component.onDestruction: if (win.canvas === canvasView) win.canvas = null
+            }
+        }
+    }
+    Component {
+        id: inspectorPanel
+        InspectorPanel {
+            id: inspectorView
+            editor: backend
+            onRequestPin: nodeId => { win.raise(); pinDialog.openFor(nodeId, 0, 0, 0, 0) }
+            onRequestReplaceImage: nodeId => { imageDialog.targetId = nodeId; imageDialog.open() }
+            Component.onCompleted: win.panels.inspector = inspectorView
+            Component.onDestruction: if (win.panels.inspector === inspectorView) win.panels.inspector = null
+        }
+    }
+    Component { id: notesPanel; NotesPanel { editor: backend } }
+    Component { id: historyPanel; HistoryPanel { editor: backend } }
+    Component { id: memoryPanel; MemoryPanel { editor: backend } }
+    Component { id: videoPanel; VideoPanel { editor: backend } }
+    Component { id: connectPanel; ConnectPanel { editor: backend; onToast: text => win.toast(text, false) } }
+    Component {
+        id: chatPanel
+        ChatPanel {
+            id: chatView
+            editor: backend
+            Component.onCompleted: win.panels.chat = chatView
+            Component.onDestruction: if (win.panels.chat === chatView) win.panels.chat = null
+        }
+    }
+
+    Dock {
+        id: dock
+        editor: backend
+        mainWindow: win
+        components: ({
+            layers: layersPanel, canvas: canvasPanel, inspector: inspectorPanel, notes: notesPanel,
+            history: historyPanel, memory: memoryPanel, video: videoPanel, connect: connectPanel, chat: chatPanel
+        })
+    }
+
+    // a panel taken out of the window lives in a window of its own; closing it puts it back
+    Instantiator {
+        id: floatingWindows
+        model: backend.hasProject ? dock.windowIds : []
+        delegate: Window {
+            id: fw
+            required property int modelData
+            readonly property int windowId: modelData
+            readonly property var spec: dock.window(modelData)
+            readonly property int rootId: spec ? spec.root.id : 0
+            visible: spec !== null
+            color: Theme.canvasBg
+            title: dock.windowTitle(modelData)
+            minimumWidth: 240
+            minimumHeight: 200
+            Component.onCompleted: {
+                if (!spec) return
+                x = spec.x; y = spec.y; width = spec.width; height = spec.height
+            }
+            // keep where the user left it (after they stop moving it)
+            Timer {
+                id: keep
+                interval: 500
+                onTriggered: dock.setGeometry(fw.windowId, fw.x, fw.y, fw.width, fw.height)
+            }
+            onXChanged: keep.restart()
+            onYChanged: keep.restart()
+            onWidthChanged: keep.restart()
+            onHeightChanged: keep.restart()
+            onClosing: close => { close.accepted = true; Qt.callLater(() => dock.dockWindow(fw.windowId)) }
+            Repeater {
+                model: fw.rootId > 0 ? [fw.rootId] : []
+                delegate: DockNode {
+                    required property int modelData
+                    anchors.fill: parent
+                    host: dock
+                    nodeId: modelData
+                    windowId: fw.windowId
+                }
+            }
+        }
+    }
+
+    Menu {
+        id: layoutMenu
+        Instantiator {
+            model: dock.panelOrder
+            delegate: MenuItem {
+                required property string modelData
+                text: dock.panelTitles[modelData]
+                checkable: true
+                checked: dock.hidden.indexOf(modelData) < 0
+                onTriggered: { if (dock.hidden.indexOf(modelData) >= 0) dock.show(modelData); else dock.hide(modelData) }
+            }
+            onObjectAdded: (i, o) => layoutMenu.insertItem(i, o)
+            onObjectRemoved: (i, o) => layoutMenu.removeItem(o)
+        }
+        MenuSeparator {}
+        MenuItem { text: "Put every window back"; enabled: dock.windowIds.length > 0; onTriggered: { for (const id of dock.windowIds) dock.dockWindow(id) } }
+        MenuItem { text: "Reset the layout"; onTriggered: dock.reset() }
     }
 
     // ---------- welcome ----------
@@ -433,7 +546,7 @@ ApplicationWindow {
             if (noteText.text.trim() === "") return
             if (nodeId !== "") backend.addPin(noteText.text.trim(), nodeId)
             else backend.addRegionPin(noteText.text.trim(), rx, ry, rw, rh)
-            agent.tab = 0
+            win.showPanel("notes")
         }
     }
 
@@ -834,10 +947,11 @@ ApplicationWindow {
     }
 
     Component.onCompleted: {
+        backend.layoutLoad(selfTest.folder === "")
         if (selfTest.folder !== "" || !backend.skillOfferPending()) return
         offer.rows = JSON.parse(backend.skillStatus()).filter(r => r.detected && r.state === "not installed")
         offer.open()
     }
 
-    SelfTest { id: selfTest; editor: backend; canvas: canvas; grabTarget: shell }
+    SelfTest { id: selfTest; editor: backend; canvas: win.canvas; dock: dock; grabTarget: shell }
 }

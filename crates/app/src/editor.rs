@@ -33,6 +33,7 @@ pub mod qobject {
         #[qproperty(QString, jobs)]
         #[qproperty(QString, workspaces)]
         #[qproperty(QString, brief)]
+        #[qproperty(QString, layout)]
         #[qproperty(QString, tokens)]
         #[qproperty(QString, languages)]
         #[qproperty(QString, language)]
@@ -111,6 +112,42 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "importImage"]
         fn import_image(self: Pin<&mut Self>, url: &QString) -> QString;
+        #[qinvokable]
+        #[cxx_name = "layoutLoad"]
+        fn layout_load(self: Pin<&mut Self>, persist: bool);
+        #[qinvokable]
+        #[cxx_name = "layoutMove"]
+        fn layout_move(self: Pin<&mut Self>, panel: &QString, group: i32, zone: &QString);
+        #[qinvokable]
+        #[cxx_name = "layoutDock"]
+        fn layout_dock(self: Pin<&mut Self>, panel: &QString, zone: &QString, window: i32);
+        #[qinvokable]
+        #[cxx_name = "layoutFloat"]
+        fn layout_float(self: Pin<&mut Self>, panel: &QString, x: f64, y: f64, w: f64, h: f64);
+        #[qinvokable]
+        #[cxx_name = "layoutHide"]
+        fn layout_hide(self: Pin<&mut Self>, panel: &QString);
+        #[qinvokable]
+        #[cxx_name = "layoutShow"]
+        fn layout_show(self: Pin<&mut Self>, panel: &QString);
+        #[qinvokable]
+        #[cxx_name = "layoutDockWindow"]
+        fn layout_dock_window(self: Pin<&mut Self>, window: i32);
+        #[qinvokable]
+        #[cxx_name = "layoutReveal"]
+        fn layout_reveal(self: Pin<&mut Self>, panel: &QString) -> i32;
+        #[qinvokable]
+        #[cxx_name = "layoutActive"]
+        fn layout_active(self: Pin<&mut Self>, group: i32, panel: &QString);
+        #[qinvokable]
+        #[cxx_name = "layoutWeights"]
+        fn layout_weights(self: Pin<&mut Self>, split: i32, weights: &QString);
+        #[qinvokable]
+        #[cxx_name = "layoutGeometry"]
+        fn layout_geometry(self: Pin<&mut Self>, window: i32, x: f64, y: f64, w: f64, h: f64);
+        #[qinvokable]
+        #[cxx_name = "layoutReset"]
+        fn layout_reset(self: Pin<&mut Self>);
         #[qinvokable]
         #[cxx_name = "formats"]
         fn formats(self: &Self) -> QString;
@@ -322,6 +359,7 @@ pub struct EditorRust {
     jobs: QString,
     workspaces: QString,
     brief: QString,
+    layout: QString,
     tokens: QString,
     languages: QString,
     language: QString,
@@ -577,6 +615,112 @@ impl qobject::Editor {
             .as_mut()
             .act(|s| s.create_node(&kind, x, y, w, h))
             .unwrap_or_default())
+    }
+
+    /// Applies one change to the panel arrangement and publishes it. Does not touch the canvas,
+    /// so dragging a divider or moving a window never redraws the frame.
+    fn layout_op<T>(
+        mut self: Pin<&mut Self>,
+        f: impl FnOnce(&mut EditorState) -> Result<T, String>,
+    ) -> Option<T> {
+        let result = {
+            let mut rust = self.as_mut().rust_mut();
+            f(&mut rust.state)
+        };
+        let out = match result {
+            Ok(v) => Some(v),
+            Err(e) => {
+                self.as_mut().show(&e, true);
+                None
+            }
+        };
+        let json = self.state.layout_json();
+        self.as_mut().set_layout(q(&json));
+        out
+    }
+
+    pub fn layout_load(mut self: Pin<&mut Self>, persist: bool) {
+        self.as_mut().rust_mut().state.layout_load(persist);
+        let json = self.state.layout_json();
+        self.as_mut().set_layout(q(&json));
+    }
+
+    pub fn layout_move(self: Pin<&mut Self>, panel: &QString, group: i32, zone: &QString) {
+        let (panel, zone) = (panel.to_string(), zone.to_string());
+        self.layout_op(|s| {
+            let zone = crate::layout::Zone::parse(&zone)?;
+            let group = u32::try_from(group).map_err(|_| "no such group".to_string())?;
+            s.layout_apply(|l| l.move_panel(&panel, group, zone))
+        });
+    }
+
+    pub fn layout_dock(self: Pin<&mut Self>, panel: &QString, zone: &QString, window: i32) {
+        let (panel, zone) = (panel.to_string(), zone.to_string());
+        self.layout_op(|s| {
+            let zone = crate::layout::Zone::parse(&zone)?;
+            let window = u32::try_from(window).ok().filter(|w| *w > 0);
+            s.layout_apply(|l| l.dock_edge(&panel, zone, window))
+        });
+    }
+
+    pub fn layout_float(self: Pin<&mut Self>, panel: &QString, x: f64, y: f64, w: f64, h: f64) {
+        let panel = panel.to_string();
+        self.layout_op(|s| s.layout_apply(|l| l.float(&panel, x, y, w, h)));
+    }
+
+    pub fn layout_hide(self: Pin<&mut Self>, panel: &QString) {
+        let panel = panel.to_string();
+        self.layout_op(|s| s.layout_apply(|l| l.hide(&panel)));
+    }
+
+    pub fn layout_show(self: Pin<&mut Self>, panel: &QString) {
+        let panel = panel.to_string();
+        self.layout_op(|s| s.layout_apply(|l| l.show(&panel)));
+    }
+
+    pub fn layout_dock_window(self: Pin<&mut Self>, window: i32) {
+        self.layout_op(|s| {
+            let window = u32::try_from(window).map_err(|_| "no such window".to_string())?;
+            s.layout_apply(|l| l.dock_window(window))
+        });
+    }
+
+    /// Shows a panel and makes its tab the active one; returns the floating window it is in, or
+    /// 0 for the main window.
+    pub fn layout_reveal(self: Pin<&mut Self>, panel: &QString) -> i32 {
+        let panel = panel.to_string();
+        self.layout_op(|s| s.layout_apply(|l| l.reveal(&panel)))
+            .flatten()
+            .and_then(|w| i32::try_from(w).ok())
+            .unwrap_or(0)
+    }
+
+    pub fn layout_active(self: Pin<&mut Self>, group: i32, panel: &QString) {
+        let panel = panel.to_string();
+        self.layout_op(|s| {
+            let group = u32::try_from(group).map_err(|_| "no such group".to_string())?;
+            s.layout_apply(|l| l.set_active(group, &panel))
+        });
+    }
+
+    pub fn layout_weights(self: Pin<&mut Self>, split: i32, weights: &QString) {
+        let weights = weights.to_string();
+        self.layout_op(|s| {
+            let split = u32::try_from(split).map_err(|_| "no such split".to_string())?;
+            let w: Vec<f64> = serde_json::from_str(&weights).map_err(|e| e.to_string())?;
+            s.layout_apply(|l| l.set_weights(split, &w))
+        });
+    }
+
+    pub fn layout_geometry(self: Pin<&mut Self>, window: i32, x: f64, y: f64, w: f64, h: f64) {
+        self.layout_op(|s| {
+            let window = u32::try_from(window).map_err(|_| "no such window".to_string())?;
+            s.layout_apply(|l| l.set_geometry(window, x, y, w, h))
+        });
+    }
+
+    pub fn layout_reset(self: Pin<&mut Self>) {
+        self.layout_op(EditorState::layout_reset);
     }
 
     pub fn formats(&self) -> QString {

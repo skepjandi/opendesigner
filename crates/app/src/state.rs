@@ -52,6 +52,9 @@ pub struct EditorState {
     next_local_job: u64,
     /// The workspace the window last showed, to notice when an agent switches it.
     known_dir: Option<PathBuf>,
+    /// Where the panels are (`layout.rs`) and the file that keeps it between runs.
+    layout: crate::layout::Layout,
+    layout_file: Option<PathBuf>,
 }
 
 /// A job on the window's progress strip: `total` 0 means "working, no percentage".
@@ -131,6 +134,8 @@ impl EditorState {
             jobs: Default::default(),
             next_local_job: 1_000_000,
             known_dir: None,
+            layout: crate::layout::Layout::default(),
+            layout_file: None,
         }
     }
 
@@ -1410,6 +1415,45 @@ impl EditorState {
         let config = token::config_dir().map_err(|e| e.to_string())?;
         let home = skill::home_dir().map_err(|e| e.to_string())?;
         answer_skill_offer_in(&home, &config, install)
+    }
+
+    // ---- panel layout ----
+
+    /// Loads the saved arrangement of panels (or the default). With `persist` false (the window
+    /// session) nothing is read or written.
+    pub fn layout_load(&mut self, persist: bool) {
+        self.layout_file = persist
+            .then(|| token::config_dir().ok().map(|d| d.join("layout.json")))
+            .flatten();
+        self.layout = self
+            .layout_file
+            .as_deref()
+            .map(crate::layout::Layout::load)
+            .unwrap_or_default();
+    }
+
+    pub fn layout_json(&self) -> String {
+        self.layout.to_json()
+    }
+
+    /// Applies one change to the arrangement and keeps the result on disk. A change the layout
+    /// refuses leaves it as it was.
+    pub fn layout_apply<T>(
+        &mut self,
+        f: impl FnOnce(&mut crate::layout::Layout) -> Res<T>,
+    ) -> Res<T> {
+        let out = f(&mut self.layout)?;
+        if let Some(path) = &self.layout_file {
+            self.layout.save(path)?;
+        }
+        Ok(out)
+    }
+
+    pub fn layout_reset(&mut self) -> Res<()> {
+        self.layout_apply(|l| {
+            *l = crate::layout::Layout::default();
+            Ok(())
+        })
     }
 
     /// The sections of formats the user can pick from, as JSON.
