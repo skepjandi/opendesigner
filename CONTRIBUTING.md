@@ -9,11 +9,12 @@ Read [AGENTS.md](AGENTS.md) first. It applies to humans and AI agents alike.
 
 ```bash
 cargo fmt --all --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
-cmake --preset dev && cmake --build --preset dev
-ctest --preset dev --output-on-failure
-clang-format --dry-run --Werror $(git ls-files '*.cpp' '*.h')
+cargo clippy --all-targets -- -D warnings
+cargo test
+cargo deny check
+# the Qt editor (needs Qt 6; see the development guide)
+QMAKE="$(brew --prefix qt)/bin/qmake" cargo clippy -p opendesigner-app --all-targets -- -D warnings
+QMAKE="$(brew --prefix qt)/bin/qmake" cargo test -p opendesigner-app
 ```
 
 5. Add a `CHANGELOG.md` entry; update the wiki if behavior or architecture changes.

@@ -1,0 +1,27 @@
+OpenDesigner third-party notices
+================================
+
+OpenDesigner is licensed under the Mozilla Public License 2.0 (see LICENSE in the source tree).
+
+Qt
+--
+This application uses the Qt toolkit (https://www.qt.io) under the GNU Lesser General Public
+License, version 3 (LGPLv3). Qt is linked dynamically: the Qt frameworks are in
+Contents/Frameworks and the Qt plug-ins and QML modules are in Contents/PlugIns and
+Contents/Resources/qml of this bundle, and can be replaced with another build of the same Qt
+version. The corresponding Qt source code is available from https://download.qt.io and
+https://code.qt.io. The full license texts are at https://www.gnu.org/licenses/lgpl-3.0.html and
+https://www.gnu.org/licenses/gpl-3.0.html.
+
+Only Qt modules offered under the LGPLv3 are bundled; the build refuses to package a module that
+is available under the GPL only (scripts/package-macos.sh).
+
+Lato font
+---------
+The bundled Lato Regular and Lato Bold fonts are licensed under the SIL Open Font License 1.1.
+The license text is in Contents/Resources/OFL.txt.
+
+Rust crates
+-----------
+The Rust dependencies are listed in Cargo.lock; their licenses are checked by `cargo deny`
+(MIT, Apache-2.0, BSD, ISC, Zlib, MPL-2.0, Unicode, CC0). `cargo deny list` prints them.
