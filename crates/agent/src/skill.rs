@@ -126,6 +126,10 @@ pub fn generate() -> Vec<SkillFile> {
             contents: playbook::topic("motion").unwrap_or_default().to_string(),
         },
         SkillFile {
+            path: "references/logo-design.md",
+            contents: playbook::topic("logo").unwrap_or_default().to_string(),
+        },
+        SkillFile {
             path: "references/formats.md",
             contents: playbook::topic("formats").unwrap_or_default().to_string(),
         },

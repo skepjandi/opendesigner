@@ -121,6 +121,7 @@ fn tool_full(
 pub fn definitions() -> Vec<Value> {
     let mut all = core_definitions();
     all.extend(crate::assets::tools::definitions());
+    all.extend(crate::assets::logo::definitions());
     all
 }
 
@@ -145,9 +146,9 @@ fn core_definitions() -> Vec<Value> {
             "get_playbook",
             "Craft guidance for making work that is not mediocre. Topics: design (images), style \
              (named looks with rules), video, motion (timings, easing, recipes), formats (sizes and \
-             safe zones). Call it with no topic for the list; read the ones that apply before you \
+             safe zones), logo (identity design). Call it with no topic for the list; read the ones that apply before you \
              build, not after.",
-            json!({"topic": {"type": "string", "enum": ["design", "style", "video", "motion", "formats"]}}),
+            json!({"topic": {"type": "string", "enum": ["design", "style", "video", "motion", "formats", "logo"]}}),
             &[],
             true,
         ),
@@ -639,6 +640,10 @@ fn persist(ws: &Workspace) -> Result<(), ToolError> {
 pub fn call(ctx: &mut CallCtx, name: &str, args: Value) -> Result<Output, ToolError> {
     match name {
         "get_guidance" => get_guidance(ctx),
+        n if crate::assets::logo::NAMES.contains(&n) => {
+            let dir = ctx.ws.dir().map(std::path::Path::to_path_buf);
+            crate::assets::logo::call(dir.as_deref(), n, args)
+        }
         n if crate::assets::tools::handles(n) => {
             let dir = ctx.ws.dir().map(std::path::Path::to_path_buf);
             crate::assets::tools::call(dir.as_deref(), n, args)

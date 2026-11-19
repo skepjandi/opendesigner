@@ -19,6 +19,7 @@ pub mod catalog;
 pub mod container;
 pub mod generate;
 pub mod index;
+pub mod logo;
 pub mod packs;
 pub mod project;
 pub mod raster;
