@@ -11,19 +11,15 @@ Item {
 
     readonly property var chat: editor.chat ? JSON.parse(editor.chat) : ({ status: "off", messages: [], permission: null })
     readonly property bool connected: chat.status === "ready" || chat.status === "busy"
-    readonly property var presets: [
-        { label: "Claude Code", command: "npx -y @agentclientprotocol/claude-agent-acp" },
-        { label: "Codex", command: "npx -y @agentclientprotocol/codex-acp" },
-        { label: "Gemini CLI", command: "gemini --acp" },
-        { label: "Other", command: "" }
-    ]
+    readonly property var presets: JSON.parse(editor.chatPresets())
 
     Component.onCompleted: {
         const last = editor.chatLastCommand()
         if (last !== "") commandField.text = last
         const i = presets.findIndex(p => p.command === last)
-        presetBox.currentIndex = i >= 0 ? i : (last !== "" ? presets.length - 1 : 0)
-        if (last === "") commandField.text = presets[0].command
+        const firstFound = Math.max(0, presets.findIndex(p => p.found))
+        presetBox.currentIndex = i >= 0 ? i : (last !== "" ? presets.length - 1 : firstFound)
+        if (last === "") commandField.text = presets[firstFound].command
     }
 
     onChatChanged: Qt.callLater(() => list.positionViewAtEnd())
@@ -43,14 +39,14 @@ Item {
                 wrapMode: Text.WordWrap
                 color: Theme.muted
                 font.pixelSize: 11
-                text: "Chat with the coding agent you already use. OpenDesigner starts it on your machine, in this project's folder, and gives it the editor's tools; you stay signed in to it yourself. Install and sign in to the agent first (the commands below use npx or the agent's own CLI, and the package names change; check the agent's documentation if one fails)."
+                text: "Chat with the coding agent you already use. OpenDesigner starts it on your machine, in this project's folder, and gives it the editor's tools; you stay signed in to it yourself. Agents found on this computer are marked. Sign in to the agent first; the first start of Claude Code or Codex downloads an adapter and can take a minute or two."
             }
             RowLayout {
                 Layout.fillWidth: true
                 ComboBox {
                     id: presetBox
-                    model: root.presets.map(p => p.label)
-                    Layout.preferredWidth: 120
+                    model: root.presets.map(p => p.found ? p.label + "  (found)" : p.label)
+                    Layout.preferredWidth: 170
                     onActivated: i => { if (root.presets[i].command !== "") commandField.text = root.presets[i].command }
                 }
                 Field { id: commandField; Layout.fillWidth: true; placeholderText: "command that starts your agent" }

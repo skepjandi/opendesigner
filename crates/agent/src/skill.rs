@@ -49,6 +49,14 @@ pub const TARGETS: &[Target] = &[
         detect: &[".claude"],
         source: "https://code.claude.com/docs/en/skills (Personal: ~/.claude/skills/<skill-name>/SKILL.md)",
     },
+    Target {
+        id: "omp",
+        label: "omp",
+        readers: &["omp"],
+        skills_dir: ".omp/agent/skills",
+        detect: &[".omp"],
+        source: "https://github.com/can1357/oh-my-pi (its skills.md doc: native provider: ~/.omp/agent/skills/<name>/SKILL.md; it also reads ~/.agents/skills and ~/.claude/skills, and drops a same-named identical copy)",
+    },
 ];
 
 pub fn find_target(id: &str) -> Option<&'static Target> {

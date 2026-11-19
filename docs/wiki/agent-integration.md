@@ -1,6 +1,6 @@
 # Agent Integration
 
-> **Status: Partially implemented.** The MCP server and the skill generator/installer (`crates/agent`, `opendesigner skill …`) are built and tested. The Qt app runs the MCP server in-process, has a Connect tab that previews and installs the skill, and a Chat tab (see [In-app chat](#in-app-chat)); an automatic first-run offer to install the skill is not built. **Checked against real agents (2026-11-19, none of them signed in on the test machine):** Claude Code 2.1.318 connected to the server over HTTP with the bearer token and listed it as connected with tools (`--mcp-config` and `--debug mcp`); Gemini CLI 0.38.2 (`gemini --acp`), the Claude adapter (`@agentclientprotocol/claude-agent-acp`) and the Codex adapter (`@agentclientprotocol/codex-acp`) all answered the chat's ACP handshake, the first one and the last one with a sign-in error that the chat reports with the agent's own hint, and the Claude adapter opened a session with the editor's MCP server. **Not checked:** a real tool call or prompt turn with any agent (every model call needed a sign-in that only you can do), Codex and opencode connecting to MCP, and the skill being loaded by a real agent. Skill locations for the supported agents were verified against each agent's own docs on 2026-11-19 (see the target table).
+> **Status: Partially implemented.** The MCP server, the skill generator/installer (`crates/agent`, `opendesigner skill …`), per-agent connection instructions (`od_agent::connect`) and the Chat tab are built and tested; the Qt app runs the MCP server in-process and has a Connect tab (a picker of agents with the exact thing to paste, and the skill install) and a Chat tab (see [In-app chat](#in-app-chat)). An automatic first-run offer to install the skill is not built. The design is agent-agnostic: MCP over Streamable HTTP and ACP are open protocols, and the skill goes where each agent reads skills. **Checked against real agents (2026-11-19):** with **omp 19.0.0**, signed in, a full turn through the in-app chat's own ACP client (`omp acp`) called `get_guidance`, `list_pages` and `apply_ops` on this server, created a frame and a text node, and the edit is attributed `agent:omp-coding-agent` in the project history; the same server was also read from a project `.omp/mcp.json` by `omp -p`. **opencode 1.19.3** listed the server as connected from an `opencode.json`, and `opencode acp` opened a chat session. Claude Code 2.1.318 connected over HTTP with the bearer token and listed the tools; Gemini CLI 0.38.2, the Claude adapter and the Codex adapter answered the chat's ACP handshake (Gemini and Codex with a sign-in error, which the chat reports). **Not checked:** a model turn with Claude Code, Codex or Gemini CLI (not signed in here), Codex, Gemini and Cursor connecting to MCP, and any of it on Windows or Linux. Skill locations were verified against each agent's docs on 2026-11-19 (see the target table).
 
 The point of OpenDesigner is that the user guides an agent *with the GUI*. Three mechanisms carry that, and the app installs the first two on first run.
 
@@ -46,6 +46,7 @@ It never edits an agent's config, credentials or history, never overwrites a ski
 | Target id | Directory (under the user's home) | Read by | Verified against |
 |-----------|-----------------------------------|---------|------------------|
 | `agents` | `~/.agents/skills/` | Codex CLI, Gemini CLI, opencode | Codex docs list `$HOME/.agents/skills` as the user location; Gemini CLI docs list `~/.agents/skills/` as an alias of `~/.gemini/skills/`; opencode reads `~/.agents/skills` for compatibility (all read 2026-11-19) |
+| `omp` | `~/.omp/agent/skills/` | omp | omp's skills doc: the native provider reads `~/.omp/agent/skills/<name>/SKILL.md`; it also reads `~/.agents/skills` and `~/.claude/skills` and drops an identical same-named copy, so installing both is harmless (read in omp's bundled docs 2026-11-19; not run against an installed copy) |
 | `claude-code` | `~/.claude/skills/` | Claude Code | Claude Code docs: personal skills at `~/.claude/skills/<skill-name>/SKILL.md` (read 2026-11-19). Claude Code does not list `~/.agents/skills`, so it needs its own row |
 | Cursor, VS Code, others | not supported | | Not verified. VS Code reads project-level `.agents/skills/` per the Agent Skills quickstart; a project-level install is not built |
 
@@ -97,6 +98,22 @@ Deviations: `add_annotation` is not offered to agents, and there is no `transcri
 | Store | `list_export_presets`, `export`, `export_set`, `export_panorama`, `device_template`, `validate_export` ([Store Assets](./store-assets.md)) |
 | Video | `get_timeline`, `apply_timeline_ops`, `render_frame`, `transcribe` `[INFERENCE: scope decided in Phase 5]` ([Video Editing](./video-editing.md)) |
 
+### Connecting an agent
+
+The Connect tab (and `opendesigner serve-mcp <project> --agent <id>`) shows, per agent, the exact thing to run or save; it is `od_agent::connect::recipes`. The editor never edits an agent's configuration (invariant 6), and no recipe contains the token: each reads the token file when the agent starts (`$(cat 'file')`, an `!` command header for omp, `{file:…}` for opencode) or names an environment variable to fill from it.
+
+| Agent | What to do | Checked against the real agent |
+|-------|-----------|--------------------------------|
+| omp | `.omp/mcp.json` (project) or `~/.omp/agent/mcp.json` with an `http` server and an `Authorization` header of `!printf 'Bearer %s' "$(cat 'token-file')"` | a real turn listed the pages through it |
+| Claude Code | `claude mcp add --transport http …` | connected, tools listed (no model turn) |
+| Codex CLI | `[mcp_servers.opendesigner]` with `url` and `bearer_token_env_var` in `~/.codex/config.toml` | `codex mcp list` parsed it; no connection tried |
+| Gemini CLI | `gemini mcp add -s user --transport http --header …` (copies the token into Gemini's settings) | entry written; no connection tried |
+| opencode | `opencode.json` with a `remote` server and `Bearer {file:token-file}` | `opencode mcp list` showed it connected |
+| Cursor | `.cursor/mcp.json` with `${env:OPENDESIGNER_MCP_TOKEN}` | not installed here; documented format only |
+| any other client | the URL and `Authorization: Bearer <token>` | the server speaks MCP 2025-06-18 over Streamable HTTP |
+
+The shell forms are for macOS and Linux shells; Windows was not tried.
+
 ## Guidance context
 
 This is the feature the whole app exists for. The editor maintains, and exposes to agents, what the user is pointing at:
@@ -110,14 +127,14 @@ The agent's output is shown, not applied silently: changed nodes are outlined, a
 
 ## In-app chat
 
-> **Status: Partially implemented.** Built: an ACP v1 client (`od_agent::acp`), the Chat tab, tests against a scripted agent, and `cargo run -p opendesigner-agent --example acp_probe -- <agent command>` to run the session setup against a real agent (no prompt is sent). Setup was checked with Gemini CLI, the Claude adapter and the Codex adapter as described above; a prompt turn was not, because none of them is signed in here. The setup timeout is 4 minutes because the first `npx` start of an adapter downloads it (over a minute here).
+> **Status: Partially implemented.** Built: an ACP v1 client (`od_agent::acp`), the Chat tab, tests against a scripted agent, and `cargo run -p opendesigner-agent --example acp_probe -- [--prompt=TEXT] <agent command>` to run the session setup (and one turn) against a real agent. With **omp** a real turn worked end to end (see the status above). Setup was checked with opencode, Gemini CLI, the Claude adapter and the Codex adapter; a prompt turn was not, because those three are not signed in here. The setup timeout is 4 minutes because the first `npx` start of an adapter downloads it (over a minute here).
 
 A chat panel (Kino's "chat panel in your project") that drives an agent over the **Agent Client Protocol**: the user picks the agent they already use and are signed in to (their own subscription); OpenDesigner starts it as a child process and shows its turns, tool calls and permission requests inline.
 
 - **Protocol.** ACP version 1: newline-delimited JSON-RPC 2.0 over the child's stdio (`initialize`, `session/new`, `session/prompt`, `session/cancel`, `session/update` notifications, `session/request_permission`). An agent that answers with another version is refused with a message saying so. Lines that are not JSON are ignored (some agents print a banner). ACP is changing (a v2 draft exists, and adapter package names have been renamed more than once), so this is the part most likely to need updating.
 - **What the agent is given.** `session/new` carries the project folder as the working directory and one MCP server: the editor's own, over HTTP, with the bearer token in an `Authorization` header (the agent must advertise `mcpCapabilities.http`, or the chat says it cannot connect). The agent therefore edits the design through `apply_ops` like any other agent: attributed, checkpointed, outlined. The first prompt of a conversation carries a short preamble telling it to call `get_guidance`, which returns the selection, the pinned notes and the user's recent hand edits.
 - **What the client serves.** Nothing: no file-system or terminal capability is declared, and a request for either is answered with "method not supported". Agents do their own file and shell work in their own process; their own permission prompts arrive as `session/request_permission` and are shown with the agent's options (Allow, Reject, ...) for the user to pick, or Cancel.
-- **What starts.** Only the command the user typed or picked in the panel (a program and arguments, split on spaces with quotes, **no shell**); it is remembered next to the connection token. No project file and no agent can set it. Presets in the panel: `npx -y @agentclientprotocol/claude-agent-acp`, `npx -y @agentclientprotocol/codex-acp`, `gemini --acp` (from the adapters' published names and Gemini CLI's documentation; unchecked here).
+- **What starts.** Only the command the user typed or picked in the panel (a program and arguments, split on spaces with quotes, **no shell**); it is remembered next to the connection token. No project file and no agent can set it. Presets in the panel, each marked "found" when the programs it needs are on `PATH`: `omp acp`, `npx -y @agentclientprotocol/claude-agent-acp`, `npx -y @agentclientprotocol/codex-acp`, `gemini --acp`, `opencode acp`, or any command you type (any ACP agent works).
 - **Credentials.** The agent signs in on its own; OpenDesigner never sees its credentials. The agent does receive the local MCP token, which only opens the loopback server of this app.
 - **Not built:** plans, images in prompts, session resume and a session list, several conversations, per-turn checkpoints named after the chat (the checkpoint comes from the MCP `apply_ops` turn as for any agent).
 

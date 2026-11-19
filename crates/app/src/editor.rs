@@ -202,14 +202,17 @@ pub mod qobject {
         #[cxx_name = "chatLastCommand"]
         fn chat_last_command(self: &Self) -> QString;
         #[qinvokable]
+        #[cxx_name = "chatPresets"]
+        fn chat_presets(self: &Self) -> QString;
+        #[qinvokable]
         #[cxx_name = "startMcp"]
         fn start_mcp(self: Pin<&mut Self>);
         #[qinvokable]
         #[cxx_name = "stopMcp"]
         fn stop_mcp(self: Pin<&mut Self>);
         #[qinvokable]
-        #[cxx_name = "connectCommand"]
-        fn connect_command(self: &Self) -> QString;
+        #[cxx_name = "connectRecipes"]
+        fn connect_recipes(self: &Self) -> QString;
         #[qinvokable]
         #[cxx_name = "skillStatus"]
         fn skill_status(self: &Self) -> QString;
@@ -710,6 +713,10 @@ impl qobject::Editor {
         });
     }
 
+    pub fn chat_presets(&self) -> QString {
+        q(&EditorState::chat_presets())
+    }
+
     pub fn chat_last_command(&self) -> QString {
         q(&EditorState::chat_last_command())
     }
@@ -730,8 +737,8 @@ impl qobject::Editor {
         self.as_mut().show("Agent connection stopped", false);
     }
 
-    pub fn connect_command(&self) -> QString {
-        q(&self.state.connect_command())
+    pub fn connect_recipes(&self) -> QString {
+        q(&self.state.connect_recipes())
     }
 
     pub fn skill_status(&self) -> QString {

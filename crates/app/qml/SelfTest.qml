@@ -79,7 +79,7 @@ Item {
         },
         function () {
             editor.startMcp()
-            const ok = editor.mcpRunning && editor.connectCommand().indexOf("claude mcp add") === 0
+            const ok = editor.mcpRunning && JSON.parse(editor.connectRecipes()).length >= 7
             editor.stopMcp()
             return check(ok, "agent connection did not start") && check(!editor.mcpRunning, "agent connection did not stop")
         },

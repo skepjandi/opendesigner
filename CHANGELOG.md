@@ -8,6 +8,18 @@ All notable changes to OpenDesigner are documented here.
 
 ## 2026-11-19
 
+### feat(agent): agent-agnostic connection (omp, opencode, Codex, Gemini, Cursor, any MCP client) and a real omp turn
+
+**Area:** `feat(agent)`, `feat(app)`, `feat(cli)`
+
+**Problem:** Connection help covered Claude Code only, the skill had no omp location, and the chat offered three presets.
+
+**Change:** `od_agent::connect::recipes` gives the exact setup per agent (omp, Claude Code, Codex CLI, Gemini CLI, opencode, Cursor, any client); none contains the token. The Connect tab has an agent picker; `serve-mcp --agent <id>` prints one. New skill target `omp` (`~/.omp/agent/skills`). The chat offers `omp acp` and `opencode acp` besides the Claude, Codex and Gemini ones and marks the installed ones. `acp_probe --prompt=` runs a turn.
+
+**Verified:** with omp 19.0.0 (signed in) a turn through the chat's ACP client called `get_guidance`, `list_pages` and `apply_ops` on a served project, created a frame and a text node, and the history attributes it to `agent:omp-coding-agent`; `omp -p` read the same server from a project `.omp/mcp.json`; `opencode mcp list` showed it connected and `opencode acp` opened a session; unit tests for the recipes; app tests and the window session. **Not verified:** a model turn with Claude Code, Codex or Gemini CLI (not signed in), Codex/Gemini/Cursor connecting to MCP, the omp skill location with a running omp, Windows shells.
+
+**PR:** n/a
+
 ### test(agent): the chat's ACP setup checked against real agents; MCP checked with real Claude Code
 
 **Area:** `test(agent)`, `docs(wiki)`

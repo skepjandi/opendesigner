@@ -55,6 +55,82 @@ pub struct Chat {
     first_prompt: bool,
 }
 
+/// A coding agent the chat knows how to start.
+struct Preset {
+    label: &'static str,
+    command: &'static str,
+    /// Programs that must be on `PATH` for it to work; all of them.
+    needs: &'static [&'static str],
+}
+
+/// Agents that speak ACP, most direct first. `omp`, `gemini` and `opencode` serve it themselves;
+/// the other two run through the adapters their vendors publish.
+const PRESETS: &[Preset] = &[
+    Preset {
+        label: "omp",
+        command: "omp acp",
+        needs: &["omp"],
+    },
+    Preset {
+        label: "Claude Code",
+        command: "npx -y @agentclientprotocol/claude-agent-acp",
+        needs: &["npx", "claude"],
+    },
+    Preset {
+        label: "Codex",
+        command: "npx -y @agentclientprotocol/codex-acp",
+        needs: &["npx", "codex"],
+    },
+    Preset {
+        label: "Gemini CLI",
+        command: "gemini --acp",
+        needs: &["gemini"],
+    },
+    Preset {
+        label: "opencode",
+        command: "opencode acp",
+        needs: &["opencode"],
+    },
+    Preset {
+        label: "Other",
+        command: "",
+        needs: &[],
+    },
+];
+
+/// Whether an executable called `program` is in one of the `PATH` directories.
+fn on_path(program: &str) -> bool {
+    let Some(path) = std::env::var_os("PATH") else {
+        return false;
+    };
+    let names: &[&str] = if cfg!(windows) {
+        &[".exe", ".cmd", ".bat"]
+    } else {
+        &[""]
+    };
+    std::env::split_paths(&path).any(|dir| {
+        names
+            .iter()
+            .any(|ext| dir.join(format!("{program}{ext}")).is_file())
+    })
+}
+
+/// The chat's agent choices as JSON: `[{label, command, found}]`. `found` is whether the agent
+/// is installed here, judged by the programs it needs being on `PATH`.
+pub fn presets_json() -> String {
+    let rows: Vec<serde_json::Value> = PRESETS
+        .iter()
+        .map(|p| {
+            serde_json::json!({
+                "label": p.label,
+                "command": p.command,
+                "found": !p.needs.is_empty() && p.needs.iter().all(|n| on_path(n)),
+            })
+        })
+        .collect();
+    serde_json::Value::Array(rows).to_string()
+}
+
 /// Splits a command line into program and arguments: spaces separate, single or double quotes
 /// group. No shell is involved, so nothing is expanded or piped.
 pub fn split_command(line: &str) -> Result<(String, Vec<String>), String> {

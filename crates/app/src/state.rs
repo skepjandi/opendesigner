@@ -10,6 +10,7 @@ use crate::chat::{Chat, ChatHook, ChatInput, split_command};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use od_agent::acp::{AgentCommand, McpEndpoint};
+use od_agent::connect;
 use od_agent::export::{Plan, export_assets};
 use od_agent::mcp::{ChangeEvent, Handler};
 use od_agent::skill;
@@ -929,6 +930,11 @@ impl EditorState {
     // ---- in-app chat ----
 
     /// The agent command last used, kept next to the connection token.
+    /// The agents the chat offers, as JSON, with which are installed.
+    pub fn chat_presets() -> String {
+        crate::chat::presets_json()
+    }
+
     pub fn chat_last_command() -> String {
         token::config_dir()
             .ok()
@@ -1004,14 +1010,15 @@ impl EditorState {
         }
     }
 
-    pub fn connect_command(&self) -> String {
+    /// How to connect each supported agent, as a JSON array; empty while the server is off.
+    pub fn connect_recipes(&self) -> String {
         match &self.server {
-            Some(s) => format!(
-                "claude mcp add --transport http opendesigner {} --header \"Authorization: Bearer $(cat '{}')\"",
-                s.url,
-                s.token_file.display()
-            ),
-            None => String::new(),
+            Some(s) => serde_json::to_string(&connect::recipes(
+                &s.url,
+                &s.token_file.display().to_string(),
+            ))
+            .unwrap_or_default(),
+            None => "[]".to_string(),
         }
     }
 
@@ -1666,7 +1673,7 @@ mod tests {
         );
         assert!(s.render_canvas(1.0).is_err());
         assert_eq!(s.hit_test(0.0, 0.0), None);
-        assert_eq!(s.connect_command(), "");
+        assert_eq!(s.connect_recipes(), "[]");
     }
 
     #[test]
@@ -1680,14 +1687,14 @@ mod tests {
         assert!(url.starts_with("http://127.0.0.1:"));
         assert!(token_file.exists(), "the token is created where we said");
         assert!(s.snapshot().mcp_running);
-        let cmd = s.connect_command();
+        let recipes = s.connect_recipes();
         assert!(
-            cmd.contains("claude mcp add") && cmd.contains(&url),
-            "{cmd}"
+            recipes.contains("claude mcp add") && recipes.contains(&url),
+            "{recipes}"
         );
         assert!(
-            !cmd.contains(&std::fs::read_to_string(&token_file).unwrap()),
-            "no token in the command"
+            !recipes.contains(std::fs::read_to_string(&token_file).unwrap().trim()),
+            "no token in any recipe"
         );
         assert_eq!(
             s.start_mcp(&token_file, Arc::new(|_| {})).unwrap(),
@@ -1696,7 +1703,7 @@ mod tests {
         );
         s.stop_mcp();
         assert!(!s.snapshot().mcp_running);
-        assert_eq!(s.connect_command(), "");
+        assert_eq!(s.connect_recipes(), "[]");
     }
 
     fn write_png(path: &std::path::Path, w: u32, h: u32) {
