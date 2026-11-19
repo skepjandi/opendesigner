@@ -6,8 +6,10 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use crate::chat::{Chat, ChatHook, ChatInput, split_command};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
+use od_agent::acp::{AgentCommand, McpEndpoint};
 use od_agent::export::{Plan, export_assets};
 use od_agent::mcp::{ChangeEvent, Handler};
 use od_agent::skill;
@@ -37,6 +39,7 @@ pub struct EditorState {
     active_frame: Option<NodeId>,
     /// The language the canvas, the inspector's text and exports use; `None` is the default text.
     language: Option<String>,
+    chat: Option<Chat>,
     agent_changed: BTreeSet<NodeId>,
     server: Option<Server>,
 }
@@ -61,6 +64,7 @@ pub struct Snapshot {
     pub tokens: String,
     pub languages: String,
     pub language: String,
+    pub chat: String,
     pub can_undo: bool,
     pub can_redo: bool,
     pub mcp_running: bool,
@@ -90,6 +94,7 @@ impl EditorState {
             ws: None,
             active_frame: None,
             language: None,
+            chat: None,
             agent_changed: BTreeSet::new(),
             server: None,
         }
@@ -108,6 +113,7 @@ impl EditorState {
     // ---- projects ----
 
     fn adopt(&mut self, ws: Workspace) {
+        self.chat_stop();
         self.stop_mcp();
         let first_frame = view::frames(ws.session.document())
             .first()
@@ -920,6 +926,84 @@ impl EditorState {
         }
     }
 
+    // ---- in-app chat ----
+
+    /// The agent command last used, kept next to the connection token.
+    pub fn chat_last_command() -> String {
+        token::config_dir()
+            .ok()
+            .and_then(|d| std::fs::read_to_string(d.join("chat-agent.txt")).ok())
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default()
+    }
+
+    /// Remembers the agent command for next time (next to the connection token).
+    pub fn save_chat_command(command_line: &str) {
+        if let Ok(dir) = token::config_dir() {
+            let _ = std::fs::create_dir_all(&dir);
+            let _ = std::fs::write(dir.join("chat-agent.txt"), command_line.trim());
+        }
+    }
+
+    /// Starts the agent in `command_line` (a program and arguments, no shell) with the project
+    /// folder as its working directory and the editor's MCP server as its tool. The agent connection
+    /// must be on.
+    pub fn chat_start(&mut self, command_line: &str, hook: ChatHook) -> Res<()> {
+        let (program, args) = split_command(command_line)?;
+        let cwd = self.with_ws(|ws| {
+            ws.dir()
+                .map(Path::to_path_buf)
+                .ok_or_else(|| "the project has no folder".to_string())
+        })?;
+        let server = self
+            .server
+            .as_ref()
+            .ok_or("turn on the agent connection first")?;
+        let mcp = McpEndpoint {
+            url: server.url.clone(),
+            token: token::load_or_create(&server.token_file).map_err(|e| e.to_string())?,
+        };
+        if self.chat.is_none() {
+            self.chat = Some(Chat::new()?);
+        }
+        if let Some(chat) = self.chat.as_mut() {
+            chat.start(AgentCommand { program, args, cwd }, mcp, hook);
+        }
+        Ok(())
+    }
+
+    pub fn chat_send(&mut self, text: &str) -> Res<()> {
+        self.chat
+            .as_mut()
+            .ok_or_else(|| "start the chat first".to_string())?
+            .send(text)
+    }
+
+    /// Answers the agent's permission request; an empty `option` cancels it.
+    pub fn chat_answer(&mut self, request: &str, option: &str) -> Res<()> {
+        let request: u64 = request.parse().map_err(|_| "bad request id".to_string())?;
+        let chat = self.chat.as_mut().ok_or("start the chat first")?;
+        chat.answer(request, (!option.is_empty()).then_some(option))
+    }
+
+    pub fn chat_cancel(&self) {
+        if let Some(c) = &self.chat {
+            c.cancel();
+        }
+    }
+
+    pub fn chat_stop(&mut self) {
+        if let Some(c) = self.chat.as_mut() {
+            c.stop();
+        }
+    }
+
+    pub fn chat_apply(&mut self, input: ChatInput) {
+        if let Some(c) = self.chat.as_mut() {
+            c.apply(input);
+        }
+    }
+
     pub fn connect_command(&self) -> String {
         match &self.server {
             Some(s) => format!(
@@ -1076,6 +1160,11 @@ impl EditorState {
                 .clone()
                 .filter(|l| doc.locales.contains_key(l))
                 .unwrap_or_default(),
+            chat: self
+                .chat
+                .as_ref()
+                .map_or_else(Chat::idle_view, Chat::view)
+                .to_string(),
             can_undo: ws.session.can_undo(),
             can_redo: ws.session.can_redo(),
             mcp_running: self.server.is_some(),
@@ -1762,5 +1851,129 @@ mod tests {
             "Hello",
             "with no language, text edits change the default"
         );
+    }
+
+    fn mock_agent() -> std::path::PathBuf {
+        let exe = std::env::current_exe().unwrap();
+        let name = if cfg!(windows) {
+            "mock_acp_agent.exe"
+        } else {
+            "mock_acp_agent"
+        };
+        let path = exe
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("examples")
+            .join(name);
+        if !path.exists() {
+            let built = std::process::Command::new(env!("CARGO"))
+                .args([
+                    "build",
+                    "--example",
+                    "mock_acp_agent",
+                    "-p",
+                    "opendesigner-agent",
+                ])
+                .status()
+                .unwrap();
+            assert!(built.success());
+        }
+        path
+    }
+
+    fn pump(
+        s: &mut EditorState,
+        rx: &std::sync::mpsc::Receiver<ChatInput>,
+        done: impl Fn(&Value) -> bool,
+    ) -> Value {
+        loop {
+            let chat: Value = serde_json::from_str(&s.snapshot().chat).unwrap();
+            if done(&chat) {
+                return chat;
+            }
+            let input = rx
+                .recv_timeout(std::time::Duration::from_secs(30))
+                .expect("the agent should keep talking");
+            s.chat_apply(input);
+        }
+    }
+
+    #[test]
+    fn the_chat_runs_a_scripted_agent_through_the_editor_and_hands_it_the_local_server() {
+        let (mut s, t) = state();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let hook: ChatHook = Arc::new(move |input| {
+            let _ = tx.send(input);
+        });
+        let command = format!(
+            "\"{}\" normal {}",
+            mock_agent().display(),
+            t.path().join("new.json").display()
+        );
+        assert!(
+            s.chat_start(&command, hook.clone()).is_err(),
+            "the agent connection must be on first"
+        );
+        assert!(s.chat_send("hi").is_err());
+
+        s.start_mcp(&t.path().join("token"), Arc::new(|_| {}))
+            .unwrap();
+        s.chat_start(&command, hook).unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(&s.snapshot().chat).unwrap()["status"],
+            "starting"
+        );
+        pump(&mut s, &rx, |c| c["status"] == "ready");
+
+        // the agent was given this editor's MCP server and the bearer token, and nothing else
+        let new: Value =
+            serde_json::from_str(&std::fs::read_to_string(t.path().join("new.json")).unwrap())
+                .unwrap();
+        let token = std::fs::read_to_string(t.path().join("token")).unwrap();
+        assert_eq!(
+            new["mcpServers"][0]["headers"][0]["value"],
+            format!("Bearer {}", token.trim())
+        );
+        assert!(
+            new["mcpServers"][0]["url"]
+                .as_str()
+                .unwrap()
+                .starts_with("http://127.0.0.1:")
+        );
+        assert_eq!(new["cwd"], t.path().join("p.od").display().to_string());
+
+        s.chat_send("make the headline bigger").unwrap();
+        let waiting = pump(&mut s, &rx, |c| !c["permission"].is_null());
+        assert_eq!(waiting["status"], "busy");
+        assert!(s.chat_send("again").is_err(), "one turn at a time");
+        let request = waiting["permission"]["request"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        s.chat_answer(
+            &request,
+            waiting["permission"]["options"][0]["id"].as_str().unwrap(),
+        )
+        .unwrap();
+        let done = pump(&mut s, &rx, |c| c["status"] == "ready");
+        let said: String = done["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|m| m["role"] == "agent")
+            .map(|m| m["text"].as_str().unwrap())
+            .collect();
+        assert_eq!(said, "Hello world [fs refused] [chose yes]");
+        assert_eq!(done["messages"][0]["role"], "note");
+        assert_eq!(done["messages"][1]["text"], "make the headline bigger");
+
+        s.chat_stop();
+        assert_eq!(
+            serde_json::from_str::<Value>(&s.snapshot().chat).unwrap()["status"],
+            "off"
+        );
+        assert!(s.chat_send("hello?").is_err());
     }
 }
