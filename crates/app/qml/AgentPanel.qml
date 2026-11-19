@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQuick.Dialogs
 
 // The loop with an agent: the notes you pinned, what the agent did (with a restore point before
 // each of its turns), and how to connect an agent.
@@ -13,6 +14,16 @@ Rectangle {
     JsonModel { id: notesModel }
     JsonModel { id: checkpointsModel }
     JsonModel { id: logModel }
+    JsonModel { id: memoryModel }
+    readonly property var memory: editor.memory ? JSON.parse(editor.memory) : []
+    onMemoryChanged: memoryModel.sync(memory)
+    FileDialog {
+        id: memoryDialog
+        title: "Add pictures for the agent"
+        fileMode: FileDialog.OpenFiles
+        nameFilters: ["Images (*.png *.jpg *.jpeg *.webp)"]
+        onAccepted: { for (const u of selectedFiles) root.editor.importToMemory(u.toString()) }
+    }
     onNotesChanged: notesModel.sync(notes)
     onCheckpointsChanged: checkpointsModel.sync(checkpoints.slice().reverse().slice(0, 6))
     onLogChanged: logModel.sync(log)
@@ -26,10 +37,11 @@ Rectangle {
     property alias tab: bar.currentIndex
 
     // ⌘L: show the chat tab (the chat panel puts the cursor in its message field)
-    function focusChat() { tab = 3; chatPanel.focusInput() }
+    function focusChat() { tab = 4; chatPanel.focusInput() }
     function refreshSkill() { skillRows = JSON.parse(editor.skillStatus()) }
     Component.onCompleted: {
         refreshSkill()
+        memoryModel.sync(memory)
         notesModel.sync(notes)
         checkpointsModel.sync(checkpoints.slice().reverse().slice(0, 6))
         logModel.sync(log)
@@ -52,7 +64,7 @@ Rectangle {
             Layout.fillWidth: true
             background: Rectangle { color: Theme.panel }
             Repeater {
-                model: ["Notes", "History", "Connect", "Chat"]
+                model: ["Notes", "History", "Memory", "Connect", "Chat"]
                 TabButton {
                     required property string modelData
                     required property int index
@@ -253,6 +265,71 @@ Rectangle {
                             Label { text: modelData.summary; color: Theme.muted; font.pixelSize: 11; elide: Text.ElideRight; Layout.fillWidth: true }
                         }
                     }
+                }
+            }
+
+            // ---- memory ----
+            ColumnLayout {
+                spacing: 0
+                Label {
+                    Layout.fillWidth: true
+                    Layout.margins: 10
+                    wrapMode: Text.WordWrap
+                    color: Theme.muted
+                    font.pixelSize: Theme.fontSize
+                    text: "Pictures you add here wait for the agent: it sees them (list_media) and uses them when the work needs one. They are copied into this project's media folder and never placed on the design by you."
+                }
+                RowLayout {
+                    Layout.leftMargin: 10
+                    Layout.rightMargin: 10
+                    Btn { text: "Add pictures…"; primary: true; enabled: root.editor.hasProject; onClicked: memoryDialog.open() }
+                    Label { text: "or drop them on the window"; color: Theme.muted; font.pixelSize: 11 }
+                }
+                ListView {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    Layout.topMargin: 8
+                    clip: true
+                    model: memoryModel
+                    spacing: 4
+                    ScrollBar.vertical: ScrollBar {}
+                    delegate: Rectangle {
+                        required property string json
+                        readonly property var modelData: JSON.parse(json)
+                        x: 10
+                        width: ListView.view.width - 20
+                        height: 58
+                        radius: Theme.radius
+                        color: Theme.panelRaised
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.margins: 6
+                            spacing: 8
+                            Image {
+                                Layout.preferredWidth: 46
+                                Layout.preferredHeight: 46
+                                source: modelData.file ? "file://" + modelData.file : ""
+                                sourceSize.width: 92
+                                sourceSize.height: 92
+                                fillMode: Image.PreserveAspectCrop
+                                asynchronous: true
+                            }
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 1
+                                Label { text: modelData.name; color: Theme.text; font.pixelSize: 12; elide: Text.ElideMiddle; Layout.fillWidth: true }
+                                Label { text: Math.round(modelData.bytes / 1024) + " KB · " + (modelData.used ? "used in the design" : "not used yet"); color: Theme.muted; font.pixelSize: 11 }
+                            }
+                        }
+                    }
+                }
+                Label {
+                    visible: memoryModel.count === 0
+                    Layout.fillWidth: true
+                    Layout.margins: 10
+                    text: "Nothing here yet."
+                    color: Theme.muted
+                    font.pixelSize: 12
                 }
             }
 

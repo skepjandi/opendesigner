@@ -28,6 +28,7 @@ pub mod qobject {
         #[qproperty(QString, changed)]
         #[qproperty(QString, unrendered)]
         #[qproperty(QString, overflows)]
+        #[qproperty(QString, memory)]
         #[qproperty(QString, tokens)]
         #[qproperty(QString, languages)]
         #[qproperty(QString, language)]
@@ -273,6 +274,7 @@ pub struct EditorRust {
     changed: QString,
     unrendered: QString,
     overflows: QString,
+    memory: QString,
     tokens: QString,
     languages: QString,
     language: QString,
@@ -381,6 +383,7 @@ impl qobject::Editor {
         self.as_mut().set_changed(q(&snap.changed));
         self.as_mut().set_unrendered(q(&snap.unrendered));
         self.as_mut().set_overflows(q(&snap.overflows));
+        self.as_mut().set_memory(q(&snap.memory));
         self.as_mut().set_tokens(q(&snap.tokens));
         self.as_mut().set_languages(q(&snap.languages));
         self.as_mut().set_language(q(&snap.language));

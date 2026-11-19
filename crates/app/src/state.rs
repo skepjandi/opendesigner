@@ -71,6 +71,7 @@ pub struct Snapshot {
     pub changed: String,
     pub unrendered: String,
     pub overflows: String,
+    pub memory: String,
     pub tokens: String,
     pub languages: String,
     pub language: String,
@@ -570,6 +571,12 @@ impl EditorState {
     /// frame (at most 80% of the frame, centered on `center` or on the frame) and selects it.
     /// Copies a file the user chose into the project's `media/` folder without placing it
     /// anywhere: it waits there for the agent (`list_media`). Returns its reference.
+    /// The files in the agent's memory (`media/`): reference, size and where they are on disk.
+    pub fn memory_list(&self) -> Value {
+        self.with_ws(|ws| Ok(memory_of(ws)))
+            .unwrap_or_else(|_| Value::Array(Vec::new()))
+    }
+
     pub fn import_to_memory(&mut self, src: &std::path::Path) -> Res<String> {
         self.with_ws(|ws| {
             let reference = ws.import_media(src).map_err(|e| e.to_string())?;
@@ -1315,6 +1322,7 @@ impl EditorState {
                     .map(|f| collect_unrendered(doc, f, ws.dir()))
                     .unwrap_or_default(),
             ),
+            memory: memory_of(&ws).to_string(),
             overflows: to_string(&frame.map(|f| collect_overflows(doc, f)).unwrap_or_default()),
             tokens: to_string(&view::tokens(doc)),
             languages: to_string(&view::locales(doc)),
@@ -1354,6 +1362,30 @@ fn image_problem(n: &Node, dir: Option<&std::path::Path>) -> Option<String> {
 /// Image nodes in a frame that the renderer cannot draw (no file, unreadable file): the canvas
 /// marks where they are and says why.
 /// Text in `frame` that wraps to more rows than its box is tall, with the box's place in the frame.
+/// The files in a workspace's `media/` folder, for the memory tab.
+fn memory_of(ws: &Workspace) -> Value {
+    let files = ws.media().unwrap_or_default();
+    Value::Array(
+        files
+            .iter()
+            .map(|f| {
+                json!({
+                    "id": f.path,
+                    "name": f.path.trim_start_matches("media/"),
+                    "bytes": f.bytes,
+                    "file": ws.media_path(&f.path).ok().map(|p| p.display().to_string()),
+                    "used": ws.session.document().pages.iter().any(|p| uses_image(&p.root, &f.path)),
+                })
+            })
+            .collect(),
+    )
+}
+
+fn uses_image(node: &Node, reference: &str) -> bool {
+    node.image.as_deref() == Some(reference)
+        || node.children.iter().any(|c| uses_image(c, reference))
+}
+
 fn collect_overflows(doc: &od_core::Document, frame: &NodeId) -> Vec<Value> {
     let Some(node) = doc.node(frame) else {
         return Vec::new();
@@ -1892,6 +1924,32 @@ mod tests {
         assert!(s.render_canvas(1.0).is_err());
         assert_eq!(s.hit_test(0.0, 0.0), None);
         assert_eq!(s.connect_recipes(), "[]");
+    }
+
+    #[test]
+    fn pictures_added_to_memory_are_listed_and_marked_used_once_the_design_has_them() {
+        let (mut s, t) = state();
+        let src = t.path().join("shot.png");
+        write_png(&src, 8, 8);
+        assert_eq!(s.memory_list(), json!([]));
+        let reference = s.import_to_memory(&src).unwrap();
+        assert_eq!(reference, "media/shot.png");
+        let list = s.memory_list();
+        assert_eq!(list[0]["name"], "shot.png");
+        assert_eq!(list[0]["used"], false);
+        assert!(
+            list[0]["file"]
+                .as_str()
+                .unwrap()
+                .ends_with("media/shot.png")
+        );
+        s.create_node("frame", 0.0, 0.0, 100.0, 100.0).unwrap();
+        s.import_image(&src, None).unwrap();
+        assert_eq!(s.memory_list()[0]["used"], true);
+        assert!(
+            s.import_to_memory(&t.path().join("notes.txt")).is_err(),
+            "only pictures"
+        );
     }
 
     #[test]
