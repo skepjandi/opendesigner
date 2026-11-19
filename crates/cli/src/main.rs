@@ -10,6 +10,8 @@ use od_core::{
     Actor, AnnotationTarget, Node, NodeId, OpError, Operation, ProjectError, Session, Workspace,
     project,
 };
+mod serve;
+
 use od_render::RenderError;
 use od_store::{ImageFacts, Preset, Verification};
 use thiserror::Error;
@@ -123,12 +125,27 @@ enum Command {
         #[arg(long, value_delimiter = ',')]
         select: Vec<String>,
     },
+    /// Serve the project to coding agents over MCP on 127.0.0.1 (stop with Ctrl-C).
+    ServeMcp {
+        dir: PathBuf,
+        /// First port to try; the next ones are tried when it is taken.
+        #[arg(long, default_value_t = od_agent::DEFAULT_PORT)]
+        port: u16,
+        /// Print the token itself (by default only the file that holds it).
+        #[arg(long)]
+        show_token: bool,
+        /// Replace the token first; agents must be reconnected.
+        #[arg(long)]
+        rotate_token: bool,
+    },
 }
 
 #[derive(Debug, Error)]
 enum CliError {
     #[error(transparent)]
     Project(#[from] ProjectError),
+    #[error(transparent)]
+    Agent(#[from] od_agent::AgentError),
     #[error(transparent)]
     Op(#[from] OpError),
     #[error(transparent)]
@@ -318,6 +335,12 @@ fn run(cli: Cli) -> Result<(), CliError> {
             let json = serde_json::to_string_pretty(&ws.guidance()).map_err(json_err)?;
             println!("{json}");
         }
+        Command::ServeMcp {
+            dir,
+            port,
+            show_token,
+            rotate_token,
+        } => serve::run(&dir, port, show_token, rotate_token)?,
     }
     Ok(())
 }
