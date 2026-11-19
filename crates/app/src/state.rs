@@ -35,6 +35,8 @@ struct Server {
 pub struct EditorState {
     ws: Option<Arc<Mutex<Workspace>>>,
     active_frame: Option<NodeId>,
+    /// The language the canvas, the inspector's text and exports use; `None` is the default text.
+    language: Option<String>,
     agent_changed: BTreeSet<NodeId>,
     server: Option<Server>,
 }
@@ -57,6 +59,8 @@ pub struct Snapshot {
     pub changed: String,
     pub unrendered: String,
     pub tokens: String,
+    pub languages: String,
+    pub language: String,
     pub can_undo: bool,
     pub can_redo: bool,
     pub mcp_running: bool,
@@ -85,6 +89,7 @@ impl EditorState {
         EditorState {
             ws: None,
             active_frame: None,
+            language: None,
             agent_changed: BTreeSet::new(),
             server: None,
         }
@@ -109,6 +114,7 @@ impl EditorState {
             .and_then(|f| NodeId::parse(&f.id).ok());
         self.ws = Some(Arc::new(Mutex::new(ws)));
         self.active_frame = first_frame;
+        self.language = None;
         self.agent_changed.clear();
     }
 
@@ -254,6 +260,16 @@ impl EditorState {
     /// Sets one property from the inspector: `value` is JSON (`10`, `"#ffcc00"`, `null`).
     pub fn set_property(&mut self, id: &str, name: &str, value: &str) -> Res<()> {
         let value: Value = serde_json::from_str(value).map_err(|e| format!("value: {e}"))?;
+        let language = self.active_language();
+        if let (Some(language), "text", Value::String(text)) = (language, name, &value) {
+            return self
+                .apply_user(&[Operation::SetLocalizedText {
+                    locale: language,
+                    id: parse_id(id)?,
+                    text: Some(text.clone()),
+                }])
+                .map(|_| ());
+        }
         let prop: Property = serde_json::from_value(json!({"name": name, "value": value}))
             .map_err(|e| format!("{name}: {e}"))?;
         self.apply_user(&[Operation::Set {
@@ -261,6 +277,84 @@ impl EditorState {
             prop,
         }])
         .map(|_| ())
+    }
+
+    /// The language in use, or `None` when it is the default or its translations are gone (an
+    /// undo or an agent can remove a language under the editor).
+    fn active_language(&self) -> Option<String> {
+        let language = self.language.clone()?;
+        self.with_ws(|ws| Ok(ws.session.document().locales.contains_key(&language)))
+            .ok()
+            .filter(|known| *known)
+            .map(|_| language)
+    }
+
+    /// Switches the language the canvas, the inspector's text and exports show (`""` is the default
+    /// text).
+    pub fn switch_language(&mut self, tag: &str) -> Res<()> {
+        if tag.is_empty() {
+            self.language = None;
+            return Ok(());
+        }
+        let known = self.with_ws(|ws| Ok(ws.session.document().locales.contains_key(tag)))?;
+        if !known {
+            return Err(format!("the project has no language {tag:?}"));
+        }
+        self.language = Some(tag.to_string());
+        Ok(())
+    }
+
+    /// Adds a language: every text node gets a translation that starts as its current text, ready
+    /// to edit, in one undoable step. Switches to it.
+    pub fn add_language(&mut self, tag: &str) -> Res<()> {
+        let tag = tag.trim();
+        let ops: Vec<Operation> = self.with_ws(|ws| {
+            let doc = ws.session.document();
+            if doc.locales.contains_key(tag) {
+                return Err(format!("{tag} already exists"));
+            }
+            Ok(view::text_nodes(doc)
+                .into_iter()
+                .filter_map(|t| {
+                    Some(Operation::SetLocalizedText {
+                        locale: tag.to_string(),
+                        id: NodeId::parse(&t.id).ok()?,
+                        text: Some(t.text),
+                    })
+                })
+                .collect())
+        })?;
+        if ops.is_empty() {
+            return Err("there are no text nodes to translate yet".to_string());
+        }
+        self.apply_user(&ops)?;
+        self.language = Some(tag.to_string());
+        Ok(())
+    }
+
+    /// Removes a language and all of its translations, in one undoable step.
+    pub fn remove_language(&mut self, tag: &str) -> Res<()> {
+        let ops: Vec<Operation> = self.with_ws(|ws| {
+            let texts = ws
+                .session
+                .document()
+                .locales
+                .get(tag)
+                .ok_or_else(|| format!("the project has no language {tag:?}"))?;
+            Ok(texts
+                .keys()
+                .map(|id| Operation::SetLocalizedText {
+                    locale: tag.to_string(),
+                    id: id.clone(),
+                    text: None,
+                })
+                .collect())
+        })?;
+        self.apply_user(&ops)?;
+        if self.language.as_deref() == Some(tag) {
+            self.language = None;
+        }
+        Ok(())
     }
 
     /// Defines or recolors a design token (`value` is `#rrggbb` or `#rrggbbaa`).
@@ -563,7 +657,11 @@ impl EditorState {
     pub fn render_canvas(&self, scale: f64) -> Res<String> {
         let frame = self.active_frame.as_ref().ok_or("no frame is open")?;
         self.with_ws(|ws| {
-            let doc = ws.session.document();
+            let localized = self
+                .language
+                .as_deref()
+                .and_then(|l| ws.session.document().localized(l));
+            let doc = localized.as_ref().unwrap_or_else(|| ws.session.document());
             let node = doc.node(frame).ok_or("the frame no longer exists")?;
             let longest = node.width.max(node.height).max(1.0);
             let scale = scale.clamp(0.01, MAX_CANVAS_SIDE / longest).min(16.0);
@@ -610,7 +708,14 @@ impl EditorState {
                 },
                 other => return Err(format!("unknown export mode {other:?}")),
             };
-            let out = export_assets(ws, &plan, preset, None, false).map_err(|e| e.0)?;
+            let out = export_assets(
+                ws,
+                &plan,
+                preset,
+                None,
+                false,
+                self.language.as_deref().filter(|l| ws.session.document().locales.contains_key(*l)),
+            ).map_err(|e| e.0)?;
             let files: Vec<Value> = out
                 .files
                 .iter()
@@ -857,9 +962,20 @@ impl EditorState {
             let mut shallow: Node = n.clone();
             let kids = shallow.children.len();
             shallow.children.clear();
+            let translation = self
+                .language
+                .as_ref()
+                .and_then(|l| doc.locales.get(l))
+                .and_then(|texts| texts.get(&n.id));
+            if let Some(t) = translation {
+                shallow.text = Some(t.clone());
+            }
             let mut v = serde_json::to_value(&shallow).unwrap_or(Value::Null);
             if let Value::Object(m) = &mut v {
                 m.insert("child_count".into(), json!(kids));
+                if self.language.is_some() && n.kind == NodeKind::Text {
+                    m.insert("translated".into(), json!(translation.is_some()));
+                }
             }
             v
         });
@@ -954,6 +1070,12 @@ impl EditorState {
                     .unwrap_or_default(),
             ),
             tokens: to_string(&view::tokens(doc)),
+            languages: to_string(&view::locales(doc)),
+            language: self
+                .language
+                .clone()
+                .filter(|l| doc.locales.contains_key(l))
+                .unwrap_or_default(),
             can_undo: ws.session.can_undo(),
             can_redo: ws.session.can_redo(),
             mcp_running: self.server.is_some(),
@@ -1583,5 +1705,62 @@ mod tests {
         assert!(!home.path().join(".agents").exists());
         let empty = tempfile::tempdir().unwrap();
         assert!(install_skill_in(empty.path()).is_err());
+    }
+
+    #[test]
+    fn a_language_starts_as_a_copy_edits_only_its_own_text_and_survives_undo() {
+        let (mut s, _t) = state();
+        let text = s.create_node("text", 10.0, 10.0, 300.0, 100.0).unwrap();
+        assert!(s.add_language("not a tag").is_err());
+        assert!(
+            s.switch_language("ja").is_err(),
+            "unknown languages are refused"
+        );
+
+        s.add_language("ja").unwrap();
+        assert_eq!(s.snapshot().language, "ja");
+        let langs: Value = serde_json::from_str(&s.snapshot().languages).unwrap();
+        assert_eq!(langs[0]["locale"], "ja");
+        assert_eq!(langs[0]["translated"], 1);
+        assert!(s.add_language("ja").is_err(), "no duplicates");
+
+        s.set_property(&text, "text", "\"守る\"").unwrap();
+        assert_eq!(insp(&s)["text"], "守る");
+        assert_eq!(insp(&s)["translated"], true);
+        let ja_canvas = s.render_canvas(1.0).unwrap();
+
+        s.switch_language("").unwrap();
+        assert_eq!(insp(&s)["text"], "Text", "the default text did not change");
+        assert!(insp(&s).get("translated").is_none());
+        assert_ne!(
+            s.render_canvas(1.0).unwrap(),
+            ja_canvas,
+            "the canvas follows the language"
+        );
+
+        // exports follow the active language and name their files after it
+        s.switch_language("ja").unwrap();
+        let out = s.export("set", None, "tr", 1).unwrap();
+        assert_eq!(out["files"][0]["path"], "exports/tr-ja-01.png");
+
+        // removing the language is one undoable step; an undo can also pull it from under the editor
+        s.remove_language("ja").unwrap();
+        assert_eq!(s.snapshot().language, "");
+        s.undo().unwrap();
+        assert!(s.snapshot().languages.contains("\"ja\""));
+        s.switch_language("ja").unwrap();
+        s.undo().unwrap();
+        s.undo().unwrap();
+        assert_eq!(
+            s.snapshot().language,
+            "",
+            "a language that no longer exists is not active"
+        );
+        s.set_property(&text, "text", "\"Hello\"").unwrap();
+        assert_eq!(
+            insp(&s)["text"],
+            "Hello",
+            "with no language, text edits change the default"
+        );
     }
 }

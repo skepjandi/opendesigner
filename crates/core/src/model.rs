@@ -245,6 +245,9 @@ pub struct Document {
     pub next_id: u64,
     /// Named colors, referenced by paints as `{name}`.
     pub tokens: BTreeMap<String, String>,
+    /// Translations of text nodes: language tag, then node id to text. A text node without an
+    /// entry shows its own `text` in that language.
+    pub locales: BTreeMap<String, BTreeMap<NodeId, String>>,
     pub pages: Vec<Page>,
 }
 
@@ -262,6 +265,7 @@ impl Document {
             name: name.to_string(),
             next_id: 1,
             tokens: BTreeMap::new(),
+            locales: BTreeMap::new(),
             pages: Vec::new(),
         }
     }
@@ -303,6 +307,69 @@ impl Document {
         }
         self.tokens.insert(name.to_string(), value);
         Ok(())
+    }
+
+    /// Sets (or with `None` removes) the translation of text node `id` in `locale`; returns the
+    /// previous one. A language with no translations left disappears.
+    pub fn set_locale_text(
+        &mut self,
+        locale: &str,
+        id: &NodeId,
+        text: Option<&str>,
+    ) -> Result<Option<String>, OpError> {
+        limits::locale_tag(locale)?;
+        let node = self
+            .node(id)
+            .ok_or_else(|| OpError::NoSuchNode(id.to_string()))?;
+        if node.kind != NodeKind::Text {
+            return Err(OpError::NotApplicable {
+                property: "translation",
+                kind: node.kind.as_str(),
+            });
+        }
+        if let Some(t) = text {
+            text_within("text", t, limits::MAX_TEXT_LEN)?;
+            if !self.locales.contains_key(locale) && self.locales.len() >= limits::MAX_LOCALES {
+                return Err(OpError::Limit(format!(
+                    "at most {} languages",
+                    limits::MAX_LOCALES
+                )));
+            }
+        }
+        let old = match text {
+            Some(t) => self
+                .locales
+                .entry(locale.to_string())
+                .or_default()
+                .insert(id.clone(), t.to_string()),
+            None => {
+                let old = self.locales.get_mut(locale).and_then(|m| m.remove(id));
+                if self.locales.get(locale).is_some_and(BTreeMap::is_empty) {
+                    self.locales.remove(locale);
+                }
+                old
+            }
+        };
+        Ok(old)
+    }
+
+    /// The document as it reads in `locale`: every translated text node shows its translation.
+    /// `None` when the language has no translations.
+    pub fn localized(&self, locale: &str) -> Option<Document> {
+        fn walk(n: &mut Node, texts: &BTreeMap<NodeId, String>) {
+            if let Some(t) = texts.get(&n.id) {
+                n.text = Some(t.clone());
+            }
+            for c in &mut n.children {
+                walk(c, texts);
+            }
+        }
+        let texts = self.locales.get(locale)?;
+        let mut doc = self.clone();
+        for page in &mut doc.pages {
+            walk(&mut page.root, texts);
+        }
+        Some(doc)
     }
 
     /// Ids of the nodes whose fill or stroke refers to the token `name`.
@@ -378,6 +445,18 @@ impl Document {
                 "at most {} tokens",
                 limits::MAX_TOKENS
             )));
+        }
+        if self.locales.len() > limits::MAX_LOCALES {
+            return Err(OpError::Limit(format!(
+                "at most {} languages",
+                limits::MAX_LOCALES
+            )));
+        }
+        for (locale, texts) in &self.locales {
+            limits::locale_tag(locale)?;
+            for text in texts.values() {
+                text_within("text", text, limits::MAX_TEXT_LEN)?;
+            }
         }
         for (name, value) in &self.tokens {
             if !valid_token_name(name) {

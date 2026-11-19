@@ -247,6 +247,13 @@ Design tokens are named colors. Define or recolor one with `{"op": "set_token", 
 with it, and those nodes are outlined for the user. `{"op": "set_token", "name": "brand.old",
 "value": null}` removes a token, and is refused while a node still uses it. Prefer changing a token
 to recoloring many nodes one by one.
+
+Translations: a text node's own `text` is the default language. `list_locales` shows the languages
+and which text nodes each still lacks. `{"op": "set_localized_text", "locale": "ja", "id": "n_7",
+"text": "..."}` sets one translation (`text: null` removes it); a language tag looks like `ja` or
+`pt-BR`. Pass `locale` to `export`, `export_set` or `export_panorama` to render a language; set and
+panorama files are named `<prefix>-<locale>-01.png`. Translated text can be longer: check
+`render_preview` of each language for overflow.
 "##;
 
 fn store_specs_md() -> String {

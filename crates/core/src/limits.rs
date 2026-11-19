@@ -11,6 +11,7 @@ pub const MAX_TEXT_LEN: usize = 10_000;
 pub const MAX_PATH_LEN: usize = 1_024;
 pub const MAX_FONT_SIZE: f64 = 2_000.0;
 pub const MAX_FAMILY_LEN: usize = 100;
+pub const MAX_LOCALES: usize = 50;
 pub const MIN_FONT_WEIGHT: f64 = 100.0;
 pub const MAX_FONT_WEIGHT: f64 = 900.0;
 pub const MIN_LINE_HEIGHT: f64 = 0.5;
@@ -73,4 +74,26 @@ pub fn family_name(s: &str) -> Result<(), OpError> {
         });
     }
     Ok(())
+}
+
+/// A language tag such as `en`, `ja` or `pt-BR`: 2 to 3 letters, then up to three subtags of 2 to 8
+/// letters or digits, at most 20 characters in all.
+pub fn locale_tag(tag: &str) -> Result<(), OpError> {
+    let mut parts = tag.split('-');
+    let language_ok = parts
+        .next()
+        .is_some_and(|l| (2..=3).contains(&l.len()) && l.chars().all(|c| c.is_ascii_alphabetic()));
+    let rest: Vec<&str> = parts.collect();
+    let rest_ok = rest.len() <= 3
+        && rest
+            .iter()
+            .all(|p| (2..=8).contains(&p.len()) && p.chars().all(|c| c.is_ascii_alphanumeric()));
+    if tag.len() <= 20 && language_ok && rest_ok {
+        Ok(())
+    } else {
+        Err(OpError::OutOfBounds {
+            what: "locale",
+            detail: format!("{tag:?} is not a language tag like en, ja or pt-BR"),
+        })
+    }
 }

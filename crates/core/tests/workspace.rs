@@ -177,3 +177,45 @@ fn token_changes_are_saved_with_the_project_and_restore_after_reopening() {
     reopened.session.restore(Actor::User, cp).unwrap();
     assert_eq!(reopened.session.document().tokens["brand.gold"], "#f2ca83");
 }
+
+#[test]
+fn translations_are_saved_with_the_project_and_survive_a_reopen_and_a_restore() {
+    let (mut ws, tmp, root) = workspace();
+    let mut n = NewNode::new(NodeKind::Text);
+    n.text = Some("Hello".into());
+    let text = ws
+        .session
+        .apply(
+            Actor::User,
+            None,
+            &[Operation::Create {
+                parent: root,
+                index: None,
+                node: n,
+            }],
+        )
+        .unwrap()
+        .created[0]
+        .clone();
+    let cp = ws.session.checkpoint(Actor::User, "before").unwrap();
+    ws.session
+        .apply(
+            Actor::User,
+            None,
+            &[Operation::SetLocalizedText {
+                locale: "ja".into(),
+                id: text.clone(),
+                text: Some("こんにちは".into()),
+            }],
+        )
+        .unwrap();
+    ws.save().unwrap();
+    let manifest = std::fs::read_to_string(tmp.path().join("p.od/od.toml")).unwrap();
+    assert!(manifest.contains("[locales.ja]"), "{manifest}");
+
+    let mut reopened = Workspace::open(&tmp.path().join("p.od")).unwrap();
+    let ja = reopened.session.document().localized("ja").unwrap();
+    assert_eq!(ja.node(&text).unwrap().text.as_deref(), Some("こんにちは"));
+    reopened.session.restore(Actor::User, cp).unwrap();
+    assert!(reopened.session.document().localized("ja").is_none());
+}

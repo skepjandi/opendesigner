@@ -172,7 +172,8 @@ pub fn definitions() -> Vec<Value> {
              fill, stroke, corner_radius, text, font_size, font_family, font_weight, text_align, line_height, \
              image (a media/ path from list_media), image_fit (cover, contain or fill), {op:'move', id, x, y}, \
              {op:'reparent', id, parent, index?}, {op:'delete', id}, \
-             {op:'set_token', name, value} (a named color '#rrggbb'; value null removes an unused token). Colors are '#rrggbb', '#rrggbbaa' or \
+             {op:'set_token', name, value} (a named color '#rrggbb'; value null removes an unused token), \
+             {op:'set_localized_text', locale, id, text} (a translation of a text node; text null removes it). Colors are '#rrggbb', '#rrggbbaa' or \
              '{token.name}'. Ids are minted for you; the result lists the created ids. A checkpoint is taken \
              before your first change in a turn so the user can restore it.",
             json!({
@@ -221,6 +222,15 @@ pub fn definitions() -> Vec<Value> {
             true,
         ),
         tool(
+            "list_locales",
+            "The languages of the design and what each still lacks, plus every text node with its \
+             default text. Translate with apply_ops set_localized_text; export a language with the \
+             `locale` argument of export, export_set and export_panorama.",
+            json!({}),
+            &[],
+            true,
+        ),
+        tool(
             "render_preview",
             "Render a frame to an image so you can look at the result.",
             json!({
@@ -240,7 +250,8 @@ pub fn definitions() -> Vec<Value> {
                 "file": id("File name ending in .png, for example shot-01.png."),
                 "preset": id("A preset id from list_export_presets."),
                 "scale": {"type": "number", "minimum": 0.01, "maximum": 16},
-                "alpha": {"type": "boolean", "description": "Keep transparency (ignored when the preset forbids it)."}
+                "alpha": {"type": "boolean", "description": "Keep transparency (ignored when the preset forbids it)."},
+                "locale": id("A language from list_locales: text nodes show that language; set files are named <prefix>-<locale>-NN.png.")
             }),
             &["frame", "file"],
             false,
@@ -255,7 +266,8 @@ pub fn definitions() -> Vec<Value> {
                 "prefix": id("File name stem, for example shot (gives shot-01.png)."),
                 "preset": id("A preset id from list_export_presets."),
                 "scale": {"type": "number", "minimum": 0.01, "maximum": 16},
-                "alpha": {"type": "boolean", "description": "Keep transparency (ignored when the preset forbids it)."}
+                "alpha": {"type": "boolean", "description": "Keep transparency (ignored when the preset forbids it)."},
+                "locale": id("A language from list_locales: text nodes show that language; set files are named <prefix>-<locale>-NN.png.")
             }),
             &["frames", "prefix"],
             false,
@@ -272,7 +284,8 @@ pub fn definitions() -> Vec<Value> {
                 "prefix": id("File name stem, for example shot (gives shot-01.png)."),
                 "preset": id("A preset id from list_export_presets."),
                 "scale": {"type": "number", "minimum": 0.01, "maximum": 16},
-                "alpha": {"type": "boolean", "description": "Keep transparency (ignored when the preset forbids it)."}
+                "alpha": {"type": "boolean", "description": "Keep transparency (ignored when the preset forbids it)."},
+                "locale": id("A language from list_locales: text nodes show that language; set files are named <prefix>-<locale>-NN.png.")
             }),
             &["frame", "slices", "prefix"],
             false,
@@ -329,6 +342,13 @@ pub fn call(ctx: &mut CallCtx, name: &str, args: Value) -> Result<Output, ToolEr
         "restore_checkpoint" => restore_checkpoint(ctx, parse(args)?),
         "list_export_presets" => Ok(Output::json(&presets_json())),
         "list_media" => list_media(ctx),
+        "list_locales" => {
+            let doc = ctx.ws.session.document();
+            Ok(Output::json(&json!({
+                "default_language_nodes": od_core::view::text_nodes(doc),
+                "languages": od_core::view::locales(doc),
+            })))
+        }
         "render_preview" => render_preview(ctx, parse(args)?),
         "export" => export(ctx, parse(args)?),
         "export_set" => export_set(ctx, parse(args)?),
@@ -724,6 +744,8 @@ struct ExportArgs {
     scale: Option<f32>,
     #[serde(default)]
     alpha: bool,
+    #[serde(default)]
+    locale: Option<String>,
 }
 
 fn export(ctx: &mut CallCtx, a: ExportArgs) -> Result<Output, ToolError> {
@@ -732,7 +754,14 @@ fn export(ctx: &mut CallCtx, a: ExportArgs) -> Result<Output, ToolError> {
         frame: &id,
         file: &a.file,
     };
-    let out = export_assets(ctx.ws, &plan, a.preset.as_deref(), a.scale, a.alpha)?;
+    let out = export_assets(
+        ctx.ws,
+        &plan,
+        a.preset.as_deref(),
+        a.scale,
+        a.alpha,
+        a.locale.as_deref(),
+    )?;
     let Some(file) = out.files.first() else {
         return fail("nothing was exported");
     };
@@ -772,6 +801,8 @@ struct ExportSetArgs {
     scale: Option<f32>,
     #[serde(default)]
     alpha: bool,
+    #[serde(default)]
+    locale: Option<String>,
 }
 
 fn export_set(ctx: &mut CallCtx, a: ExportSetArgs) -> Result<Output, ToolError> {
@@ -784,7 +815,14 @@ fn export_set(ctx: &mut CallCtx, a: ExportSetArgs) -> Result<Output, ToolError> 
         frames: &frames,
         prefix: &a.prefix,
     };
-    let out = export_assets(ctx.ws, &plan, a.preset.as_deref(), a.scale, a.alpha)?;
+    let out = export_assets(
+        ctx.ws,
+        &plan,
+        a.preset.as_deref(),
+        a.scale,
+        a.alpha,
+        a.locale.as_deref(),
+    )?;
     Ok(Output::json(&set_json(&out, a.preset.as_deref())))
 }
 
@@ -800,6 +838,8 @@ struct PanoramaArgs {
     scale: Option<f32>,
     #[serde(default)]
     alpha: bool,
+    #[serde(default)]
+    locale: Option<String>,
 }
 
 fn export_panorama(ctx: &mut CallCtx, a: PanoramaArgs) -> Result<Output, ToolError> {
@@ -809,7 +849,14 @@ fn export_panorama(ctx: &mut CallCtx, a: PanoramaArgs) -> Result<Output, ToolErr
         slices: a.slices,
         prefix: &a.prefix,
     };
-    let out = export_assets(ctx.ws, &plan, a.preset.as_deref(), a.scale, a.alpha)?;
+    let out = export_assets(
+        ctx.ws,
+        &plan,
+        a.preset.as_deref(),
+        a.scale,
+        a.alpha,
+        a.locale.as_deref(),
+    )?;
     Ok(Output::json(&set_json(&out, a.preset.as_deref())))
 }
 

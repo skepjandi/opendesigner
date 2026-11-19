@@ -629,3 +629,67 @@ fn tokens_change_through_history_recolor_their_users_and_refuse_to_vanish_while_
     s.restore(Actor::User, cp).unwrap();
     assert_eq!(s.document().tokens["brand.gold"], "#f2ca83");
 }
+
+#[test]
+fn translations_are_operations_that_undo_and_never_change_the_default_text() {
+    let (mut s, root) = session();
+    let mut headline = NewNode::new(NodeKind::Text);
+    headline.text = Some("Hold for everything.".into());
+    let text = created_id(&mut s, &root, headline);
+    let shape = created_id(&mut s, &root, rect(0.0, 0.0, 10.0, 10.0));
+
+    let set = |s: &mut Session, locale: &str, id: &NodeId, t: Option<&str>| {
+        s.apply(
+            agent(),
+            None,
+            &[Operation::SetLocalizedText {
+                locale: locale.into(),
+                id: id.clone(),
+                text: t.map(String::from),
+            }],
+        )
+    };
+    let receipt = set(&mut s, "ja", &text, Some("すべてを守る。")).unwrap();
+    assert_eq!(receipt.touched, vec![text.clone()]);
+    set(&mut s, "pt-BR", &text, Some("Guarde tudo.")).unwrap();
+
+    let doc = s.document();
+    assert_eq!(
+        doc.node(&text).unwrap().text.as_deref(),
+        Some("Hold for everything.")
+    );
+    let ja = doc.localized("ja").unwrap();
+    assert_eq!(
+        ja.node(&text).unwrap().text.as_deref(),
+        Some("すべてを守る。")
+    );
+    assert!(doc.localized("fr").is_none());
+
+    // undo removes the translation (and the language with it), redo restores it
+    s.undo(Actor::User).unwrap();
+    assert!(s.document().localized("pt-BR").is_none());
+    s.redo(Actor::User).unwrap();
+    assert!(s.document().localized("pt-BR").is_some());
+
+    // removing the last translation of a language removes the language
+    set(&mut s, "ja", &text, None).unwrap();
+    assert!(s.document().localized("ja").is_none());
+
+    let before = s.document().clone();
+    for (locale, id) in [
+        ("english", &text),
+        ("", &text),
+        ("e", &text),
+        ("en_US", &text),
+        ("ja", &shape),
+    ] {
+        assert!(
+            set(&mut s, locale, id, Some("x")).is_err(),
+            "{locale:?} on {id}"
+        );
+    }
+    assert!(set(&mut s, "ja", &NodeId::parse("n_999").unwrap(), Some("x")).is_err());
+    assert!(set(&mut s, "ja", &text, Some("a\u{0}b")).is_err());
+    assert!(same_content(&before, s.document()));
+    assert_eq!(s.document().locales, before.locales);
+}

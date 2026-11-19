@@ -86,6 +86,10 @@ fn the_editor_window_runs_a_scripted_session() {
         "the set export wrote its slide"
     );
     assert!(
+        project.join("exports/tr-ja-01.png").exists(),
+        "the Japanese set was written under its language name"
+    );
+    assert!(
         project.join("exports/pano-01.png").exists()
             && project.join("exports/pano-02.png").exists(),
         "the panorama was cut into two files"
@@ -101,6 +105,10 @@ fn the_editor_window_runs_a_scripted_session() {
         "the ellipse is filled with the token"
     );
     let manifest = std::fs::read_to_string(project.join("od.toml")).unwrap();
+    assert!(
+        manifest.contains("[locales.ja]") && manifest.contains("守る"),
+        "the translation is saved in the manifest: {manifest}"
+    );
     assert!(
         manifest.contains("brand.gold") && manifest.contains("#f2ca83"),
         "{manifest}"

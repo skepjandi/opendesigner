@@ -240,3 +240,73 @@ fn a_device_frame_and_a_panorama_work_from_the_command_line() {
     let set = ok(&["export-set", dir_s, "--prefix", "all"]);
     assert!(set.contains("wrote exports/all-01.png"), "{set}");
 }
+
+#[test]
+fn a_translation_exports_from_the_command_line() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("l10n.od");
+    let dir_s = s(&dir);
+    ok(&["new", dir_s, "--name", "L10n"]);
+    let page = fs::read_to_string(dir.join("pages/p_1.json")).unwrap();
+    let root: serde_json::Value = serde_json::from_str(&page).unwrap();
+    let root_id = root["root"]["id"].as_str().unwrap().to_string();
+    let ops = tmp.path().join("ops.json");
+    fs::write(
+        &ops,
+        serde_json::json!([{"op": "create", "parent": root_id, "node": {
+            "kind": "frame", "name": "Slide", "width": 600, "height": 300, "fill": "#ffffff",
+            "children": [{"kind": "text", "name": "Headline", "x": 20, "y": 20, "width": 560,
+                          "text": "Hold", "font_size": 120, "fill": "#000000"}]}}])
+        .to_string(),
+    )
+    .unwrap();
+    let receipt: serde_json::Value = serde_json::from_str(&ok(&["apply", dir_s, s(&ops)])).unwrap();
+    let frame = receipt["created"][0].as_str().unwrap().to_string();
+    let text = receipt["touched"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap().to_string())
+        .find(|id| *id != frame)
+        .unwrap();
+
+    assert!(ok(&["locales", dir_s]).contains("no languages"));
+    fs::write(
+        &ops,
+        serde_json::json!([{"op": "set_localized_text", "locale": "ja", "id": text, "text": "守る"}])
+            .to_string(),
+    )
+    .unwrap();
+    ok(&["apply", dir_s, s(&ops)]);
+    assert!(ok(&["locales", dir_s]).starts_with("ja\t1 translated"));
+
+    let (en, ja) = (tmp.path().join("en.png"), tmp.path().join("ja.png"));
+    ok(&["export", dir_s, "--frame", &frame, "--out", s(&en)]);
+    ok(&[
+        "export",
+        dir_s,
+        "--frame",
+        &frame,
+        "--out",
+        s(&ja),
+        "--locale",
+        "ja",
+    ]);
+    assert_ne!(fs::read(&en).unwrap(), fs::read(&ja).unwrap());
+    let set = ok(&["export-set", dir_s, "--prefix", "slide", "--locale", "ja"]);
+    assert!(set.contains("exports/slide-ja-01.png"), "{set}");
+    assert!(
+        !od(&[
+            "export",
+            dir_s,
+            "--frame",
+            &frame,
+            "--out",
+            s(&en),
+            "--locale",
+            "fr"
+        ])
+        .status
+        .success()
+    );
+}

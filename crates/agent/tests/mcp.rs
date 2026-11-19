@@ -159,6 +159,7 @@ fn tools_list_describes_every_tool_with_a_closed_schema() {
         "export_panorama",
         "device_template",
         "list_media",
+        "list_locales",
         "validate_export",
     ] {
         assert!(names.contains(&expected), "missing {expected}");
@@ -575,4 +576,64 @@ fn a_device_template_is_a_valid_create_payload_that_applies_as_is() {
             assert!(err, "{bad}: {text}");
         }
     }
+}
+
+#[test]
+fn a_design_exports_in_each_language_without_touching_the_default() {
+    let f = fixture();
+    let made = f.ok(
+        "apply_ops",
+        json!({"ops": [{"op":"create","parent":f.root,"node":{
+            "kind":"frame","name":"Slide","width":1320,"height":2868,"fill":"#ffffff",
+            "children":[{"kind":"text","name":"Headline","x":60,"y":100,"width":1200,
+                         "text":"Hold","font_size":300,"fill":"#000000"}]}}]}),
+    );
+    let frame = made["created"][0].as_str().unwrap().to_string();
+    let found = f.ok("find_nodes", json!({"kind": "text"}));
+    let text = found[0]["id"].as_str().unwrap().to_string();
+
+    let before = f.ok("list_locales", json!({}));
+    assert_eq!(before["languages"].as_array().unwrap().len(), 0);
+    assert_eq!(before["default_language_nodes"][0]["text"], "Hold");
+
+    f.ok(
+        "apply_ops",
+        json!({"ops": [{"op": "set_localized_text", "locale": "ja", "id": text, "text": "守る"}]}),
+    );
+    let after = f.ok("list_locales", json!({}));
+    assert_eq!(after["languages"][0]["locale"], "ja");
+    assert_eq!(after["languages"][0]["translated"], 1);
+    assert_eq!(
+        f.ok("get_node", json!({"id": text}))["text"],
+        "Hold",
+        "the default text is untouched"
+    );
+
+    let dir = f.ws.lock().unwrap().dir().unwrap().to_path_buf();
+    let en = f.ok("export_set", json!({"frames": [frame], "prefix": "slide"}));
+    let ja = f.ok(
+        "export_set",
+        json!({"frames": [frame], "prefix": "slide", "locale": "ja"}),
+    );
+    assert_eq!(en["files"][0]["path"], "exports/slide-01.png");
+    assert_eq!(ja["files"][0]["path"], "exports/slide-ja-01.png");
+    let (a, b) = (
+        std::fs::read(dir.join("exports/slide-01.png")).unwrap(),
+        std::fs::read(dir.join("exports/slide-ja-01.png")).unwrap(),
+    );
+    assert_ne!(a, b, "the translated slide looks different");
+
+    let (err, message) = f.tool(
+        "export_set",
+        json!({"frames": [frame], "prefix": "x", "locale": "fr"}),
+    );
+    assert!(
+        err && message.contains("no translations") && message.contains("ja"),
+        "{message}"
+    );
+    let (err, _) = f.tool(
+        "apply_ops",
+        json!({"ops": [{"op": "set_localized_text", "locale": "not a tag", "id": text, "text": "x"}]}),
+    );
+    assert!(err);
 }

@@ -8,6 +8,18 @@ All notable changes to OpenDesigner are documented here.
 
 ## 2026-11-19
 
+### feat(core): per-language text and exports
+
+**Area:** `feat(core)`, `feat(render)`, `feat(mcp)`, `feat(cli)`, `feat(ui)`, `feat(skill)`
+
+**Problem:** A store listing ships in many languages, and re-asking an agent to redraw each one is the cost this studio exists to remove.
+
+**Change:** `Document::locales` holds translations of text nodes (language tag, then node id to text) in `od.toml`; the new operation `set_localized_text` sets or removes one (undoable, attributed, checkpointed) and a language with no translations disappears. `Document::localized(tag)` gives the document as it reads in a language, which `export_assets` renders: `export`, `export_set` and `export_panorama` take a `locale`, and set and panorama files are named `<prefix>-<locale>-NN.png`. New tool `list_locales` (languages, what each lacks, every text node) and CLI `locales`, `--locale` on the export commands. The editor has a language switcher (the canvas, the text field and exports follow it) and a Languages dialog; adding a language copies the current text of every text node as a starting point, in one undoable step.
+
+**Verified:** `fmt`, `clippy -D warnings`, tests (core: operation, undo/redo, removal, refusals, persistence and restore after a reopen; MCP: translate then export both languages with different pixels and unknown-language refusal; app unit test; the window session adds a language, edits a translation, exports a set in it and checks the saved manifest). **Not verified:** the toolbar combo box and the Languages dialog controls (only the calls behind them run); right-to-left text and complex scripts (shaping uses the bundled Lato plus system fonts, unchecked); that a longer translation fits its box (nothing detects overflow).
+
+**PR:** n/a
+
 ### perf(render): a benchmark for the render path, and the first measured numbers
 
 **Area:** `perf(render)`

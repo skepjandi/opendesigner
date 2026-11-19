@@ -27,6 +27,8 @@ struct Manifest {
     // Tables must come last in TOML.
     #[serde(default)]
     tokens: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    locales: BTreeMap<String, BTreeMap<String, String>>,
 }
 
 fn io_err(path: &Path, source: std::io::Error) -> ProjectError {
@@ -124,6 +126,14 @@ pub fn save(dir: &Path, session: &Session) -> Result<(), ProjectError> {
         next_id: doc.next_id,
         pages: doc.pages.iter().map(|p| p.id.to_string()).collect(),
         tokens: doc.tokens.clone(),
+        locales: doc
+            .locales
+            .iter()
+            .map(|(l, texts)| {
+                let texts = texts.iter().map(|(id, t)| (id.to_string(), t.clone()));
+                (l.clone(), texts.collect())
+            })
+            .collect(),
     };
     let toml = toml::to_string(&manifest).map_err(|e| parse_err(&dir.join(MANIFEST), e))?;
     write_atomic(&dir.join(MANIFEST), toml.as_bytes())?;
@@ -182,11 +192,21 @@ pub fn load(dir: &Path) -> Result<Session, ProjectError> {
         }
         pages.push(page);
     }
+    let mut locales = BTreeMap::new();
+    for (locale, texts) in manifest.locales {
+        let mut parsed = BTreeMap::new();
+        for (id, text) in texts {
+            let id = NodeId::parse(&id).map_err(|e| ProjectError::Invalid(e.to_string()))?;
+            parsed.insert(id, text);
+        }
+        locales.insert(locale, parsed);
+    }
     let doc = Document {
         format: manifest.format,
         name: manifest.name,
         next_id: manifest.next_id,
         tokens: manifest.tokens,
+        locales,
         pages,
     };
 
