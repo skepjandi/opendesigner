@@ -9,7 +9,7 @@ Item {
     id: root
     required property var editor
 
-    readonly property var chat: editor.chat ? JSON.parse(editor.chat) : ({ status: "off", messages: [], permission: null })
+    readonly property var chat: editor.chat ? JSON.parse(editor.chat) : ({ status: "off", messages: [], permission: null, plan: [] })
     readonly property bool connected: chat.status === "ready" || chat.status === "busy"
     readonly property var presets: JSON.parse(editor.chatPresets())
 
@@ -74,6 +74,37 @@ Item {
             }
             Btn { text: "Cancel"; visible: root.chat.status === "busy"; onClicked: root.editor.chatCancel() }
             Btn { text: "Disconnect"; onClicked: root.editor.chatStop() }
+        }
+
+        // the agent's plan, as it stands: done, doing, to do
+        Rectangle {
+            Layout.fillWidth: true
+            visible: root.chat.plan && root.chat.plan.length > 0
+            implicitHeight: planColumn.implicitHeight + 12
+            radius: Theme.radius
+            color: Theme.panelRaised
+            border.width: 1
+            border.color: Theme.border
+            ColumnLayout {
+                id: planColumn
+                anchors.fill: parent
+                anchors.margins: 6
+                spacing: 2
+                Label { text: "Plan"; color: Theme.text; font.pixelSize: 11; font.bold: true }
+                Repeater {
+                    model: root.chat.plan || []
+                    delegate: Label {
+                        required property var modelData
+                        Layout.fillWidth: true
+                        wrapMode: Text.Wrap
+                        textFormat: Text.PlainText
+                        font.pixelSize: 11
+                        color: modelData.status === "in_progress" ? Theme.accent : Theme.muted
+                        font.bold: modelData.status === "in_progress"
+                        text: (modelData.status === "completed" ? "✓ " : modelData.status === "in_progress" ? "▸ " : "○ ") + modelData.content
+                    }
+                }
+            }
         }
 
         ListView {

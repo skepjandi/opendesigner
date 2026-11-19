@@ -64,7 +64,7 @@ Frames, primitives, paths with the pen tool, text, images, selection/transform/s
 
 `agent` crate: MCP server and tool surface, `get_guidance`, selection and annotation model and UI (pins), attributed operations with agent-change outlines and checkpoints, skill generator and installer with the verified target table, connect-command UX. **Exit:** with Claude Code and Codex CLI, a user pins "headline too small" on a text node, the agent reads the pin, resizes, resolves it; the layer is outlined; restore brings the old size back. Installer tests prove it writes only inside its directories.
 
-**Progress (2026-11-19):** the MCP server and tools, token handling, the `serve-mcp` command, the skill generator and the previewed, reversible skill installer (`opendesigner skill …`) are built and tested (see [Agent Integration](./agent-integration.md#implemented)); annotation/selection model is in `core`. Not built: the pin UI and the agent-change outline in the editor (need the Qt shell), the first-run offer in the app, and the Claude Code / Codex end-to-end check, which needs those agents run by hand.
+**Progress (2026-11-19):** the MCP server and tools, token handling, the `serve-mcp` command, the skill generator and the previewed, reversible skill installer (`opendesigner skill …`) are built and tested (see [Agent Integration](./agent-integration.md#implemented)); annotation/selection model is in `core`. The pin UI, the agent-change outline and the first-run offer are built in the Qt shell. Not done: a Claude Code / Codex prompt turn (not signed in here).
 
 ## Phase 4: store studio
 
@@ -76,7 +76,7 @@ Frames, primitives, paths with the pen tool, text, images, selection/transform/s
 
 ## Phase 6: in-app chat
 
-**Progress (2026-11-19):** an ACP v1 client, the Chat tab (start an agent from a preset or a custom command, send, permission buttons, cancel, disconnect) and the MCP hand-off are built and tested against a scripted agent, including the window session. The session setup was also run against real Gemini CLI, the Claude adapter and the Codex adapter (see [Agent Integration](./agent-integration.md#in-app-chat)); a real prompt turn then worked end to end with omp (`omp acp`: tools called, a frame created, edit attributed to the agent), and the panel marks which agents are installed. Not met: plans, session list, a prompt turn with Claude Code, Codex or Gemini CLI (not signed in here). ACP's v2 draft is not supported. **Exit** (the Phase 3 scenario without leaving the app) is unverified.
+**Progress (2026-11-19):** an ACP v1 client, the Chat tab (start an agent from a preset or a custom command, send, permission buttons, cancel, disconnect) and the MCP hand-off are built and tested against a scripted agent, including the window session. The session setup was also run against real Gemini CLI, the Claude adapter and the Codex adapter (see [Agent Integration](./agent-integration.md#in-app-chat)); a real prompt turn then worked end to end with omp (`omp acp`: tools called, a frame created, edit attributed to the agent), and the panel marks which agents are installed. Plans are shown (real omp emits them). Not met: a session list, a prompt turn with Claude Code, Codex or Gemini CLI (not signed in here). ACP's v2 draft is not supported. **Exit** (the Phase 3 scenario without leaving the app) is unverified.
 
 ACP client, agent picker for installed agents, chat panel with tool calls, plans and approvals inline, guidance context attached to each prompt, scripted demo agent for tests, session list.
 

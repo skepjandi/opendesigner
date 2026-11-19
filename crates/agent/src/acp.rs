@@ -57,6 +57,16 @@ pub struct PermissionOption {
     pub kind: String,
 }
 
+/// One step of the agent's plan.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlanEntry {
+    pub content: String,
+    /// `pending`, `in_progress` or `completed`.
+    pub status: String,
+    /// `high`, `medium` or `low`.
+    pub priority: String,
+}
+
 /// What the agent reports while a turn runs, in the order it happens.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ChatEvent {
@@ -73,6 +83,8 @@ pub enum ChatEvent {
         status: Option<String>,
     },
     /// The agent wants permission; answer with [`AcpSession::answer_permission`].
+    /// The agent's whole plan as it stands; each one replaces the last.
+    Plan(Vec<PlanEntry>),
     Permission {
         request: u64,
         title: String,
@@ -129,6 +141,19 @@ fn event_for(update: &Value) -> Option<ChatEvent> {
             title: update["title"].as_str().map(str::to_string),
             status: update["status"].as_str().map(str::to_string),
         }),
+        "plan" => Some(ChatEvent::Plan(
+            update["entries"]
+                .as_array()?
+                .iter()
+                .filter_map(|e| {
+                    Some(PlanEntry {
+                        content: e["content"].as_str()?.to_string(),
+                        status: e["status"].as_str().unwrap_or("pending").to_string(),
+                        priority: e["priority"].as_str().unwrap_or("medium").to_string(),
+                    })
+                })
+                .collect(),
+        )),
         _ => None,
     }
 }

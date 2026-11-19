@@ -8,6 +8,16 @@ All notable changes to OpenDesigner are documented here.
 
 ## 2026-11-19
 
+### feat(app): first-run skill offer and the agent's plan in the chat
+
+**Area:** `feat(app)`, `feat(agent)`
+
+**Change:** On the first start with an agent that reads skills present and ours not installed, a dialog lists every file it would write and offers Install, Not now or Don't ask again (a marker in the config folder; nothing is written without a click). The chat shows ACP `plan` updates as a checklist (replaced whole by each update, cleared at the next user message). The session list stays unbuilt.
+
+**Verified:** app tests (offer once, no agent nothing to offer, don't-ask-again installs nothing, installed is not offered), a chat test for plans, the ACP test and the window session (the mock agent's plan, the offer's API), and a real omp turn whose `todo` tool arrived as two `plan` updates. **Not verified:** the dialog itself (the window session drives the API, not clicks; it is not opened in the session), plans from Claude Code, Codex or Gemini, Windows.
+
+**PR:** n/a
+
 ### feat(render): text that does not fit its box is detected and shown
 
 **Area:** `feat(render)`, `feat(app)`, `feat(mcp)`
