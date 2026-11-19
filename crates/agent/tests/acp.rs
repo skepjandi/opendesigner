@@ -233,3 +233,77 @@ async fn an_agent_that_dies_mid_turn_fails_the_turn_and_reports_the_exit() {
         }
     }
 }
+
+#[tokio::test]
+async fn the_agents_settings_and_commands_are_offered_and_can_be_changed() {
+    use od_agent::acp::ConfigVia;
+    let (session, tx, mut rx) = start("settings", None).await;
+    let session = Arc::new(session.unwrap());
+    // the settings and the commands, in whichever order they arrive
+    let (mut options, mut commands) = (None, None);
+    for _ in 0..4 {
+        match next(&mut rx).await {
+            ChatEvent::Config(o) => options = Some(o),
+            ChatEvent::Commands(c) => commands = Some(c),
+            other => panic!("unexpected {other:?}"),
+        }
+        if options.is_some() && commands.is_some() {
+            break;
+        }
+    }
+    let options = options.expect("the settings");
+    let commands = commands.expect("the commands");
+    assert_eq!(
+        options.len(),
+        2,
+        "the number setting is not a choice: {options:?}"
+    );
+    assert_eq!(options[0].id, "model");
+    assert_eq!(options[0].current, "fast");
+    assert_eq!(
+        options[0]
+            .choices
+            .iter()
+            .map(|c| c.value.as_str())
+            .collect::<Vec<_>>(),
+        ["fast", "big"]
+    );
+    assert_eq!(options[1].category, "thought_level");
+    assert_eq!(commands.len(), 2);
+    assert_eq!(
+        (commands[1].name.as_str(), commands[1].hint.as_str()),
+        ("switch", "[model]")
+    );
+
+    session.set_config("thinking", "high", ConfigVia::Option, tx.clone());
+    let ChatEvent::Config(all) = next(&mut rx).await else {
+        panic!("the new state")
+    };
+    assert_eq!(all[1].current, "high");
+    session.set_config("model", "forbidden", ConfigVia::Option, tx.clone());
+    assert!(matches!(next(&mut rx).await, ChatEvent::Notice(m) if m.contains("no such value")));
+}
+
+#[tokio::test]
+async fn an_agent_with_only_modes_and_models_gets_the_same_controls() {
+    use od_agent::acp::ConfigVia;
+    let (session, tx, mut rx) = start("legacy", None).await;
+    let session = Arc::new(session.unwrap());
+    let ChatEvent::Config(options) = next(&mut rx).await else {
+        panic!("settings first")
+    };
+    let ids: Vec<(&str, ConfigVia)> = options.iter().map(|o| (o.id.as_str(), o.via)).collect();
+    assert_eq!(
+        ids,
+        [("model", ConfigVia::Model), ("mode", ConfigVia::Mode)]
+    );
+    assert_eq!(options[0].choices[1].value, "m2");
+    session.set_config("mode", "code", ConfigVia::Mode, tx);
+    assert_eq!(
+        next(&mut rx).await,
+        ChatEvent::ConfigSet {
+            id: "mode".into(),
+            value: "code".into()
+        }
+    );
+}

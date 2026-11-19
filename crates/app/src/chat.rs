@@ -69,6 +69,10 @@ pub struct Chat {
     queued: std::collections::VecDeque<String>,
     /// Answer the agent's permission requests with "allow" without asking.
     auto_allow: bool,
+    /// The settings the agent offers (model, mode, effort), as the panel shows them.
+    config: Vec<od_agent::acp::ConfigOption>,
+    /// The slash commands the agent understands.
+    commands: Vec<od_agent::acp::SlashCommand>,
 }
 
 /// A coding agent the chat knows how to start.
@@ -217,6 +221,8 @@ impl Chat {
             waiting_prompt: None,
             queued: Default::default(),
             auto_allow: false,
+            config: Vec::new(),
+            commands: Vec::new(),
         })
     }
 
@@ -240,6 +246,8 @@ impl Chat {
         self.first_prompt = true;
         self.waiting_prompt = None;
         self.queued.clear();
+        self.config.clear();
+        self.commands.clear();
         self.status = Status::Starting;
         let (tx, mut rx) = mpsc::unbounded_channel::<ChatEvent>();
         self.events = Some(tx.clone());
@@ -324,6 +332,25 @@ impl Chat {
         let session = self.session.as_ref().ok_or("the chat is not connected")?;
         session.answer_permission(request, option);
         self.permission = None;
+        Ok(())
+    }
+
+    /// Changes a setting of the agent's session (its model, mode or effort).
+    pub fn set_config(&mut self, id: &str, value: &str) -> Result<(), String> {
+        let (session, events) = match (&self.session, &self.events) {
+            (Some(s), Some(e)) => (Arc::clone(s), e.clone()),
+            _ => return Err("the chat is not connected".into()),
+        };
+        let option = self
+            .config
+            .iter()
+            .find(|o| o.id == id)
+            .ok_or_else(|| format!("the agent has no setting {id:?}"))?;
+        if !option.choices.iter().any(|c| c.value == value) {
+            return Err(format!("{value:?} is not one of the choices for {id}"));
+        }
+        let _enter = self.runtime.enter();
+        session.set_config(id, value, option.via, events);
         Ok(())
     }
 
@@ -452,6 +479,14 @@ impl Chat {
                 self.push(json!({"role": "error", "text": message}));
                 self.send_queued();
             }
+            ChatEvent::Config(options) => self.config = options,
+            ChatEvent::ConfigSet { id, value } => {
+                if let Some(o) = self.config.iter_mut().find(|o| o.id == id) {
+                    o.current = value;
+                }
+            }
+            ChatEvent::Commands(list) => self.commands = list,
+            ChatEvent::Notice(text) => self.push(json!({"role": "error", "text": text})),
             ChatEvent::Exited(why) => {
                 self.session = None;
                 self.events = None;
@@ -476,7 +511,7 @@ impl Chat {
 
     /// What the panel shows before any chat was started.
     pub fn idle_view() -> Value {
-        json!({"status": "off", "messages": [], "permission": null, "plan": [], "auto_allow": false, "queued": 0})
+        json!({"status": "off", "messages": [], "permission": null, "plan": [], "auto_allow": false, "queued": 0, "config": [], "commands": []})
     }
 
     pub fn view(&self) -> Value {
@@ -487,6 +522,15 @@ impl Chat {
             "plan": self.plan,
             "auto_allow": self.auto_allow,
             "queued": self.queued.len(),
+            "config": self.config.iter().map(|o| json!({
+                "id": o.id, "name": o.name, "category": o.category, "current": o.current,
+                "choices": o.choices.iter().map(|c| json!({
+                    "value": c.value, "name": c.name, "description": c.description,
+                })).collect::<Vec<_>>(),
+            })).collect::<Vec<_>>(),
+            "commands": self.commands.iter().map(|c| json!({
+                "name": c.name, "description": c.description, "hint": c.hint,
+            })).collect::<Vec<_>>(),
         })
     }
 }
@@ -671,5 +715,11 @@ mod tests {
                 .unwrap()
                 .contains("cannot start")
         );
+    }
+
+    #[test]
+    fn a_setting_cannot_be_changed_when_the_chat_is_not_connected() {
+        let mut chat = Chat::new().unwrap();
+        assert!(chat.set_config("model", "other").is_err());
     }
 }

@@ -284,6 +284,15 @@ pub mod qobject {
         #[cxx_name = "chatSend"]
         fn chat_send(self: Pin<&mut Self>, text: &QString);
         #[qinvokable]
+        #[cxx_name = "directionCatalog"]
+        fn direction_catalog(self: &Self) -> QString;
+        #[qinvokable]
+        #[cxx_name = "directionPrompt"]
+        fn direction_prompt(self: &Self, selection: &QString) -> QString;
+        #[qinvokable]
+        #[cxx_name = "chatSetConfig"]
+        fn chat_set_config(self: Pin<&mut Self>, id: &QString, value: &QString);
+        #[qinvokable]
         #[cxx_name = "chatAnswer"]
         fn chat_answer(self: Pin<&mut Self>, request: &QString, option: &QString);
         #[qinvokable]
@@ -1076,6 +1085,27 @@ impl qobject::Editor {
     pub fn chat_send(mut self: Pin<&mut Self>, text: &QString) {
         let text = text.to_string();
         self.as_mut().act(|s| s.chat_send(&text));
+    }
+
+    /// The choices the direction picker offers.
+    pub fn direction_catalog(&self) -> QString {
+        q(&od_agent::direction::catalog_json().to_string())
+    }
+
+    /// Turns the picks into the block that goes into the prompt.
+    pub fn direction_prompt(&self, selection: &QString) -> QString {
+        match od_agent::direction::prompt_from_json(&selection.to_string()) {
+            Ok(text) => q(&text),
+            Err(e) => {
+                eprintln!("the direction could not be read: {e}");
+                q("")
+            }
+        }
+    }
+
+    pub fn chat_set_config(mut self: Pin<&mut Self>, id: &QString, value: &QString) {
+        let (id, value) = (id.to_string(), value.to_string());
+        self.as_mut().act(|s| s.chat_set_config(&id, &value));
     }
 
     pub fn chat_answer(mut self: Pin<&mut Self>, request: &QString, option: &QString) {

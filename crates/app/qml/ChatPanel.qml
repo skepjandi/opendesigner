@@ -13,7 +13,6 @@ Item {
     JsonModel { id: messagesModel }
     JsonModel { id: planModel }
     JsonModel { id: optionsModel }
-    function focusInput() { if (connected) input.forceActiveFocus() }
     onChatChanged: {
         messagesModel.sync(chat.messages)
         planModel.sync(chat.plan || [])
@@ -22,6 +21,44 @@ Item {
     }
     readonly property bool connected: chat.status === "ready" || chat.status === "busy"
     readonly property var presets: JSON.parse(editor.chatPresets())
+    // the agent's commands, filtered by what is typed
+    readonly property var allCommands: root.chat.commands || []
+    property bool showCommands: false
+    readonly property var commandList: {
+        if (!root.showCommands) return []
+        const typed = inputText.text.trim()
+        const q = typed.startsWith("/") ? typed.slice(1).split(/\s/)[0].toLowerCase() : ""
+        return root.allCommands.filter(c => q === "" || c.name.toLowerCase().indexOf(q) === 0).slice(0, 40)
+    }
+    function updateCommands() {
+        const typed = inputText.text
+        root.showCommands = typed.startsWith("/") && typed.indexOf(" ") < 0 && root.allCommands.length > 0
+    }
+    function useCommand(name) {
+        inputText.text = "/" + name + " "
+        inputText.forceActiveFocus()
+        root.showCommands = false
+    }
+    function send() {
+        const text = inputText.text.trim()
+        if (text === "") return
+        root.editor.chatSend(text)
+        inputText.text = ""
+        root.showCommands = false
+    }
+    function openLink(link) { Qt.openUrlExternally(link) }
+    function focusInput() { if (connected) inputText.forceActiveFocus() }
+
+    DirectionPicker {
+        id: direction
+        editor: root.editor
+        onPicked: text => {
+            if (text === "") return
+            const current = inputText.text.trim()
+            inputText.text = current === "" ? text : current + "\n\n" + text
+            inputText.forceActiveFocus()
+        }
+    }
 
     Component.onCompleted: {
         const last = editor.chatLastCommand()
@@ -98,6 +135,43 @@ Item {
             Btn { text: "Disconnect"; onClicked: root.editor.chatStop() }
         }
 
+        // what the agent is set to: model, mode, how hard it thinks
+        Flow {
+            Layout.fillWidth: true
+            visible: root.connected && root.chat.config && root.chat.config.length > 0
+            spacing: 6
+            Repeater {
+                model: root.chat.config || []
+                delegate: RowLayout {
+                    required property var modelData
+                    spacing: 4
+                    Label {
+                        color: Theme.muted
+                        font.pixelSize: 11
+                        text: modelData.category === "thought_level" ? "Effort"
+                            : modelData.category === "model" ? "Model"
+                            : modelData.category === "mode" ? "Mode"
+                            : modelData.name
+                    }
+                    ComboBox {
+                        id: settingBox
+                        required property var modelData
+                        implicitWidth: Math.min(230, Math.max(110, settingBox.currentText.length * 7 + 40))
+                        implicitHeight: Theme.row
+                        font.pixelSize: 11
+                        model: settingBox.modelData.choices.map(c => c.name + (c.description ? "  ·  " + c.description : ""))
+                        currentIndex: {
+                            const at = settingBox.modelData.choices.findIndex(c => c.value === settingBox.modelData.current)
+                            return at >= 0 ? at : 0
+                        }
+                        onActivated: i => root.editor.chatSetConfig(settingBox.modelData.id, settingBox.modelData.choices[i].value)
+                        ToolTip.visible: hovered
+                        ToolTip.text: settingBox.modelData.choices.length + " choices"
+                    }
+                }
+            }
+        }
+
         // the agent's plan, as it stands: done, doing, to do
         Rectangle {
             Layout.fillWidth: true
@@ -149,19 +223,25 @@ Item {
                      : "transparent"
                 border.width: modelData.role === "tool" ? 1 : 0
                 border.color: Theme.border
-                Label {
+                // a text edit, so the user can select and copy what the agent said
+                TextEdit {
                     id: body
                     anchors.fill: parent
                     anchors.margins: 6
-                    wrapMode: Text.Wrap
-                    textFormat: Text.PlainText
+                    readOnly: true
+                    selectByMouse: true
+                    wrapMode: TextEdit.Wrap
+                    textFormat: TextEdit.PlainText
                     font.pixelSize: modelData.role === "thought" || modelData.role === "tool" ? 11 : Theme.fontSize
                     font.italic: modelData.role === "thought"
                     color: modelData.role === "agent" || modelData.role === "user" ? Theme.text
                          : modelData.role === "error" ? "#ff9a9a" : Theme.muted
+                    selectionColor: Theme.accentStrong
+                    selectedTextColor: Theme.textOnAccent
                     text: modelData.queued ? "You (queued): " + modelData.text : modelData.role === "tool" ? (modelData.status === "completed" ? "✓ " : modelData.status === "failed" ? "✗ " : "… ") + modelData.title
                         : modelData.role === "user" ? "You: " + modelData.text
                         : modelData.text
+                    onLinkActivated: link => root.openLink(link)
                 }
             }
         }
@@ -205,23 +285,90 @@ Item {
             }
         }
 
+        // the slash commands the agent understands
+        Popup {
+            id: commandPopup
+            width: Math.min(420, parent ? parent.width - 20 : 420)
+            y: -commandList.implicitHeight - 8
+            padding: 6
+            visible: root.commandList.length > 0 && root.showCommands
+            background: Rectangle { radius: Theme.radius; color: Theme.panelRaised; border.width: 1; border.color: Theme.border }
+            contentItem: ListView {
+                id: commandList
+                implicitHeight: Math.min(260, contentHeight)
+                model: root.commandList
+                clip: true
+                ScrollBar.vertical: ScrollBar {}
+                delegate: Rectangle {
+                    required property var modelData
+                    width: commandList.width
+                    height: 44
+                    color: "transparent"
+                    Label {
+                        anchors.fill: parent
+                        anchors.margins: 4
+                        text: "/" + modelData.name + (modelData.hint ? " " + modelData.hint : "") + "\n" + modelData.description
+                        color: Theme.text
+                        font.pixelSize: 11
+                        wrapMode: Text.WordWrap
+                        elide: Text.ElideRight
+                    }
+                    TapHandler { onTapped: root.useCommand(modelData.name) }
+                }
+            }
+        }
+
         RowLayout {
             Layout.fillWidth: true
             visible: root.connected
             spacing: 6
-            Field {
-                id: input
+            Btn {
+                text: "Direction"
+                onClicked: direction.open()
+                ToolTip.visible: hovered
+                ToolTip.delay: 500
+                ToolTip.text: "Pick a look, colors, type and mood; they go into the prompt"
+            }
+            Btn {
+                text: "/"
+                onClicked: { root.showCommands = true; inputText.forceActiveFocus() }
+                ToolTip.visible: hovered
+                ToolTip.delay: 500
+                ToolTip.text: "The agent's own commands"
+                enabled: (root.chat.commands || []).length > 0
+            }
+            ScrollView {
                 Layout.fillWidth: true
-                placeholderText: root.chat.status === "busy" ? "Type now; it is sent when the agent is done" : "Ask for a change (your selection and notes are sent along)"
-                enabled: root.chat.status === "ready" || root.chat.status === "busy"
-                onAccepted: send()
-                function send() {
-                    if (text.trim() === "") return
-                    root.editor.chatSend(text)
-                    text = ""
+                Layout.preferredHeight: Math.min(110, Math.max(34, inputText.implicitHeight + 8))
+                clip: true
+                TextArea {
+                    id: inputText
+                    width: Math.max(0, parent ? parent.width : 0)
+                    wrapMode: TextEdit.Wrap
+                    color: Theme.text
+                    font.pixelSize: Theme.fontSize
+                    placeholderText: root.chat.status === "busy" ? "Type now; it is sent when the agent is done" : "Ask for a change (your selection and notes are sent along)"
+                    placeholderTextColor: Theme.muted
+                    enabled: root.chat.status === "ready" || root.chat.status === "busy"
+                    background: Rectangle { radius: 4; color: Theme.field; border.width: 1; border.color: inputText.activeFocus ? Theme.accent : Theme.border }
+                    onTextChanged: root.updateCommands()
+                    Keys.onPressed: key => {
+                        if (key.key === Qt.Key_Return && !(key.modifiers & Qt.ShiftModifier)) {
+                            root.send()
+                            key.accepted = true
+                        } else if (key.key === Qt.Key_Tab && root.showCommands && root.commandList.length > 0) {
+                            root.useCommand(root.commandList[0].name)
+                            key.accepted = true
+                        }
+                    }
                 }
             }
-            Btn { text: "Send"; primary: true; enabled: (root.chat.status === "ready" || root.chat.status === "busy") && input.text.trim() !== ""; onClicked: input.send() }
+            Btn {
+                text: "Send"
+                primary: true
+                enabled: (root.chat.status === "ready" || root.chat.status === "busy") && inputText.text.trim() !== ""
+                onClicked: root.send()
+            }
         }
     }
 }

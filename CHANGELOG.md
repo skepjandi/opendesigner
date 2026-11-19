@@ -8,6 +8,16 @@ All notable changes to OpenDesigner are documented here.
 
 ## 2026-11-19
 
+### feat(app): the chat can change the agent's model and effort, run its commands, and starts from a direction the user picks
+
+**Area:** `feat(acp)`, `feat(app)`, `feat(agent)`
+
+**Why:** "the chat has no way to change models or effort", "add a button with a full selection menu (styles, color palettes) that injects into the prompt", and the agent's words could not be copied. **Change:** (1) The ACP client reads the settings the agent offers (`configOptions`, or the older `modes`/`models`), shows them in the chat (model, mode, effort) and changes them (`session/set_config_option`, `session/set_mode`, `session/set_model`); the agent's slash commands are listed behind `/` and typed into the message. (2) A **Direction** button (chat and start screen) opens a picker of looks, palettes, type pairings, mood, motion, layout and imagery, plus free text and three working switches (look for skills first, show three directions first, remember the choices); the picks become a block in the prompt. (3) The agent's messages are text edits, so they can be selected and copied.
+
+**Verified:** ACP tests (settings and commands arrive, a choice can be changed, a refused setting is reported, an agent with only modes/models gets the same controls), direction tests (ids unique, the looks match the style playbook, the picks become instructions, typed colors beat a listed palette), window session. **Not verified:** against real agents by hand (the protocol was read from omp's own answers over ACP: 3 settings and 116 commands); the picker by eye; whether every agent supports the calls.
+
+**PR:** n/a
+
 ### feat(mcp): exports tell the agent when a frame was never reviewed or changed since
 
 **Area:** `feat(mcp)`
