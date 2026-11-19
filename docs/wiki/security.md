@@ -1,6 +1,6 @@
 # Security
 
-> **Status: Design.** The invariants are requirements for the implementation. Nothing here has been built or verified.
+> **Status: Partially implemented.** The MCP endpoint's mitigations in [MCP endpoint](#mcp-endpoint) are built in `crates/agent` and covered by socket-level tests (token, `Host`, `Origin`, method and size limits, loopback bind). Everything else here is a requirement for code not yet written. Nothing has been reviewed by a third party.
 
 ## Assets
 
@@ -39,6 +39,8 @@ Threats and mitigations:
 
 Kino's MCP endpoint is a useful precedent for the UX (fixed loopback port, keep the app open); what we add is the explicit token and Origin/Host policy because the endpoint can write files-in-effect.
 
+
+**Implemented** in `crates/agent/src/server.rs`: bind to `127.0.0.1` only; every request must pass `guard` before any handler: any `Origin` header is refused (`403`), `Host` must be `127.0.0.1:<port>` or `localhost:<port>` (`403`), `Authorization: Bearer <token>` is compared in constant time (`401` with `WWW-Authenticate: Bearer`), then the protocol version header is checked (`400`). Bodies over 4 MB are refused (`413`). The token is 32 random bytes from the OS (`getrandom`), stored in the per-user config directory with mode `0600` on Unix (on Windows the user profile's default permissions apply; not hardened further), never printed unless `--show-token` is given, and replaced with `--rotate-token`. Tests: `crates/agent/tests/server.rs` and `crates/cli/tests/serve.rs`.
 ## Skill installer
 
 - Writes only `<skills dir>/opendesigner/` under user-approved agent locations, after showing every path.

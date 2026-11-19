@@ -15,8 +15,10 @@ path = "src/main.rs"
 
 [dependencies]
 opendesigner-core = { path = "../core" }
+opendesigner-agent = { path = "../agent" }
 opendesigner-render = { path = "../render" }
 opendesigner-store = { path = "../store" }
+tokio.workspace = true
 clap.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

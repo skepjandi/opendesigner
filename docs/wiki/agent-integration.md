@@ -1,6 +1,6 @@
 # Agent Integration
 
-> **Status: Design.** Per-agent skill directories other than `~/.agents/skills/` and `~/.claude/skills/` (both present on the maintainer's machine and the first from the Agent Skills guidance) are `[INFERENCE]` until the Phase 0 spike checks each agent.
+> **Status: Partially implemented.** The MCP server (`crates/agent`) and the guidance tools are built and tested; the skill generator/installer, the in-process Qt integration and the in-app chat are design only. Per-agent skill directories other than `~/.agents/skills/` and `~/.claude/skills/` (both present on the maintainer's machine and the first from the Agent Skills guidance) are `[INFERENCE]` until the Phase 0 spike checks each agent.
 
 The point of OpenDesigner is that the user guides an agent *with the GUI*. Three mechanisms carry that, and the app installs the first two on first run.
 
@@ -54,6 +54,21 @@ It never edits an agent's config, credentials or history, never overwrites a ski
 Each row is data in `agent`'s target table, not code, so adding an agent is a one-row change with a test that the installer writes only inside that row's directory.
 
 ## The MCP server
+
+### Implemented
+
+`crates/agent`: `mcp.rs` (JSON-RPC 2.0 and the MCP lifecycle, transport-free, so it is tested without a socket), `tools.rs` (the tools), `server.rs` (the loopback HTTP transport), `token.rs` (the token and its file). `opendesigner serve-mcp <project>` runs it over a project folder and prints the connect command for Claude Code.
+
+- **Transport:** Streamable HTTP as in the 2025-06-18 spec, JSON responses only. `POST /mcp` carries one JSON-RPC message; notifications get `202`; `GET` is `405` (no server-to-client stream); `DELETE` ends a session. Versions `2025-06-18`, `2025-03-26` and `2024-11-05` are negotiated, and an unsupported `MCP-Protocol-Version` header is `400`. Default port 45790, falling forward when taken.
+- **Sessions and attribution:** `initialize` mints a session id (`Mcp-Session-Id`) and names the agent from `clientInfo.name`; every change the session makes is attributed to `agent:<name>` in the history.
+- **Turns and checkpoints:** the first `apply_ops` of a turn (the `turn` argument, or one per call when omitted) first takes a checkpoint named `before: <summary>`; later calls in the same turn reuse it, and the result reports `checkpoint_before`. This is what lets the user restore "the state before the agent's turn".
+- **Tools:** `get_guidance`, `get_selection`, `get_annotations`, `resolve_annotation`, `list_pages`, `get_node`, `get_tree`, `find_nodes`, `list_tokens`, `apply_ops`, `list_checkpoints`, `diff_checkpoint`, `restore_checkpoint`, `list_export_presets`, `render_preview` (returns a PNG image block), `export`, `validate_export`. Arguments are closed types (`deny_unknown_fields`); a rejected call returns `isError: true` with the reason and changes nothing.
+- **Writes stay in the project:** `export` and `validate_export` take a plain file name (letters, digits, `. _ -`, ending `.png`) under `<project>/exports/`; separators, leading dots and `..` are refused. No tool takes another path.
+- **Change hook:** `Handler::with_change_hook` reports the nodes an agent touched, for the editor to outline them. Reads do not fire it.
+
+Deviations: tokens cannot be changed through MCP yet (they are not part of the undoable history), `add_annotation` is not offered to agents, and there is no `transcribe` or timeline tool.
+
+### Design (as originally specified)
 
 - Streamable HTTP on `127.0.0.1`, fixed default port with fallback, **bearer token** per install, `Host` and `Origin` checks, off until enabled. See [Security](./security.md#mcp-endpoint).
 - Tools are thin wrappers over `core` operations; the schema is generated from the operation types. Read tools are free; write tools return the changed node ids and the new checkpoint id.
