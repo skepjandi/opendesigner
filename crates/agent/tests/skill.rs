@@ -272,7 +272,7 @@ fn unknown_targets_and_unsafe_names_are_rejected() {
     let home = home_with_agents();
     assert!(skill::install(home.path(), &["cursor"], false).is_err());
     assert!(skill::uninstall(home.path(), &["nope"]).is_err());
-    assert_eq!(skill::TARGETS.len(), 2);
+    assert_eq!(skill::TARGETS.len(), 3);
     for t in skill::TARGETS {
         assert!(!t.skills_dir.contains(".."));
         assert!(t.source.starts_with("https://"));

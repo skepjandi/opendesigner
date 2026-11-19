@@ -14,6 +14,8 @@ Rectangle {
     readonly property var log: editor.log ? JSON.parse(editor.log) : []
     readonly property var checkpoints: editor.checkpoints ? JSON.parse(editor.checkpoints) : []
     property var skillRows: []
+    readonly property var recipes: editor.mcpRunning ? JSON.parse(editor.connectRecipes()) : []
+    readonly property var recipe: recipes.length > recipeBox.currentIndex ? recipes[recipeBox.currentIndex] : null
     property string skillResult: ""
     property alias tab: bar.currentIndex
 
@@ -273,7 +275,19 @@ Rectangle {
                         visible: root.editor.mcpRunning
                         Layout.fillWidth: true
                         spacing: 4
-                        Label { text: "Connect Claude Code"; color: Theme.text; font.pixelSize: 12; font.bold: true }
+                        Label { text: "Connect your agent"; color: Theme.text; font.pixelSize: 12; font.bold: true }
+                        ComboBox {
+                            id: recipeBox
+                            Layout.fillWidth: true
+                            model: root.recipes.map(r => r.label)
+                        }
+                        Label {
+                            Layout.fillWidth: true
+                            wrapMode: Text.WordWrap
+                            color: Theme.muted
+                            font.pixelSize: 11
+                            text: root.recipe ? root.recipe.place : ""
+                        }
                         Rectangle {
                             Layout.fillWidth: true
                             implicitHeight: cmd.implicitHeight + 12
@@ -285,20 +299,21 @@ Rectangle {
                                 id: cmd
                                 anchors.fill: parent
                                 anchors.margins: 6
-                                text: root.editor.connectCommand()
+                                text: root.recipe ? root.recipe.text : ""
+                                textFormat: Text.PlainText
                                 color: Theme.text
                                 font.family: "Menlo"
                                 font.pixelSize: 11
                                 wrapMode: Text.WrapAnywhere
                             }
                         }
-                        Btn { text: "Copy command"; onClicked: root.copy(root.editor.connectCommand()) }
+                        Btn { text: "Copy"; onClicked: root.copy(root.recipe ? root.recipe.text : "") }
                         Label {
                             Layout.fillWidth: true
                             wrapMode: Text.WordWrap
                             color: Theme.muted
                             font.pixelSize: 11
-                            text: "Other agents: this address with the header Authorization: Bearer <the token in the file the command reads>."
+                            text: root.recipe ? "Checked: " + root.recipe.checked + " The token stays in a file only you can read; nothing here contains it." : ""
                         }
                     }
 

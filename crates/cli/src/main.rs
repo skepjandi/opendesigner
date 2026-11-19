@@ -189,6 +189,10 @@ enum Command {
         /// Replace the token first; agents must be reconnected.
         #[arg(long)]
         rotate_token: bool,
+        /// Which agent to print connection instructions for: omp, claude-code, codex, gemini,
+        /// opencode, cursor or other.
+        #[arg(long, default_value = "claude-code")]
+        agent: String,
     },
     /// Install, inspect or remove the Agent Skill that teaches coding agents to use OpenDesigner.
     Skill {
@@ -493,7 +497,8 @@ fn run(cli: Cli) -> Result<(), CliError> {
             port,
             show_token,
             rotate_token,
-        } => serve::run(&dir, port, show_token, rotate_token)?,
+            agent,
+        } => serve::run(&dir, port, show_token, rotate_token, &agent)?,
         Command::Skill { action } => skillcmd::run(action)?,
     }
     Ok(())

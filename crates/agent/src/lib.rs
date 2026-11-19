@@ -2,6 +2,7 @@
 //! it exposes, and the per-install token that guards it (`docs/wiki/agent-integration.md`).
 
 pub mod acp;
+pub mod connect;
 pub mod error;
 pub mod export;
 pub mod mcp;
