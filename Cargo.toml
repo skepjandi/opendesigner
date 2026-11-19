@@ -1,0 +1,33 @@
+[workspace]
+resolver = "3"
+members = ["crates/core", "crates/render", "crates/store", "crates/cli"]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2024"
+rust-version = "1.85"
+license = "MPL-2.0"
+repository = "https://github.com/skepjandi/opendesigner"
+authors = ["OpenDesigner contributors"]
+publish = false
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+toml = "1"
+clap = { version = "4", features = ["derive"] }
+tiny-skia = "0.12"
+png = "0.18"
+tempfile = "3"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+unused_must_use = "deny"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+dbg_macro = "deny"
+todo = "deny"

@@ -1,0 +1,22 @@
+[package]
+name = "opendesigner-render"
+description = "CPU rasterizer and PNG export for OpenDesigner documents"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[lib]
+name = "od_render"
+
+[dependencies]
+opendesigner-core = { path = "../core" }
+tiny-skia.workspace = true
+png.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

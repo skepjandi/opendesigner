@@ -1,6 +1,6 @@
 # Architecture
 
-> **Status: Design.** Nothing here is implemented. Crate names are the intended names; the first implementation PR replaces intent with fact.
+> **Status: Partially implemented.** `core`, `render`, `store` and `cli` exist under `crates/` and are tested; `agent`, `bridge` and the Qt shell (`app/`) are design only. Crate names below are the real ones for the built crates (Cargo packages are `opendesigner-<name>`, library names `od_<name>`).
 
 ## The problem this solves
 

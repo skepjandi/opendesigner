@@ -1,6 +1,6 @@
 # Development Guide
 
-> **Status: Design.** There is no Cargo workspace or CMake project yet; the commands below are the contract the first implementation PR must satisfy. Prerequisites for the Rust–Qt bridge come from `cxx-qt`'s getting-started page (CMake 3.24+, a C++ compiler, Rust, Qt 6) and Qt 6.12's documentation.
+> **Status: Partially implemented.** The Cargo workspace exists and its checks pass (see [Commands that work today](#commands-that-work-today)); the CMake/Qt project does not, so everything marked *(intended)* below is still the contract for it. Prerequisites for the Rust–Qt bridge come from `cxx-qt`'s getting-started page (CMake 3.24+, a C++ compiler, Rust, Qt 6) and Qt 6.12's documentation.
 
 ## Prerequisites
 
@@ -14,6 +14,24 @@
 | `cargo-deny` | Licenses, advisories, sources |
 | FFmpeg shared libraries matching the major Qt Multimedia uses, fetched and checksum-verified by `cargo xtask media-setup` | Phase 5 onward ([Video Editing](./video-editing.md#qt-multimedia-and-ffmpeg)) |
 | Linux: the Qt platform plugin dependencies (X11/Wayland, fontconfig, Vulkan or OpenGL drivers) | Running and packaging on Linux |
+
+Today only Rust stable (the repository pins `stable` with `rustfmt` and `clippy` in `rust-toolchain.toml`) and `cargo-deny` are needed. Qt, CMake and the C++ tools come with the shell.
+
+## Commands that work today
+
+```bash
+cargo fmt --all --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace            # 36 tests: core, render, store and the CLI end to end
+cargo deny check                  # advisories, bans, licenses, sources (deny.toml)
+
+# the headless editor
+cargo run -p opendesigner-cli -- new demo.od
+cargo run -p opendesigner-cli -- apply demo.od ops.json --agent claude-code --turn t1
+cargo run -p opendesigner-cli -- export demo.od --frame n_3 --preset apple-iphone-6.9 --out shot.png
+```
+
+`opendesigner --help` lists every subcommand. `export` writes nothing and exits with code 2 when the image does not meet its preset.
 
 ## Commands (intended)
 

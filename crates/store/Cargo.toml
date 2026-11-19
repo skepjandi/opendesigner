@@ -1,0 +1,20 @@
+[package]
+name = "opendesigner-store"
+description = "Store export presets and validation for OpenDesigner"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[lib]
+name = "od_store"
+
+[dependencies]
+thiserror.workspace = true
+png.workspace = true
+
+[lints]
+workspace = true
