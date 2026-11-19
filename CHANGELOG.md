@@ -8,6 +8,18 @@ All notable changes to OpenDesigner are documented here.
 
 ## 2026-11-19
 
+### perf(render): frames with many nodes are drawn in parallel bands; laid-out text is cached
+
+**Area:** `perf(render)`
+
+**Problem:** Redrawing the canvas took 64 ms at 10,000 nodes (budget 16 ms) and an export at scale 1 took 231 ms.
+
+**Change:** A frame of 256 or more nodes is drawn as up to 8 horizontal bands on `std::thread::scope` threads (4 rows of overlap per side so seams match), each band skipping nodes wholly outside it (a frame's subtree goes with it). Text layouts (shaping) are kept between renders in a 4096-entry cache keyed by text, size, family, weight, alignment and wrap width. No new dependency.
+
+**Verified:** `cargo run --release -p opendesigner-render --example bench` on an M2 Pro: canvas at 10,000 nodes 64 ms to about 31-34 ms (still over the 16 ms budget), 1,000 nodes 9 ms, export at scale 1 and 10,000 nodes 230 ms to 133 ms. A test compares 1, 2, 3 and 8 bands on a busy frame (strokes, rounded corners, nested clipping frame, wrapped text across seams, nodes outside the frame) at three scales: not bit-identical (anti-aliased edge samples differ by float rounding: fewer than 0.02% of values, by at most 64/255). **Not verified:** other machines (the speed-up depends on core count; a 1-core machine renders in one band as before), Windows and Linux.
+
+**PR:** n/a
+
 ### feat(agent): agent-agnostic connection (omp, opencode, Codex, Gemini, Cursor, any MCP client) and a real omp turn
 
 **Area:** `feat(agent)`, `feat(app)`, `feat(cli)`
