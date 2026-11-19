@@ -1,6 +1,6 @@
 # Roadmap
 
-> **Status: Design.** Phase 0 has not started. This page is the decision log from day one; every deviation from it is recorded here by the PR that causes it.
+> **Status: In progress.** Phases 1 to 4 and 6 are largely built (each phase below has a **Progress** note saying what is met and what is not); Phase 5 (video) and Phase 7 (release) have not started beyond a macOS bundle script. The Phase 0 spikes were not run as separate experiments: several were answered by building (the decision log says which). This page is also the decision log; every deviation from the plan is recorded here by the PR that causes it.
 
 ## Goal
 

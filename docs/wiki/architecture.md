@@ -56,7 +56,7 @@ OpenCut's rewrite states it as a principle: business logic lives in Rust, and ea
 | `core` | Node model, validated operations, history/checkpoints, project I/O, annotations, workspace and guidance, geometry (bounds, hit tests), panel views ([Document Format](./document-format.md)) | no | built |
 | `render` | CPU rasterizer and PNG export: frames, groups, rectangles, ellipses, text (shaped, wrapped, aligned; one style per node) and images (PNG, JPEG, WebP from `media/`; cover, contain, fill; rounded corners; cached decode); an image it cannot read is reported, not dropped silently | no | partial |
 | `store` | Export presets and validation ([Store Assets](./store-assets.md)); device frames and panoramas are not built | no | partial |
-| `agent` | MCP server and tools, token, skill generator and installer ([Agent Integration](./agent-integration.md)); the ACP client is not built | no | built (MCP, skill) |
+| `agent` | MCP server and tools, token, skill generator and installer ([Agent Integration](./agent-integration.md)); ACP client for the in-app chat | no | built (MCP, skill, chat) |
 | `cli` | Headless commands over the same operations | no | built |
 | `app` | The Qt Quick editor: the `Editor` QObject, the Qt-free `EditorState`, the QML ([Qt Desktop](./qt-desktop.md#layers)) | **yes** | built |
 | `media` | Decode/encode, FFmpeg ([Video Editing](./video-editing.md)) | no | not started |
