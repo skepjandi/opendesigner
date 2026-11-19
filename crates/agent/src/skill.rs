@@ -193,6 +193,14 @@ project files directly: that bypasses validation, checkpoints and the user's vie
    changed in the user's terms (\"raised the headline to 96 px\"). End your turn by saying what you
    changed and what you left alone.
 
+## Memory between tasks
+
+Earlier runs leave notes in the project's `.opendesigner/memory/` folder (text the user can read
+and keep in git): brand facts, what the user corrected or liked, what worked, mistakes to avoid,
+decisions. `get_guidance` lists them; `read_memory` opens one. Read the relevant notes before you
+build, and before you finish `write_memory` what the next run should know (for example
+`brand.md`, `lessons.md`, `decisions.md`, `style.md`). Short and factual. Never secrets or tokens.
+
 ## One workspace per deliverable
 
 A repository can hold several designs side by side: an app store set, an Instagram reel, a landing

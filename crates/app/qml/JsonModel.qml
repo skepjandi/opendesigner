@@ -14,6 +14,12 @@ ListModel {
         return k === undefined || k === null ? "#" + i : String(k)
     }
 
+    function hasKey(key) {
+        for (let i = 0; i < model.count; ++i)
+            if (model.get(i).key === key) return true
+        return false
+    }
+
     function sync(items) {
         const list = items || []
         const keys = []

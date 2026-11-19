@@ -9,10 +9,16 @@ Rectangle {
     required property var editor
     color: Theme.panel
 
+    property string openNote: ""
+    function reloadNotes() {
+        notesModel.sync(JSON.parse(editor.memoryNotes()))
+        if (openNote !== "" && !notesModel.hasKey(openNote)) openNote = ""
+    }
     JsonModel { id: memoryModel }
+    JsonModel { id: notesModel }
     readonly property var memory: editor.memory ? JSON.parse(editor.memory) : []
-    onMemoryChanged: memoryModel.sync(memory)
-    Component.onCompleted: memoryModel.sync(memory)
+    onMemoryChanged: { memoryModel.sync(memory); reloadNotes() }
+    Component.onCompleted: { memoryModel.sync(memory); reloadNotes() }
     FileDialog {
         id: memoryDialog
         title: "Add pictures for the agent"
@@ -83,6 +89,65 @@ Rectangle {
                 text: "Nothing here yet."
                 color: Theme.muted
                 font.pixelSize: 12
+            }
+            Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border }
+            RowLayout {
+                Layout.fillWidth: true
+                Layout.margins: 10
+                Label {
+                    Layout.fillWidth: true
+                    text: "Notes for the agent"
+                    color: Theme.text
+                    font.pixelSize: Theme.fontSize
+                    font.bold: true
+                }
+                Btn { text: "Refresh"; onClicked: root.reloadNotes() }
+            }
+            Label {
+                Layout.fillWidth: true
+                Layout.leftMargin: 10
+                Layout.rightMargin: 10
+                wrapMode: Text.WordWrap
+                color: Theme.muted
+                font.pixelSize: 11
+                text: "Text the agent keeps in .opendesigner/memory/ between tasks (brand facts, lessons, decisions). Track that folder in git; never put secrets in it."
+            }
+            Repeater {
+                model: notesModel
+                delegate: Label {
+                    required property string json
+                    readonly property var modelData: JSON.parse(json)
+                    Layout.fillWidth: true
+                    Layout.leftMargin: 10
+                    Layout.rightMargin: 10
+                    elide: Text.ElideRight
+                    color: root.openNote === modelData.name ? Theme.text : Theme.muted
+                    font.pixelSize: 12
+                    text: modelData.name + " · " + Math.max(1, Math.round(modelData.bytes / 1024)) + " KB · " + modelData.title
+                    MouseArea { anchors.fill: parent; onClicked: root.openNote = modelData.name }
+                }
+            }
+            Label {
+                visible: notesModel.count === 0
+                Layout.margins: 10
+                text: "No notes yet."
+                color: Theme.muted
+                font.pixelSize: 12
+            }
+            TextArea {
+                id: noteText
+                visible: root.openNote !== ""
+                Layout.fillWidth: true
+                Layout.preferredHeight: 140
+                Layout.margins: 10
+                readOnly: true
+                selectByMouse: true
+                wrapMode: TextEdit.Wrap
+                color: Theme.text
+                font.pixelSize: 11
+                property var note: root.openNote !== "" ? JSON.parse(root.editor.memoryNote(root.openNote)) : ({})
+                text: note.text !== undefined ? note.text : (note.error !== undefined ? note.error : "")
+                background: Rectangle { radius: 4; color: Theme.field; border.width: 1; border.color: Theme.border }
             }
         }
 }
