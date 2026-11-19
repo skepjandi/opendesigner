@@ -6,7 +6,7 @@
 
 | Piece | Where | Notes |
 |-------|-------|-------|
-| Node model | `model.rs` | `Document` (pages, tokens, id counter), `Page` with an immutable `Group` root, `Node` with kind, geometry, `visible`, `opacity`, `fill`, `stroke`, `corner_radius`, text fields, `image` path, `children`. Ids are `n_<counter>` / `p_<counter>` minted by the document and never reused (`next_id` only grows) |
+| Node model | `model.rs` | `Document` (pages, tokens, id counter), `Page` with an immutable `Group` root, `Node` with kind, geometry, `visible`, `opacity`, `fill`, `stroke`, `corner_radius`, text fields (`text`, `font_size`, `font_family`, `font_weight` 100 to 900, `text_align` left/center/right, `line_height` as a multiple of the size; all optional with the defaults Lato, 400, left, 1.2), `image` path, `children`. A text node's `width` wraps its lines (0 means no wrapping); its `height` is not used for layout. Text is one run in one style: per-run styles, tracking and fonts per range are not built. Ids are `n_<counter>` / `p_<counter>` minted by the document and never reused (`next_id` only grows) |
 | Paint | `paint.rs` | `#rrggbb`, `#rrggbbaa` or `{token.name}` resolved against the document's tokens |
 | Operations | `ops.rs` | `create`, `set` (one typed `Property`), `move`, `reparent`, `delete`, and the history-only `restore`. Each returns the resolved forward operation, its inverse and the touched ids |
 | History | `history.rs` | `Session`: append-only log of `Transaction`s (actor, optional turn id, kind `edit`/`undo`/`redo`/`restore`), atomic apply with rollback, undo/redo as appended transactions, checkpoints as log positions, `restore(checkpoint)` appends the inverse of everything after it, `changed_since(position)` for the agent-change outline |
@@ -73,7 +73,7 @@ A page is a tree. Every node has `id`, `kind`, `name`, a transform and size, and
 | `group` | Transform-only grouping |
 | `rect`, `ellipse`, `line`, `polygon` | Primitives |
 | `path` | Bezier vector path, boolean operations stored as a derived result plus its sources |
-| `text` | Runs with font, size, weight, tracking, line height; shaped at render time |
+| `text` | Runs with font, size, weight, tracking, line height; shaped at render time. Built: one run per node with family, size, weight, alignment and line height; shaped by `cosmic-text` in `render` |
 | `image` | Reference into `media/` plus crop and fit |
 | `device` | A device frame (iPhone, iPad, Pixel, Mac window) with a screen slot for an `image` |
 | `instance` | An instance of a component, with overrides |

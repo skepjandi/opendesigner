@@ -17,6 +17,7 @@ opendesigner-core = { path = "../core" }
 tiny-skia.workspace = true
 png.workspace = true
 thiserror.workspace = true
+cosmic-text = "0.19"
 
 [lints]
 workspace = true

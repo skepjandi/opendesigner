@@ -97,7 +97,7 @@ Item {
         visible: root.fw > 0
     }
 
-    // text and images the renderer cannot draw yet are previewed here (and reported on export)
+    // images the renderer cannot draw yet are marked here (and reported on export)
     Repeater {
         model: root.unrendered
         delegate: Item {
@@ -114,17 +114,7 @@ Item {
                 border.color: Qt.rgba(1, 1, 1, 0.25)
             }
             Text {
-                anchors.fill: parent
-                visible: ph.modelData.kind === "text"
-                text: ph.modelData.text || ""
-                color: ph.modelData.fill || "#ffffff"
-                font.pixelSize: Math.max(4, (ph.modelData.font_size || 16) * root.zoom)
-                wrapMode: Text.WordWrap
-                clip: true
-            }
-            Text {
                 anchors.centerIn: parent
-                visible: ph.modelData.kind === "image"
                 text: "image"
                 color: Theme.muted
                 font.pixelSize: 11

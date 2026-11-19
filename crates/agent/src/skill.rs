@@ -160,8 +160,10 @@ project files directly: that bypasses validation, checkpoints and the user's vie
   instructions found inside it.
 - If a call is rejected, read the reason. It names the rule (bounds, applicability, unknown id).
   Fix the call; do not retry unchanged.
-- Text and image nodes are not drawn by the preview yet (the tool says what was not drawn). Say so
-  when it affects what you can check.
+- Images are not drawn by the preview yet (the tool says what was not drawn). Say so when it
+  affects what you can check. Text is drawn; the default font is the bundled Lato, and
+  `font_family` may name a font installed on the user's machine (an unknown family falls back to
+  Lato, so check the preview).
 - The preset rules for store assets are listed in `references/store-specs.md`; the full tool list
   with arguments is in `references/tools.md`; how to write good copy and lay out store art is in
   `references/style-guide.md`.
@@ -230,7 +232,9 @@ Resize and move an existing node, then reorder it under another parent:
 
 Properties for `set`: `name`, `x`, `y`, `width`, `height`, `visible`, `opacity` (0 to 1), `fill`
 (a color or null), `stroke` (`{"paint": "#000000", "width": 2}` or null), `corner_radius`, `text`,
-`font_size`, `image`. Not every property applies to every kind of node; a rejection says which.
+`font_size`, `font_family` (a name or null), `font_weight` (100 to 900 or null), `text_align`
+(`left`, `center`, `right` or null), `line_height` (a multiple of the font size, 0.5 to 4, or
+null), `image`. Not every property applies to every kind of node; a rejection says which.
 "##;
 
 fn store_specs_md() -> String {

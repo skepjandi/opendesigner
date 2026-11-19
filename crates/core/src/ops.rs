@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::OpError;
 use crate::limits::{self, finite_in, text_within};
-use crate::model::{Document, Node, NodeId, NodeKind, Stroke, validate_node_fields};
+use crate::model::{Document, Node, NodeId, NodeKind, Stroke, TextAlign, validate_node_fields};
 use crate::paint::Paint;
 
 /// One settable property with its new value. Serialized as `{"name": "x", "value": 10}`.
@@ -27,6 +27,10 @@ pub enum Property {
     CornerRadius(f64),
     Text(String),
     FontSize(f64),
+    FontFamily(Option<String>),
+    FontWeight(Option<f64>),
+    TextAlign(Option<TextAlign>),
+    LineHeight(Option<f64>),
     Image(Option<String>),
 }
 
@@ -45,6 +49,10 @@ impl Property {
             Property::CornerRadius(_) => "corner_radius",
             Property::Text(_) => "text",
             Property::FontSize(_) => "font_size",
+            Property::FontFamily(_) => "font_family",
+            Property::FontWeight(_) => "font_weight",
+            Property::TextAlign(_) => "text_align",
+            Property::LineHeight(_) => "line_height",
             Property::Image(_) => "image",
         }
     }
@@ -61,7 +69,12 @@ impl Property {
             Property::Fill(_) => matches!(kind, Frame | Rect | Ellipse | Text),
             Property::Stroke(_) => matches!(kind, Frame | Rect | Ellipse),
             Property::CornerRadius(_) => matches!(kind, Frame | Rect),
-            Property::Text(_) | Property::FontSize(_) => kind == Text,
+            Property::Text(_)
+            | Property::FontSize(_)
+            | Property::FontFamily(_)
+            | Property::FontWeight(_)
+            | Property::TextAlign(_)
+            | Property::LineHeight(_) => kind == Text,
             Property::Image(_) => kind == Image,
         }
     }
@@ -127,6 +140,39 @@ fn apply_property(
             let v = finite_in("font_size", v, 1.0, limits::MAX_FONT_SIZE)?;
             Property::FontSize(node.font_size.replace(v).unwrap_or(16.0))
         }
+        Property::FontFamily(v) => {
+            if let Some(f) = &v {
+                limits::family_name(f)?;
+            }
+            Property::FontFamily(replace(&mut node.font_family, v))
+        }
+        Property::FontWeight(v) => {
+            let v = v
+                .map(|w| {
+                    finite_in(
+                        "font_weight",
+                        w,
+                        limits::MIN_FONT_WEIGHT,
+                        limits::MAX_FONT_WEIGHT,
+                    )
+                })
+                .transpose()?;
+            Property::FontWeight(replace(&mut node.font_weight, v))
+        }
+        Property::TextAlign(v) => Property::TextAlign(replace(&mut node.text_align, v)),
+        Property::LineHeight(v) => {
+            let v = v
+                .map(|h| {
+                    finite_in(
+                        "line_height",
+                        h,
+                        limits::MIN_LINE_HEIGHT,
+                        limits::MAX_LINE_HEIGHT,
+                    )
+                })
+                .transpose()?;
+            Property::LineHeight(replace(&mut node.line_height, v))
+        }
         Property::Image(v) => {
             if let Some(p) = &v {
                 text_within("image path", p, limits::MAX_PATH_LEN)?;
@@ -166,6 +212,14 @@ pub struct NewNode {
     #[serde(default)]
     pub font_size: Option<f64>,
     #[serde(default)]
+    pub font_family: Option<String>,
+    #[serde(default)]
+    pub font_weight: Option<f64>,
+    #[serde(default)]
+    pub text_align: Option<TextAlign>,
+    #[serde(default)]
+    pub line_height: Option<f64>,
+    #[serde(default)]
     pub image: Option<String>,
     #[serde(default)]
     pub children: Vec<NewNode>,
@@ -187,6 +241,10 @@ impl NewNode {
             corner_radius: None,
             text: None,
             font_size: None,
+            font_family: None,
+            font_weight: None,
+            text_align: None,
+            line_height: None,
             image: None,
             children: Vec::new(),
         }
@@ -250,6 +308,18 @@ impl NewNode {
         }
         if let Some(v) = self.font_size {
             set(Property::FontSize(v))?;
+        }
+        if self.font_family.is_some() {
+            set(Property::FontFamily(self.font_family.clone()))?;
+        }
+        if self.font_weight.is_some() {
+            set(Property::FontWeight(self.font_weight))?;
+        }
+        if self.text_align.is_some() {
+            set(Property::TextAlign(self.text_align))?;
+        }
+        if self.line_height.is_some() {
+            set(Property::LineHeight(self.line_height))?;
         }
         if self.image.is_some() {
             set(Property::Image(self.image.clone()))?;
@@ -534,6 +604,10 @@ fn current_value(node: &Node, prop: &Property) -> Property {
         Property::CornerRadius(_) => Property::CornerRadius(node.corner_radius),
         Property::Text(_) => Property::Text(node.text.clone().unwrap_or_default()),
         Property::FontSize(_) => Property::FontSize(node.font_size.unwrap_or(16.0)),
+        Property::FontFamily(_) => Property::FontFamily(node.font_family.clone()),
+        Property::FontWeight(_) => Property::FontWeight(node.font_weight),
+        Property::TextAlign(_) => Property::TextAlign(node.text_align),
+        Property::LineHeight(_) => Property::LineHeight(node.line_height),
         Property::Image(_) => Property::Image(node.image.clone()),
     }
 }

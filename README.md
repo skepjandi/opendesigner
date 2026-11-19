@@ -41,7 +41,7 @@ Today that work happens in a terminal: you describe every pixel in text, the age
 
 ## Status
 
-**Early development.** The editor runs: open or create a project, draw rectangles, ellipses, text and frames, move and resize them, edit properties, undo and redo, pin notes for an agent, and export a frame to a PNG that is checked against App Store and Google Play rules. Coding agents connect over MCP (Claude Code and Codex are the targets; connecting them has not been tried by hand yet) and get your selection, your notes and your corrections; what they change is outlined and can be restored. The app installs an Agent Skill for the agents it finds. **Not there yet:** text is previewed but not drawn into exports, there are no images, video, device frames, or the in-app chat, and only macOS has been run. See the [roadmap](docs/wiki/roadmap.md); each wiki page says what is built and what is design.
+**Early development.** The editor runs: open or create a project, draw rectangles, ellipses, text and frames, move and resize them, edit properties (including fonts), undo and redo, pin notes for an agent, and export a frame to a PNG that is checked against App Store and Google Play rules. Coding agents connect over MCP (Claude Code and Codex are the targets; connecting them has not been tried by hand yet) and get your selection, your notes and your corrections; what they change is outlined and can be restored. The app installs an Agent Skill for the agents it finds. **Not there yet:** images, video, device frames and the in-app chat, and only macOS has been run. See the [roadmap](docs/wiki/roadmap.md); each wiki page says what is built and what is design.
 
 ## Try it
 

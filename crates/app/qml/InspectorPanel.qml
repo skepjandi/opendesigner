@@ -153,6 +153,56 @@ Rectangle {
                     onCommitted: v => root.setNum("font_size", v)
                 }
             }
+            Row2 {
+                visible: root.node && root.node.kind === "text"
+                label: "Font"
+                Field {
+                    Layout.fillWidth: true
+                    placeholderText: "Lato (bundled) or an installed family"
+                    text: root.node && root.node.font_family ? root.node.font_family : ""
+                    onCommitted: v => {
+                        if (!root.node || v === (root.node.font_family || "")) return
+                        editor.setNodeProperty(root.node.id, "font_family", v === "" ? "null" : JSON.stringify(v))
+                    }
+                }
+            }
+            Row2 {
+                visible: root.node && root.node.kind === "text"
+                label: "Weight"
+                Field {
+                    Layout.fillWidth: true
+                    placeholderText: "100 to 900 (400 regular, 700 bold)"
+                    text: root.node && root.node.font_weight ? root.num(root.node.font_weight) : ""
+                    onCommitted: v => {
+                        if (!root.node) return
+                        if (v === "") editor.setNodeProperty(root.node.id, "font_weight", "null")
+                        else root.setNum("font_weight", v)
+                    }
+                }
+                Field {
+                    Layout.preferredWidth: 60
+                    placeholderText: "Line"
+                    text: root.node && root.node.line_height ? root.num(root.node.line_height) : ""
+                    onCommitted: v => {
+                        if (!root.node) return
+                        if (v === "") editor.setNodeProperty(root.node.id, "line_height", "null")
+                        else root.setNum("line_height", v)
+                    }
+                }
+            }
+            Row2 {
+                visible: root.node && root.node.kind === "text"
+                label: "Align"
+                Repeater {
+                    model: ["left", "center", "right"]
+                    delegate: Btn {
+                        required property string modelData
+                        text: modelData
+                        active: (root.node && root.node.text_align || "left") === modelData
+                        onClicked: editor.setNodeProperty(root.node.id, "text_align", JSON.stringify(modelData))
+                    }
+                }
+            }
             ColumnLayout {
                 visible: root.node && root.node.kind === "text"
                 Layout.fillWidth: true
