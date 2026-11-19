@@ -20,7 +20,12 @@ Iterate at least once after you first look.\n\
 5. Use every tool that helps (media, device frames, tokens, languages, presets, workspaces, \
 exports). Sizes the user chose are theirs: change them only through set_format, which asks. If they \
 chose nothing, pick from list_formats and record it with set_format.\n\
-6. End by saying what you made, what you decided for them and what you would try next.";
+6. Memory: get_guidance lists the notes earlier runs left (list_memory, read_memory): read the \
+relevant ones before you build. Before you finish, write_memory what the next run should know \
+(brand facts such as colors, fonts and copy and where they came from, what the user corrected or \
+liked, what worked, mistakes to avoid, decisions) in brand.md, lessons.md, decisions.md or style.md. \
+Short and factual; never secrets or tokens.\n\
+7. End by saying what you made, what you decided for them and what you would try next.";
 
 pub const TOPICS: &[(&str, &str, &str)] = &[
     (
@@ -82,6 +87,9 @@ mod tests {
             "list_videos",
             "set_format",
             "list_formats",
+            "list_memory",
+            "read_memory",
+            "write_memory",
         ] {
             assert!(QUALITY_BAR.contains(t), "the bar should mention {t}");
             assert!(tools.contains(&t), "{t} is not a tool");
@@ -109,6 +117,8 @@ mod tests {
                                 | "resolve"
                                 | "device"
                                 | "validate"
+                                | "read"
+                                | "write"
                         )
                     )
                 {

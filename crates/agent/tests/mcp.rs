@@ -1397,3 +1397,126 @@ fn an_export_of_a_frame_with_no_background_says_so() {
         "{warnings:?}"
     );
 }
+
+#[test]
+fn an_agent_keeps_notes_in_memory_and_guidance_indexes_them() {
+    let f = fixture();
+    let notes = f._tmp.path().join("p.od/.opendesigner/memory");
+
+    let g = f.ok("get_guidance", json!({}));
+    assert_eq!(g["memory"]["notes"], json!([]));
+    assert!(
+        g["memory"]["instruction"]
+            .as_str()
+            .unwrap()
+            .contains("read_memory")
+    );
+    assert_eq!(f.ok("list_memory", json!({}))["notes"], json!([]));
+
+    let w = f.ok(
+        "write_memory",
+        json!({"name": "brand.md", "text": "# Brand\nPrimary #112233 (from the website)"}),
+    );
+    assert_eq!(w["name"], "brand.md");
+    assert_eq!(w["title"], "Brand");
+    f.ok(
+        "write_memory",
+        json!({"name": "brand.md", "text": "User wants Inter"}),
+    );
+    let text = f.ok("read_memory", json!({"name": "brand.md"}));
+    let text = text.as_str().unwrap();
+    assert!(
+        text.contains("#112233") && text.contains("User wants Inter"),
+        "{text}"
+    );
+    f.ok(
+        "write_memory",
+        json!({"name": "lessons.md", "text": "Do not stack cards", "mode": "replace"}),
+    );
+
+    let listed = f.ok("list_memory", json!({}));
+    let names: Vec<&str> = listed["notes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|n| n["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["brand.md", "lessons.md"]);
+
+    let g = f.ok("get_guidance", json!({}));
+    assert_eq!(g["memory"]["notes"].as_array().unwrap().len(), 2);
+    assert!(
+        !g.to_string().contains("#112233"),
+        "guidance lists names, not bodies"
+    );
+    assert!(f._tmp.path().join("p.od/.opendesigner/README.md").is_file());
+    assert!(
+        !f._tmp.path().join(".opendesigner").exists(),
+        "nothing outside the project"
+    );
+
+    for bad in [
+        "../evil.md",
+        "a/b.md",
+        ".hidden.md",
+        "x.png",
+        "..",
+        "/etc/passwd",
+    ] {
+        let (err, _) = f.tool("write_memory", json!({"name": bad, "text": "x"}));
+        assert!(err, "{bad} must be refused");
+        let (err, _) = f.tool("read_memory", json!({"name": bad}));
+        assert!(err, "{bad} must be refused");
+    }
+    let (err, msg) = f.tool(
+        "write_memory",
+        json!({"name": "big.md", "text": "x".repeat(70 * 1024), "mode": "replace"}),
+    );
+    assert!(err && msg.contains("at most"), "{msg}");
+    let (err, _) = f.tool(
+        "write_memory",
+        json!({"name": "a.md", "text": "x", "mode": "wipe"}),
+    );
+    assert!(err);
+    let (err, _) = f.tool("read_memory", json!({"name": "missing.md"}));
+    assert!(err);
+    assert!(!f._tmp.path().join("evil.md").exists());
+    assert_eq!(std::fs::read_dir(&notes).unwrap().count(), 2);
+
+    let defs = f.rpc("tools/list", json!({}))["result"]["tools"].clone();
+    let hint = |n: &str| {
+        defs.as_array()
+            .unwrap()
+            .iter()
+            .find(|d| d["name"] == n)
+            .unwrap()["annotations"]["readOnlyHint"]
+            .as_bool()
+            .unwrap()
+    };
+    assert!(hint("list_memory") && hint("read_memory") && !hint("write_memory"));
+}
+
+#[test]
+fn memory_tools_say_so_when_there_is_no_project_folder() {
+    let ws = Workspace::new(od_core::Session::new(od_core::Document::new("x")));
+    let handler = Handler::new(Arc::new(Mutex::new(ws)));
+    let session = init(&handler, "claude-code");
+    let call = |name: &str, args: Value| {
+        let out = handler.handle(
+            Some(&session),
+            json!({"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":name,"arguments":args}}),
+        );
+        out.body.unwrap()["result"].clone()
+    };
+    let r = call("write_memory", json!({"name": "a.md", "text": "x"}));
+    assert_eq!(r["isError"], true);
+    assert!(
+        r["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("no project folder")
+    );
+    let g = call("get_guidance", json!({}));
+    let g: Value = serde_json::from_str(g["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert!(g["memory"]["unavailable"].is_string());
+}

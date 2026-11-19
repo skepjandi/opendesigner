@@ -165,6 +165,10 @@ impl EditorState {
     fn adopt(&mut self, ws: Workspace) {
         self.chat_stop();
         self.stop_mcp();
+        // the agent's memory folder: best effort, never a reason to refuse to open
+        if let Some(dir) = ws.dir() {
+            let _ = od_agent::memory::ensure(dir);
+        }
         let first_frame = view::frames(ws.session.document())
             .first()
             .and_then(|f| NodeId::parse(&f.id).ok());
@@ -684,6 +688,31 @@ impl EditorState {
     pub fn memory_list(&self) -> Value {
         self.with_ws(|ws| Ok(memory_of(ws)))
             .unwrap_or_else(|_| Value::Array(Vec::new()))
+    }
+
+    /// The text notes of the agent's memory (`.opendesigner/memory/`): name and size.
+    pub fn agent_notes(&self) -> Value {
+        let notes = self
+            .project_dir()
+            .and_then(|dir| od_agent::memory::list(&dir).ok())
+            .unwrap_or_default();
+        Value::Array(
+            notes
+                .iter()
+                .map(|n| json!({"id": n.name, "name": n.name, "bytes": n.bytes, "title": n.title}))
+                .collect(),
+        )
+    }
+
+    /// One note: its text, or the reason it cannot be read.
+    pub fn agent_note(&self, name: &str) -> Value {
+        match self.project_dir() {
+            Some(dir) => match od_agent::memory::read(&dir, name) {
+                Ok(text) => json!({"name": name, "text": text}),
+                Err(e) => json!({"name": name, "error": e.to_string()}),
+            },
+            None => json!({"name": name, "error": "no project is open"}),
+        }
     }
 
     /// One picture of a video at `time_ms` as a PNG data URL, at most `max_side` pixels long.
@@ -2928,6 +2957,28 @@ mod tests {
         assert!(
             repo.join("opendesigner/workspaces/app store/od.toml")
                 .is_file()
+        );
+        assert!(repo.join(".opendesigner/README.md").is_file());
+        assert!(repo.join(".opendesigner/memory").is_dir());
+        assert_eq!(s.agent_notes(), json!([]));
+        let dir = s.project_dir().unwrap();
+        od_agent::memory::write(
+            &dir,
+            "brand.md",
+            "# Brand\nInter",
+            od_agent::memory::Mode::Append,
+        )
+        .unwrap();
+        assert_eq!(s.agent_notes()[0]["name"], "brand.md");
+        assert!(
+            s.agent_note("brand.md")["text"]
+                .as_str()
+                .unwrap()
+                .contains("Inter")
+        );
+        assert!(
+            s.agent_note("../x.md")["error"].is_string(),
+            "a refusal is explained"
         );
         assert!(s.snapshot().has_project);
         assert_eq!(s.snapshot().frames, "[]", "the agent decides what to make");

@@ -9,6 +9,7 @@ pub mod error;
 pub mod export;
 pub mod formats;
 pub mod mcp;
+pub mod memory;
 pub mod playbook;
 pub mod review;
 pub mod server;

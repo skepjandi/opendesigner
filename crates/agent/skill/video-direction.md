@@ -58,3 +58,11 @@ First frame: strongest picture? Every shot 1 to 6 s? Anything still for more tha
 life? Text readable at phone size (the thumbnail test at 360 px wide)? Nothing important in the
 platform UI zones? Ending held, with one clear thing? The same transition vocabulary throughout?
 If any answer is no, fix it before exporting.
+
+## Memory across tasks
+
+Start from what earlier runs learned: `get_guidance` lists the notes in `.opendesigner/memory/`;
+`read_memory` the relevant ones (`brand.md`, `style.md`, `lessons.md`, `decisions.md`). When you are
+done, `write_memory` what the next video needs: the brand facts you used and their source, the look
+and pacing the user approved, what they cut or corrected, which transitions and caption styles
+worked, decisions and mistakes to avoid. Short, factual, never secrets or tokens.

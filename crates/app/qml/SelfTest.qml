@@ -205,6 +205,13 @@ Item {
                    check(JSON.parse(editor.layout).main.kind === "split", "the main window is a split")
         },
         function () {
+            const notes = JSON.parse(editor.memoryNotes())
+            const missing = JSON.parse(editor.memoryNote("brand.md"))
+            return check(Array.isArray(notes), "the agent's notes should be a list") &&
+                   check(notes.length === 0, "a fresh project has no notes") &&
+                   check(missing.error !== undefined, "reading a note that is not there should say so: " + JSON.stringify(missing))
+        },
+        function () {
             editor.layoutHide("memory")
             const hidden = dock.hidden.indexOf("memory") >= 0
             editor.layoutShow("memory")

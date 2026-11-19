@@ -35,6 +35,7 @@ impl ToolErrorSource for OpError {}
 impl ToolErrorSource for od_core::ProjectError {}
 impl ToolErrorSource for od_render::RenderError {}
 impl ToolErrorSource for std::io::Error {}
+impl ToolErrorSource for crate::memory::MemoryError {}
 
 fn fail<T>(msg: impl Into<String>) -> Result<T, ToolError> {
     Err(ToolError(msg.into()))
@@ -381,6 +382,40 @@ pub fn definitions() -> Vec<Value> {
             true,
         ),
         tool(
+            "list_memory",
+            "The agent memory of this repository: small text notes in .opendesigner/memory/ that \
+             earlier runs left for the next one (brand facts, what the user corrected or liked, \
+             lessons, decisions). Returns name, bytes, title (first line) and modified time. Read \
+             the relevant ones with read_memory before you build.",
+            json!({}),
+            &[],
+            true,
+        ),
+        tool(
+            "read_memory",
+            "Read one memory note by name (for example brand.md or lessons.md).",
+            json!({"name": id("A note name from list_memory: lowercase letters, digits, . _ -, ending .md or .txt.")}),
+            &["name"],
+            true,
+        ),
+        tool(
+            "write_memory",
+            "Leave a note for the next run, in .opendesigner/memory/ (a folder the user tracks in \
+             git). Write what future work should know: brand facts (colors, fonts, copy) and where \
+             they came from, what the user corrected or liked, what worked, mistakes to avoid, \
+             decisions. Files like brand.md, lessons.md, decisions.md, style.md. Short, factual, \
+             Markdown. NEVER store secrets, tokens or passwords. mode append (default) adds a dated \
+             entry; replace rewrites the file (use it to merge and tidy). Limits: 64 KB per note, \
+             200 notes, 2 MB total.",
+            json!({
+                "name": id("Note name: lowercase letters, digits, . _ -, ending .md or .txt."),
+                "text": id("The note text (Markdown)."),
+                "mode": {"type": "string", "enum": ["append", "replace"], "description": "append (default) or replace."},
+            }),
+            &["name", "text"],
+            false,
+        ),
+        tool(
             "list_workspaces",
             "The workspaces of this repository: separate designs side by side (an app store set, a \
              reel, a landing page), each with its own pages, videos, notes and media. Says which \
@@ -520,6 +555,9 @@ pub fn call(ctx: &mut CallCtx, name: &str, args: Value) -> Result<Output, ToolEr
         "list_video_presets" => Ok(Output::json(&video_presets_json())),
         "list_footage" => list_footage(ctx),
         "list_workspaces" => list_workspaces(ctx),
+        "list_memory" => list_memory(ctx),
+        "read_memory" => read_memory(ctx, parse(args)?),
+        "write_memory" => write_memory(ctx, parse(args)?),
         "create_workspace" => switch_workspace(ctx, parse(args)?, true),
         "open_workspace" => switch_workspace(ctx, parse(args)?, false),
         "find_files" => find_files(ctx, parse(args)?),
@@ -785,7 +823,83 @@ fn get_guidance(ctx: &mut CallCtx) -> Result<Output, ToolError> {
         "Call get_playbook: design (images), style (pick a named look), video and motion (video), \
          formats (sizes). Review your work with review_frame and render_preview before you say it is done."
     );
+    v["memory"] = memory_index(ctx);
     Ok(Output::json(&v))
+}
+
+fn project_dir_of(ctx: &CallCtx) -> Result<std::path::PathBuf, ToolError> {
+    ctx.ws
+        .dir()
+        .map(std::path::Path::to_path_buf)
+        .ok_or_else(|| {
+            ToolError("the workspace has no project folder, so there is no memory".into())
+        })
+}
+
+fn note_json(n: &crate::memory::Note) -> Value {
+    json!({"name": n.name, "bytes": n.bytes, "title": n.title, "modified": n.modified})
+}
+
+/// Where the notes live, so the agent can tell the user where to look.
+fn memory_folder(ctx: &CallCtx) -> Option<String> {
+    let dir = ctx.ws.dir()?;
+    Some(crate::memory::folder_of(dir)?.display().to_string())
+}
+
+/// The names and titles of the notes, never their bodies.
+fn memory_index(ctx: &CallCtx) -> Value {
+    let notes = project_dir_of(ctx)
+        .map_err(|e| e.0)
+        .and_then(|d| crate::memory::list(&d).map_err(|e| e.to_string()));
+    match notes {
+        Ok(notes) => json!({
+            "notes": notes.iter().map(note_json).collect::<Vec<_>>(),
+            "folder": memory_folder(ctx),
+            "instruction": "Read the relevant notes with read_memory before you build, and write back \
+                            what the next run should know (write_memory) before you finish. No secrets.",
+        }),
+        Err(e) => json!({"notes": [], "unavailable": e}),
+    }
+}
+
+fn list_memory(ctx: &mut CallCtx) -> Result<Output, ToolError> {
+    let notes = crate::memory::list(&project_dir_of(ctx)?)?;
+    Ok(Output::json(&json!({
+        "notes": notes.iter().map(note_json).collect::<Vec<_>>(),
+        "folder": memory_folder(ctx),
+    })))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MemoryNameArgs {
+    name: String,
+}
+
+fn read_memory(ctx: &mut CallCtx, a: MemoryNameArgs) -> Result<Output, ToolError> {
+    Ok(Output::text(crate::memory::read(
+        &project_dir_of(ctx)?,
+        &a.name,
+    )?))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WriteMemoryArgs {
+    name: String,
+    text: String,
+    #[serde(default)]
+    mode: Option<String>,
+}
+
+fn write_memory(ctx: &mut CallCtx, a: WriteMemoryArgs) -> Result<Output, ToolError> {
+    let mode = match a.mode.as_deref() {
+        None | Some("append") => crate::memory::Mode::Append,
+        Some("replace") => crate::memory::Mode::Replace,
+        Some(other) => return fail(format!("mode is append or replace, not {other:?}")),
+    };
+    let note = crate::memory::write(&project_dir_of(ctx)?, &a.name, &a.text, mode)?;
+    Ok(Output::json(&note_json(&note)))
 }
 
 #[derive(Deserialize)]

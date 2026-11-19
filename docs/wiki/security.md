@@ -42,6 +42,17 @@ Kino's MCP endpoint is a useful precedent for the UX (fixed loopback port, keep 
 
 **Implemented** in `crates/agent/src/server.rs`: bind to `127.0.0.1` only; every request must pass `guard` before any handler: any `Origin` header is refused (`403`), `Host` must be `127.0.0.1:<port>` or `localhost:<port>` (`403`), `Authorization: Bearer <token>` is compared in constant time (`401` with `WWW-Authenticate: Bearer`), then the protocol version header is checked (`400`). Bodies over 4 MB are refused (`413`). The token is 32 random bytes from the OS (`getrandom`), stored in the per-user config directory with mode `0600` on Unix (on Windows the user profile's default permissions apply; not hardened further), never printed unless `--show-token` is given, and replaced with `--rotate-token`. Tests: `crates/agent/tests/server.rs` and `crates/cli/tests/serve.rs`.
 
+## Agent memory
+
+`write_memory` is a write surface outside the project folder: `<repo>/.opendesigner/memory/`, where `<repo>` is the parent of the `opendesigner/` assets folder (a project that is not inside an `opendesigner/` folder keeps its notes in `<project>/.opendesigner/`) (`od_agent::memory`). Rules, each covered by a unit test:
+
+- Names are plain `[a-z0-9._-]+`, at most 64 characters, ending `.md` or `.txt`, no leading dot, no `..`, no separators. The path is always `memory/` joined with a validated name; the agent never supplies a path.
+- Symlinks are never followed (`symlink_metadata`): a linked note, `.opendesigner` or `memory/` is refused for reads, writes and listing.
+- Caps: 64 KB per note, 200 notes, 2 MB in total. Text only (no NUL bytes); the folder never holds binaries.
+- Writes are atomic (temporary file, then rename). Append adds a dated entry; replace swaps the file.
+- OpenDesigner creates the folder and a README when a working folder is opened (best effort) and never edits `.gitignore`.
+- Notes are untrusted data on the way back: an agent reading a note treats it like any document content, not as an instruction. The README, the tool description and the playbook say never to store secrets, tokens or passwords, because the folder is meant to be committed. Nothing scans for secrets, so this is guidance, not a guarantee.
+
 ## Skill installer
 
 **Implemented** in `crates/agent/src/skill.rs` (tests in `crates/agent/tests/skill.rs` and `crates/cli/tests/skill.rs`): every bullet below; the first-run consent dialog is in the Qt app (`qml/main.qml`, state in `crates/app/src/state.rs`), which lists the paths and writes nothing without a click. The tests snapshot a temporary home folder and assert that an install adds files only under `.claude/skills/opendesigner/` and `.agents/skills/opendesigner/`, leaves every other file byte-identical (agent settings included), and that uninstall restores the snapshot.

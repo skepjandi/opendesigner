@@ -82,3 +82,13 @@ with `set_token`, `create`, `reparent` for structure · `device_template` · `li
 every note you acted on · `list_workspaces` / `create_workspace` for another deliverable ·
 `get_playbook` for the other guides. If a tool could improve the result and you did not use it, use
 it.
+
+## Memory across tasks
+
+`get_guidance` lists the notes earlier runs left in `.opendesigner/memory/` (`list_memory`). Read
+the ones that matter (`read_memory`: `brand.md` for colors, fonts and copy, `style.md` for the look,
+`lessons.md` for mistakes) before you build, and follow them unless the user now says otherwise.
+Before you finish, `write_memory` what the next run should know: brand facts and where each came
+from, what the user corrected or liked, what worked, what to avoid, decisions. Append dated entries;
+use `replace` to merge and tidy a file. Short and factual. Never store secrets, tokens or passwords:
+the folder is meant to be committed to git.

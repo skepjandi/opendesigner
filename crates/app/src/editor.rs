@@ -190,6 +190,12 @@ pub mod qobject {
         #[cxx_name = "previewStop"]
         fn preview_stop(self: Pin<&mut Self>);
         #[qinvokable]
+        #[cxx_name = "memoryNotes"]
+        fn memory_notes(self: &Self) -> QString;
+        #[qinvokable]
+        #[cxx_name = "memoryNote"]
+        fn memory_note(self: &Self, name: &QString) -> QString;
+        #[qinvokable]
         #[cxx_name = "importToMemory"]
         fn import_to_memory(self: Pin<&mut Self>, url: &QString) -> QString;
         #[qinvokable]
@@ -845,6 +851,14 @@ impl qobject::Editor {
 
     pub fn preview_stop(mut self: Pin<&mut Self>) {
         self.as_mut().rust_mut().state.preview_stop();
+    }
+
+    pub fn memory_notes(&self) -> QString {
+        q(&self.state.agent_notes().to_string())
+    }
+
+    pub fn memory_note(&self, name: &QString) -> QString {
+        q(&self.state.agent_note(&name.to_string()).to_string())
     }
 
     pub fn import_to_memory(mut self: Pin<&mut Self>, url: &QString) -> QString {
