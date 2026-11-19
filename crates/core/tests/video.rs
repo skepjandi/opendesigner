@@ -69,6 +69,7 @@ fn fade(ms: u32) -> Transition {
     Transition {
         kind: TransitionKind::Fade,
         duration_ms: ms,
+        ease: od_core::Ease::default(),
     }
 }
 
@@ -113,6 +114,7 @@ fn a_transition_longer_than_its_clip_or_a_bad_value_is_refused() {
         Transition {
             kind: TransitionKind::Cut,
             duration_ms: 100,
+            ease: od_core::Ease::default(),
         },
     ] {
         let err = s.apply(Actor::User, None, &[set(ClipProperty::Transition(bad))]);
@@ -136,6 +138,7 @@ fn a_transition_longer_than_its_clip_or_a_bad_value_is_refused() {
     let too_zoomed = Motion {
         scale_from: 1.0,
         scale_to: 3.5,
+        ease: od_core::Ease::default(),
     };
     assert!(
         s.apply(Actor::User, None, &[set(ClipProperty::Motion(too_zoomed))])
@@ -169,6 +172,7 @@ fn clips_can_be_moved_edited_and_removed_and_every_step_undoes() {
                 prop: ClipProperty::Motion(Motion {
                     scale_from: 1.0,
                     scale_to: 1.2,
+                    ease: od_core::Ease::default(),
                 }),
             },
             Operation::SetVideo {
@@ -491,6 +495,9 @@ fn overlays_fade_in_and_out_hold_a_frame_and_undo_cleanly() {
                 start_ms: 1000,
                 duration_ms: 2000,
                 fade_ms: Some(400),
+                enter: None,
+                exit: None,
+                ease: None,
             }],
         )
         .unwrap();
@@ -545,7 +552,10 @@ fn overlays_fade_in_and_out_hold_a_frame_and_undo_cleanly() {
                     frame: b,
                     start_ms: 0,
                     duration_ms: 1000,
-                    fade_ms: 0
+                    fade_ms: 0,
+                    enter: Default::default(),
+                    exit: Default::default(),
+                    ease: Default::default(),
                 }
             }]
         ),

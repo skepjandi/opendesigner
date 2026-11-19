@@ -23,6 +23,65 @@ pub const MAX_VIDEO_SIDE: u32 = 4_096;
 pub const MIN_VIDEO_SIDE: u32 = 16;
 pub const MAX_ZOOM: f64 = 3.0;
 
+/// How a value moves from its start to its end over time (`t` from 0 to 1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum Ease {
+    Linear,
+    /// Starts slowly, ends fast.
+    EaseIn,
+    /// Starts fast, settles slowly: the natural way things come to rest.
+    EaseOut,
+    /// Slow, fast, slow: the default for camera-like moves.
+    #[default]
+    EaseInOut,
+    /// Overshoots the end a little and settles back: a pop or a bounce in.
+    Back,
+}
+
+impl Ease {
+    /// The eased progress for linear progress `t` (clamped to 0..=1; `Back` may pass 1).
+    pub fn apply(self, t: f64) -> f64 {
+        let t = t.clamp(0.0, 1.0);
+        match self {
+            Ease::Linear => t,
+            Ease::EaseIn => t * t * t,
+            Ease::EaseOut => 1.0 - (1.0 - t).powi(3),
+            Ease::EaseInOut => {
+                if t < 0.5 {
+                    4.0 * t * t * t
+                } else {
+                    1.0 - (-2.0 * t + 2.0).powi(3) / 2.0
+                }
+            }
+            Ease::Back => {
+                const C1: f64 = 1.70158;
+                const C3: f64 = C1 + 1.0;
+                1.0 + C3 * (t - 1.0).powi(3) + C1 * (t - 1.0).powi(2)
+            }
+        }
+    }
+}
+
+/// How an overlay arrives and leaves. Every kind but `None` also fades.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum Entrance {
+    /// Appears and disappears at once.
+    None,
+    #[default]
+    Fade,
+    /// Rises into place from slightly below (on exit, rises away).
+    SlideUp,
+    SlideDown,
+    SlideLeft,
+    SlideRight,
+    /// Grows from 80% to full size (with `ease: back`, overshooting).
+    Pop,
+    /// Settles from 125% to full size.
+    Zoom,
+}
+
 /// How one clip arrives from the one before it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
@@ -36,6 +95,14 @@ pub enum TransitionKind {
     SlideLeft,
     /// The new clip slides in from the left, pushing the old one out to the right.
     SlideRight,
+    /// The new clip slides in from below, pushing the old one up and out.
+    SlideUp,
+    /// The new clip slides in from above, pushing the old one down and out.
+    SlideDown,
+    /// The old clip fades to black, then the new one fades up from it.
+    Dip,
+    /// The new clip settles from 120% to full size while it fades in.
+    ZoomIn,
 }
 
 /// The transition into a clip. It overlaps the end of the previous clip, so a 500 ms fade makes
@@ -49,6 +116,8 @@ pub struct Transition {
     /// Zero for a cut; otherwise 1 to 5000 and no longer than the clip.
     #[serde(default)]
     pub duration_ms: u32,
+    #[serde(default)]
+    pub ease: Ease,
 }
 
 /// A slow zoom over the clip: the picture starts at `scale_from` times the frame and ends at
@@ -58,6 +127,8 @@ pub struct Transition {
 pub struct Motion {
     pub scale_from: f64,
     pub scale_to: f64,
+    #[serde(default)]
+    pub ease: Ease,
 }
 
 impl Default for Motion {
@@ -65,6 +136,7 @@ impl Default for Motion {
         Motion {
             scale_from: 1.0,
             scale_to: 1.0,
+            ease: Ease::default(),
         }
     }
 }
@@ -103,9 +175,15 @@ pub struct Overlay {
     /// From the start of the video.
     pub start_ms: u64,
     pub duration_ms: u32,
-    /// Fade in and fade out, each at most half the duration; 0 is a cut.
+    /// How long the entrance and the exit each take, at most half the duration; 0 is a cut.
     #[serde(default)]
     pub fade_ms: u32,
+    #[serde(default)]
+    pub enter: Entrance,
+    #[serde(default)]
+    pub exit: Entrance,
+    #[serde(default)]
+    pub ease: Ease,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -349,6 +427,9 @@ pub enum OverlayProperty {
     StartMs(u64),
     DurationMs(u32),
     FadeMs(u32),
+    Enter(Entrance),
+    Exit(Entrance),
+    Ease(Ease),
 }
 
 impl Document {
@@ -736,6 +817,9 @@ pub(crate) fn apply(
             start_ms,
             duration_ms,
             fade_ms,
+            enter,
+            exit,
+            ease,
         } => {
             doc.check_frame(frame)?;
             let at = doc.video_index(video)?;
@@ -745,6 +829,9 @@ pub(crate) fn apply(
                 start_ms: *start_ms,
                 duration_ms: *duration_ms,
                 fade_ms: fade_ms.unwrap_or(0),
+                enter: enter.unwrap_or_default(),
+                exit: exit.unwrap_or_default(),
+                ease: ease.unwrap_or(Ease::EaseOut),
             };
             let target = &mut doc.videos[at];
             target.overlays.push(overlay.clone());
@@ -850,6 +937,15 @@ pub(crate) fn apply(
                 OverlayProperty::FadeMs(ms) => {
                     OverlayProperty::FadeMs(std::mem::replace(&mut o.fade_ms, *ms))
                 }
+                OverlayProperty::Enter(e) => {
+                    OverlayProperty::Enter(std::mem::replace(&mut o.enter, *e))
+                }
+                OverlayProperty::Exit(e) => {
+                    OverlayProperty::Exit(std::mem::replace(&mut o.exit, *e))
+                }
+                OverlayProperty::Ease(e) => {
+                    OverlayProperty::Ease(std::mem::replace(&mut o.ease, *e))
+                }
             };
             if let Err(e) = target.check_fields() {
                 target.overlays[oat] = before;
@@ -866,5 +962,39 @@ pub(crate) fn apply(
             ))
         }
         _ => Err(OpError::Internal("not a video operation".to_string())),
+    }
+}
+
+#[cfg(test)]
+mod ease_tests {
+    use super::*;
+
+    #[test]
+    fn every_ease_runs_from_zero_to_one_and_only_back_overshoots() {
+        for e in [
+            Ease::Linear,
+            Ease::EaseIn,
+            Ease::EaseOut,
+            Ease::EaseInOut,
+            Ease::Back,
+        ] {
+            assert!(e.apply(0.0).abs() < 1e-9, "{e:?}");
+            assert!((e.apply(1.0) - 1.0).abs() < 1e-9, "{e:?}");
+            assert_eq!(e.apply(-3.0), e.apply(0.0));
+            assert_eq!(e.apply(9.0), e.apply(1.0));
+        }
+        assert!(Ease::EaseIn.apply(0.5) < 0.5 && Ease::EaseOut.apply(0.5) > 0.5);
+        assert!((Ease::EaseInOut.apply(0.5) - 0.5).abs() < 1e-9);
+        assert!((Ease::Linear.apply(0.3) - 0.3).abs() < 1e-9);
+        let peak = (1..100)
+            .map(|i| Ease::Back.apply(f64::from(i) / 100.0))
+            .fold(0.0, f64::max);
+        assert!(peak > 1.05, "back overshoots: {peak}");
+        for e in [Ease::EaseIn, Ease::EaseOut, Ease::EaseInOut] {
+            assert!(
+                (1..100).all(|i| e.apply(f64::from(i) / 100.0) <= 1.0),
+                "{e:?}"
+            );
+        }
     }
 }

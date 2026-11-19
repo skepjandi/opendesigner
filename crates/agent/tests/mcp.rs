@@ -715,6 +715,23 @@ fn an_agent_builds_looks_at_and_lists_a_video_and_cannot_use_history_only_ops() 
     assert_eq!(listed[0]["clips"][0]["frame_name"], "One");
     assert_eq!(listed[0]["clips"][1]["start_ms"], 1500);
     assert_eq!(listed[0]["clips"][1]["transition_ms"], 500);
+    let story = listed[0]["story"].as_array().unwrap();
+    assert_eq!(story.len(), 2);
+    assert!(
+        story[0]
+            .as_str()
+            .unwrap()
+            .starts_with("0.0 s starts with frame One for 2.0 s"),
+        "{story:?}"
+    );
+    assert!(
+        story[1]
+            .as_str()
+            .unwrap()
+            .contains("1.5 s fade over 0.5 s (ease_in_out), then frame Two")
+            && story[1].as_str().unwrap().contains("zooming 1.00 to 1.50"),
+        "{story:?}"
+    );
 
     let resp = f.rpc(
         "tools/call",

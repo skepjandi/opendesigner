@@ -8,6 +8,16 @@ All notable changes to OpenDesigner are documented here.
 
 ## 2026-11-19
 
+### feat(video): motion that is worth watching, and a timeline that shows what follows what
+
+**Area:** `feat(core)`, `feat(render)`, `feat(app)`, `feat(mcp)`
+
+**Why:** Videos were fades and linear slides over still frames; the user could not see the order of things from the workspace. **Change:** Easing (`linear`, `ease_in`, `ease_out`, `ease_in_out`, `back`) on transitions, zooms and overlays; transitions `slide_up`, `slide_down`, `dip` (through black), `zoom_in`; overlays enter and leave with `fade`, `slide_*`, `pop` or `zoom`. `list_videos` returns a `story` (one sentence per clip and overlay). The Video tab is now a timeline: ruler, clip lane with the overlapped stretch of every transition, stacked overlay lanes, a playhead you can click or drag, the preview and Play, and the same story in words.
+
+**Verified:** core and render tests (ease curves incl. overshoot, slide_up/dip/pop poses at known times, overlay entrance), an MCP test of the story text, window session with the new panel. **Not verified:** the timeline by eye, the preview at playback speed (it is still a stepped still image), real footage with the new transitions.
+
+**PR:** n/a
+
 ### fix(app): chat while the agent works, always allow, scrollable panels, and a 20x faster export in dev builds
 
 **Area:** `fix(app)`, `perf(render)`, `build(repo)`

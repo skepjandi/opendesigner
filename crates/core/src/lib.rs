@@ -24,7 +24,7 @@ pub use model::{Document, ImageFit, Node, NodeId, NodeKind, Page, Stroke, TextAl
 pub use ops::{AppliedOp, NewNode, Operation, Property};
 pub use paint::{Paint, Rgba};
 pub use video::{
-    Clip, ClipProperty, ClipSource, Footage, Motion, Overlay, OverlayProperty, Transition,
-    TransitionKind, Video, VideoProperty,
+    Clip, ClipProperty, ClipSource, Ease, Entrance, Footage, Motion, Overlay, OverlayProperty,
+    Transition, TransitionKind, Video, VideoProperty,
 };
 pub use workspace::{Guidance, Workspace};
