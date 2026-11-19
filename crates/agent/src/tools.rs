@@ -171,7 +171,8 @@ pub fn definitions() -> Vec<Value> {
              {op:'set', id, prop:{name, value}} with name one of name, x, y, width, height, visible, opacity, \
              fill, stroke, corner_radius, text, font_size, font_family, font_weight, text_align, line_height, \
              image (a media/ path from list_media), image_fit (cover, contain or fill), {op:'move', id, x, y}, \
-             {op:'reparent', id, parent, index?}, {op:'delete', id}. Colors are '#rrggbb', '#rrggbbaa' or \
+             {op:'reparent', id, parent, index?}, {op:'delete', id}, \
+             {op:'set_token', name, value} (a named color '#rrggbb'; value null removes an unused token). Colors are '#rrggbb', '#rrggbbaa' or \
              '{token.name}'. Ids are minted for you; the result lists the created ids. A checkpoint is taken \
              before your first change in a turn so the user can restore it.",
             json!({

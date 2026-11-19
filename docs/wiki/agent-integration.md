@@ -78,7 +78,7 @@ Each row is data in `agent`'s target table, not code, so adding an agent is a on
 - **Media:** an image node's `image` must be `media/<plain file name>` (`.png`, `.jpg`, `.jpeg`, `.webp`); `core` refuses anything else, and the renderer refuses symlinks. Files get into `media/` only when the **user** imports them (the editor's Image button or a drop on the canvas copies the file and sniffs its first bytes). There is deliberately no agent `import_media`: a tool that copies a path from the user's disk would read outside the project (invariant 5). `list_media` shows the agent what is there, with pixel sizes, so it can size and place nodes; to use a new image it asks the user to add it.
 - **Change hook:** `Handler::with_change_hook` reports the nodes an agent touched, for the editor to outline them. Reads do not fire it.
 
-Deviations: tokens cannot be changed through MCP yet (they are not part of the undoable history), `add_annotation` is not offered to agents, and there is no `transcribe` or timeline tool.
+Deviations: `add_annotation` is not offered to agents, and there is no `transcribe` or timeline tool. Design tokens change through `apply_ops` with `set_token` (attributed, checkpointed and undoable like any edit); there is no separate token tool.
 
 ### Design (as originally specified)
 

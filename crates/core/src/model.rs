@@ -294,15 +294,37 @@ impl Document {
         if !valid_token_name(name) {
             return Err(OpError::UnknownToken(name.to_string()));
         }
-        crate::paint::Rgba::parse_hex(value)?;
+        let value = crate::paint::Rgba::parse_hex(value)?.to_hex();
         if self.tokens.len() >= limits::MAX_TOKENS && !self.tokens.contains_key(name) {
             return Err(OpError::Limit(format!(
                 "at most {} tokens",
                 limits::MAX_TOKENS
             )));
         }
-        self.tokens.insert(name.to_string(), value.to_string());
+        self.tokens.insert(name.to_string(), value);
         Ok(())
+    }
+
+    /// Ids of the nodes whose fill or stroke refers to the token `name`.
+    pub fn token_users(&self, name: &str) -> Vec<NodeId> {
+        fn uses(p: &crate::paint::Paint, name: &str) -> bool {
+            matches!(p, crate::paint::Paint::Token(t) if t == name)
+        }
+        fn walk(n: &Node, name: &str, out: &mut Vec<NodeId>) {
+            let fill = n.fill.as_ref().is_some_and(|p| uses(p, name));
+            let stroke = n.stroke.as_ref().is_some_and(|s| uses(&s.paint, name));
+            if fill || stroke {
+                out.push(n.id.clone());
+            }
+            for c in &n.children {
+                walk(c, name, out);
+            }
+        }
+        let mut out = Vec::new();
+        for page in &self.pages {
+            walk(&page.root, name, &mut out);
+        }
+        out
     }
 
     pub fn page(&self, id: &NodeId) -> Option<&Page> {

@@ -114,6 +114,14 @@ ApplicationWindow {
                     ToolTip.delay: 600
                     ToolTip.text: "Add a phone or tablet frame with a screen to drop a capture on"
                 }
+                Btn {
+                    text: "Colors…"
+                    enabled: backend.hasProject
+                    onClicked: tokensDialog.open()
+                    ToolTip.visible: hovered
+                    ToolTip.delay: 600
+                    ToolTip.text: "Named colors (design tokens): change one and everything that uses it follows"
+                }
                 Item { Layout.fillWidth: true }
                 Btn { text: "Undo"; enabled: backend.canUndo; onClicked: backend.undo() }
                 Btn { text: "Redo"; enabled: backend.canRedo; onClicked: backend.redo() }
@@ -349,6 +357,65 @@ ApplicationWindow {
             if (nodeId !== "") backend.addPin(noteText.text.trim(), nodeId)
             else backend.addRegionPin(noteText.text.trim(), rx, ry, rw, rh)
             agent.tab = 0
+        }
+    }
+
+    Modal {
+        id: tokensDialog
+        title: "Colors (design tokens)"
+        width: 520
+        height: 460
+        standardButtons: Dialog.Close
+        readonly property var rows: backend.tokens ? JSON.parse(backend.tokens) : []
+        contentItem: ColumnLayout {
+            spacing: 8
+            Label {
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+                color: Theme.muted
+                font.pixelSize: 11
+                text: "Use a color as {name} in a fill or stroke. Changing a color here recolors everything that uses it, and agents can change them too; every change can be undone."
+            }
+            ListView {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                clip: true
+                spacing: 4
+                model: tokensDialog.rows
+                delegate: RowLayout {
+                    id: tokenRow
+                    required property var modelData
+                    width: ListView.view.width
+                    spacing: 8
+                    Rectangle { Layout.preferredWidth: 22; Layout.preferredHeight: 22; radius: 4; color: tokenRow.modelData.value; border.width: 1; border.color: Theme.border }
+                    Label { text: tokenRow.modelData.name; color: Theme.text; font.pixelSize: Theme.fontSize; Layout.fillWidth: true; elide: Text.ElideRight }
+                    Label { text: tokenRow.modelData.used_by + " used"; color: Theme.muted; font.pixelSize: 11 }
+                    Field {
+                        Layout.preferredWidth: 100
+                        text: tokenRow.modelData.value
+                        onCommitted: v => { if (v !== tokenRow.modelData.value) backend.setToken(tokenRow.modelData.name, v) }
+                    }
+                    Btn {
+                        text: "Remove"
+                        enabled: tokenRow.modelData.used_by === 0
+                        onClicked: backend.removeToken(tokenRow.modelData.name)
+                    }
+                }
+            }
+            RowLayout {
+                spacing: 8
+                Field { id: newTokenName; Layout.fillWidth: true; placeholderText: "new.name" }
+                Field { id: newTokenValue; Layout.preferredWidth: 100; placeholderText: "#rrggbb" }
+                Btn {
+                    text: "Add"
+                    primary: true
+                    enabled: newTokenName.text.trim() !== "" && newTokenValue.text.trim() !== ""
+                    onClicked: {
+                        backend.setToken(newTokenName.text, newTokenValue.text)
+                        if (!backend.messageIsError) { newTokenName.text = ""; newTokenValue.text = "" }
+                    }
+                }
+            }
         }
     }
 

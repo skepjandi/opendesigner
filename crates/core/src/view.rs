@@ -86,6 +86,26 @@ pub fn frames(doc: &Document) -> Vec<FrameRow> {
     out
 }
 
+/// A design token with how many nodes use it, for the tokens panel.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct TokenRow {
+    pub name: String,
+    pub value: String,
+    pub used_by: usize,
+}
+
+/// Every token, sorted by name.
+pub fn tokens(doc: &Document) -> Vec<TokenRow> {
+    doc.tokens
+        .iter()
+        .map(|(name, value)| TokenRow {
+            name: name.clone(),
+            value: value.clone(),
+            used_by: doc.token_users(name).len(),
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -126,5 +146,33 @@ mod tests {
         let f = frames(s.document());
         assert_eq!(f.len(), 1);
         assert_eq!((f[0].name.as_str(), f[0].width), ("Frame", 10.0));
+    }
+
+    #[test]
+    fn tokens_list_by_name_with_their_users() {
+        let mut s = Session::new(Document::new("t"));
+        let page = s.add_page("p").unwrap();
+        s.set_token("b.two", "#000000").unwrap();
+        s.set_token("a.one", "#ffffff").unwrap();
+        let root = s.document().page(&page).unwrap().root.id.clone();
+        let mut n = NewNode::new(crate::NodeKind::Rect);
+        n.fill = Some(crate::Paint::parse("{a.one}").unwrap());
+        s.apply(
+            Actor::User,
+            None,
+            &[Operation::Create {
+                parent: root,
+                index: None,
+                node: n,
+            }],
+        )
+        .unwrap();
+        let rows = tokens(s.document());
+        assert_eq!(
+            rows.iter()
+                .map(|r| (r.name.as_str(), r.used_by))
+                .collect::<Vec<_>>(),
+            [("a.one", 1), ("b.two", 0)]
+        );
     }
 }

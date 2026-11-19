@@ -365,6 +365,14 @@ pub enum Operation {
     },
     /// Delete a node and its subtree.
     Delete { id: NodeId },
+    /// Define or change a design token (a named color, `value` as `#rrggbb` or `#rrggbbaa`), or
+    /// remove it with `value: null` (refused while a node still uses it). Nodes that use the
+    /// token change color with it, so they are reported as touched.
+    SetToken {
+        name: String,
+        #[serde(default)]
+        value: Option<String>,
+    },
     /// Put back an existing subtree with its original ids. Written by the history when it
     /// resolves a `Create` or inverts a `Delete`; front ends cannot issue it.
     Restore {
@@ -382,6 +390,7 @@ impl Operation {
             Operation::Move { .. } => "move",
             Operation::Reparent { .. } => "reparent",
             Operation::Delete { .. } => "delete",
+            Operation::SetToken { .. } => "set_token",
             Operation::Restore { .. } => "restore",
         }
     }
@@ -568,6 +577,7 @@ pub fn apply(
                 touched: vec![id.clone()],
             })
         }
+        Operation::SetToken { name, value } => set_token(doc, name, value.as_deref()),
         Operation::Reparent { id, parent, index } => reparent(doc, id, parent, *index),
         Operation::Delete { id } => {
             let loc = node_loc(doc, id)?;
@@ -598,6 +608,37 @@ pub fn apply(
             })
         }
     }
+}
+
+fn set_token(doc: &mut Document, name: &str, value: Option<&str>) -> Result<AppliedOp, OpError> {
+    let old = doc.tokens.get(name).cloned();
+    let users = doc.token_users(name);
+    match value {
+        Some(v) => doc.set_token(name, v)?,
+        None => {
+            if !crate::paint::valid_token_name(name) || old.is_none() {
+                return Err(OpError::UnknownToken(name.to_string()));
+            }
+            if !users.is_empty() {
+                return Err(OpError::TokenInUse {
+                    name: name.to_string(),
+                    count: users.len(),
+                });
+            }
+            doc.tokens.remove(name);
+        }
+    }
+    Ok(AppliedOp {
+        forward: Operation::SetToken {
+            name: name.to_string(),
+            value: doc.tokens.get(name).cloned(),
+        },
+        inverse: Operation::SetToken {
+            name: name.to_string(),
+            value: old,
+        },
+        touched: users,
+    })
 }
 
 /// The value a `Set` actually stored (rounded), so redo reproduces the exact bytes.

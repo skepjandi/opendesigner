@@ -27,6 +27,7 @@ pub mod qobject {
         #[qproperty(QString, log)]
         #[qproperty(QString, changed)]
         #[qproperty(QString, unrendered)]
+        #[qproperty(QString, tokens)]
         #[qproperty(bool, can_undo, cxx_name = "canUndo")]
         #[qproperty(bool, can_redo, cxx_name = "canRedo")]
         #[qproperty(bool, mcp_running, cxx_name = "mcpRunning")]
@@ -113,6 +114,12 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "toggleVisible"]
         fn toggle_visible(self: Pin<&mut Self>, id: &QString);
+        #[qinvokable]
+        #[cxx_name = "setToken"]
+        fn set_token(self: Pin<&mut Self>, name: &QString, value: &QString);
+        #[qinvokable]
+        #[cxx_name = "removeToken"]
+        fn remove_token(self: Pin<&mut Self>, name: &QString);
         #[qinvokable]
         fn reorder(self: Pin<&mut Self>, id: &QString, delta: i32);
 
@@ -210,6 +217,7 @@ pub struct EditorRust {
     log: QString,
     changed: QString,
     unrendered: QString,
+    tokens: QString,
     can_undo: bool,
     can_redo: bool,
     mcp_running: bool,
@@ -313,6 +321,7 @@ impl qobject::Editor {
         self.as_mut().set_log(q(&snap.log));
         self.as_mut().set_changed(q(&snap.changed));
         self.as_mut().set_unrendered(q(&snap.unrendered));
+        self.as_mut().set_tokens(q(&snap.tokens));
         self.as_mut().set_can_undo(snap.can_undo);
         self.as_mut().set_can_redo(snap.can_redo);
         self.as_mut().set_mcp_running(snap.mcp_running);
@@ -464,6 +473,16 @@ impl qobject::Editor {
     pub fn toggle_visible(mut self: Pin<&mut Self>, id: &QString) {
         let id = id.to_string();
         self.as_mut().act(|s| s.toggle_visible(&id));
+    }
+
+    pub fn set_token(mut self: Pin<&mut Self>, name: &QString, value: &QString) {
+        let (name, value) = (name.to_string(), value.to_string());
+        self.as_mut().act(|s| s.set_token(&name, &value));
+    }
+
+    pub fn remove_token(mut self: Pin<&mut Self>, name: &QString) {
+        let name = name.to_string();
+        self.as_mut().act(|s| s.remove_token(&name));
     }
 
     pub fn reorder(mut self: Pin<&mut Self>, id: &QString, delta: i32) {
