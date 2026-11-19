@@ -256,6 +256,39 @@ pub fn export_video(
                 in_ms: f.in_ms,
                 start_ms: placed.start_ms,
                 duration_ms: u64::from(clip.duration_ms),
+                gain: 1.0,
+                fade_in_ms: 0,
+                fade_out_ms: 0,
+            });
+        }
+    }
+    // The sound track of the video: played under the picture, cut at the end of the video.
+    let mut warnings: Vec<String> = Vec::new();
+    if let Some(track) = &v.audio {
+        let project = project
+            .as_deref()
+            .ok_or_else(|| ToolError("the project has no folder, so no sound track".into()))?;
+        let path =
+            od_media::audio_path(project, &track.file).map_err(|e| ToolError(e.to_string()))?;
+        let length = ffmpeg
+            .probe_duration(&path)
+            .map_err(|e| ToolError(e.to_string()))?;
+        let start = u64::from(track.start_ms);
+        let left = v.duration_ms().saturating_sub(start);
+        if left == 0 {
+            warnings.push(format!(
+                "the sound track {} starts after the video ends, so it is not in the file",
+                track.file
+            ));
+        } else {
+            audio.push(AudioPiece {
+                file: path,
+                in_ms: 0,
+                start_ms: start,
+                duration_ms: length.min(left),
+                gain: track.gain,
+                fade_in_ms: u64::from(track.fade_in_ms),
+                fade_out_ms: u64::from(track.fade_out_ms),
             });
         }
     }
@@ -353,10 +386,9 @@ pub fn export_video(
         ffmpeg: ffmpeg.version.clone(),
         ffmpeg_gpl: ffmpeg.gpl,
         audio_pieces: audio.len(),
-        warnings: renderer
-            .warnings()
-            .iter()
-            .map(ToString::to_string)
+        warnings: warnings
+            .into_iter()
+            .chain(renderer.warnings().iter().map(ToString::to_string))
             .collect(),
     })
 }

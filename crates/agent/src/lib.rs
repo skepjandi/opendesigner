@@ -8,6 +8,8 @@ pub mod direction;
 pub mod error;
 pub mod export;
 pub mod formats;
+pub mod freesound;
+pub mod http;
 pub mod mcp;
 pub mod mcp_servers;
 pub mod memory;

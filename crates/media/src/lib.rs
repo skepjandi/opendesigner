@@ -309,8 +309,9 @@ pub struct FileInfo {
 }
 
 /// Reads the facts out of the text `ffmpeg -i <file>` prints.
-pub fn parse_info(text: &str) -> Option<FileInfo> {
-    let duration_ms = text.lines().find_map(|l| {
+/// How long a file lasts, from ffmpeg's log.
+pub fn parse_duration(text: &str) -> Option<u64> {
+    text.lines().find_map(|l| {
         let rest = l.trim().strip_prefix("Duration: ")?;
         let t = rest.split(',').next()?;
         let mut parts = t.split(':');
@@ -319,7 +320,11 @@ pub fn parse_info(text: &str) -> Option<FileInfo> {
             + m.parse::<f64>().ok()? * 60.0
             + sec.parse::<f64>().ok()?;
         Some((secs * 1000.0).round() as u64)
-    })?;
+    })
+}
+
+pub fn parse_info(text: &str) -> Option<FileInfo> {
+    let duration_ms = parse_duration(text)?;
     let video = text.lines().find(|l| l.contains(" Video: "))?;
     let size = video
         .split([',', ' '])
@@ -355,6 +360,24 @@ impl Ffmpeg {
         parse_info(&text).ok_or_else(|| {
             MediaError::Failed(format!(
                 "{} is not a video ffmpeg can read: {}",
+                file.display(),
+                text.lines().last().unwrap_or("").trim()
+            ))
+        })
+    }
+
+    /// How long a file lasts, in milliseconds. For an audio file this is the sound alone.
+    pub fn probe_duration(&self, file: &Path) -> Result<u64, MediaError> {
+        let out = Command::new(&self.path)
+            .args(["-hide_banner", "-i"])
+            .arg(file)
+            .stdin(Stdio::null())
+            .output()
+            .map_err(|e| MediaError::Io(e.to_string()))?;
+        let text = String::from_utf8_lossy(&out.stderr);
+        parse_duration(&text).ok_or_else(|| {
+            MediaError::Failed(format!(
+                "{} is not a file ffmpeg can read: {}",
                 file.display(),
                 text.lines().last().unwrap_or("").trim()
             ))
@@ -506,13 +529,33 @@ pub fn footage_path(project: &Path, reference: &str) -> Result<PathBuf, MediaErr
     }
 }
 
-/// One piece of footage sound on the finished timeline.
+/// Where an audio file of the project is: a plain file name directly inside `media/`. The name
+/// itself is checked by `core`, which is where the rule lives.
+pub fn audio_path(project: &Path, reference: &str) -> Result<PathBuf, MediaError> {
+    let name = reference
+        .strip_prefix("media/")
+        .filter(|n| !n.is_empty() && !n.contains(['/', '\\']) && !n.starts_with('.'))
+        .ok_or_else(|| MediaError::Io(format!("{reference:?} is not a media/<file> reference")))?;
+    let path = project.join("media").join(name);
+    match std::fs::symlink_metadata(&path) {
+        Ok(m) if m.is_file() => Ok(path),
+        Ok(_) => Err(MediaError::Io(format!("{reference} is not a plain file"))),
+        Err(e) => Err(MediaError::Io(format!("{reference}: {e}"))),
+    }
+}
+
+/// One piece of sound on the finished timeline.
 #[derive(Debug, Clone)]
 pub struct AudioPiece {
     pub file: PathBuf,
     pub in_ms: u64,
     pub start_ms: u64,
     pub duration_ms: u64,
+    /// The volume it is played at: 1 is as recorded, 0 is silent.
+    pub gain: f32,
+    /// How long it takes to reach its volume, and how long it takes to leave.
+    pub fade_in_ms: u64,
+    pub fade_out_ms: u64,
 }
 
 /// Puts the sound of `pieces` under the picture of `video` (copied, not re-encoded) and writes
@@ -530,12 +573,30 @@ pub fn add_audio(
     for (n, p) in pieces.iter().enumerate() {
         cmd.arg("-i").arg(&p.file);
         filter.push_str(&format!(
-            "[{i}:a]atrim=start={s:.3}:duration={d:.3},asetpts=PTS-STARTPTS,adelay={delay}:all=1[a{n}];",
+            "[{i}:a]atrim=start={s:.3}:duration={d:.3},asetpts=PTS-STARTPTS",
             i = n + 1,
             s = p.in_ms as f64 / 1000.0,
-            d = p.duration_ms as f64 / 1000.0,
-            delay = p.start_ms
+            d = p.duration_ms as f64 / 1000.0
         ));
+        if (p.gain - 1.0).abs() > f32::EPSILON {
+            filter.push_str(&format!(",volume={g:.3}", g = p.gain));
+        }
+        let fade_in = p.fade_in_ms.min(p.duration_ms);
+        if fade_in > 0 {
+            filter.push_str(&format!(
+                ",afade=t=in:st=0:d={d:.3}",
+                d = fade_in as f64 / 1000.0
+            ));
+        }
+        let fade_out = p.fade_out_ms.min(p.duration_ms);
+        if fade_out > 0 {
+            filter.push_str(&format!(
+                ",afade=t=out:st={s:.3}:d={d:.3}",
+                s = (p.duration_ms - fade_out) as f64 / 1000.0,
+                d = fade_out as f64 / 1000.0
+            ));
+        }
+        filter.push_str(&format!(",adelay={delay}:all=1[a{n}];", delay = p.start_ms));
     }
     let labels: String = (0..pieces.len()).map(|n| format!("[a{n}]")).collect();
     filter.push_str(&format!(

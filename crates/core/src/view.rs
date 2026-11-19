@@ -197,9 +197,21 @@ pub struct VideoRow {
     pub frame_count: u64,
     pub clips: Vec<ClipRow>,
     pub overlays: Vec<crate::video::Overlay>,
+    /// The sound under the picture (none for a silent video).
+    pub audio: Option<AudioRow>,
     /// What happens, in order, in words: the clips with their motion and how each one arrives,
     /// then the overlays by start time.
     pub story: Vec<String>,
+}
+
+/// The sound track of a video.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct AudioRow {
+    pub file: String,
+    pub start_ms: u32,
+    pub gain: f32,
+    pub fade_in_ms: u32,
+    pub fade_out_ms: u32,
 }
 
 fn secs(ms: u64) -> String {
@@ -271,6 +283,22 @@ fn story_of(doc: &Document, v: &crate::video::Video) -> Vec<String> {
             secs(o.start_ms + u64::from(o.duration_ms))
         ));
     }
+    if let Some(a) = &v.audio {
+        let fades = match (a.fade_in_ms, a.fade_out_ms) {
+            (0, 0) => String::new(),
+            (i, o) => format!(
+                ", fading in over {} and out over {}",
+                secs(u64::from(i)),
+                secs(u64::from(o))
+            ),
+        };
+        out.push(format!(
+            "sound: {} from {} at volume {:.2}{fades}",
+            a.file,
+            secs(u64::from(a.start_ms)),
+            a.gain
+        ));
+    }
     out
 }
 
@@ -319,6 +347,13 @@ pub fn videos(doc: &Document) -> Vec<VideoRow> {
                     })
                     .collect(),
                 overlays: v.overlays.clone(),
+                audio: v.audio.as_ref().map(|a| AudioRow {
+                    file: a.file.clone(),
+                    start_ms: a.start_ms,
+                    gain: a.gain,
+                    fade_in_ms: a.fade_in_ms,
+                    fade_out_ms: a.fade_out_ms,
+                }),
                 story: story_of(doc, v),
             }
         })

@@ -93,10 +93,18 @@ installed on this computer, such as a speech model server
 
 Allowed destinations: the user's configured model endpoint or agent, sites the user chose to fetch an asset from (a plain `GET`, no cookies), and the update channel if enabled. No telemetry. Documented in [AGENTS.md invariant 1](../../AGENTS.md).
 
+**Freesound** is one of those sites, and the only one an agent may reach on its own: the user adds a free API token in the Connect tab to let the agent find music and sound effects for a video ([Video Editing](./video-editing.md#finding-sounds-freesound)). What that means:
+
+- The token is a credential the user types. It is stored in the per-user config folder as `freesound/token` (mode `0600` on Unix), never in a project, an export, a log or an error message, and never read by anything but the Freesound client.
+- It is sent to **freesound.org only**, in the query string of the API's own requests, where the API documents it (`/apiv2/search/text/`, `/apiv2/sounds/<id>/`). A preview is fetched from the same site (freesound.org or a host under it); a redirect that leads anywhere else is refused, so the token cannot be replayed to a third party.
+- The client (`crates/agent/src/http.rs`) is a small HTTP/1.1 client: one `GET`, no cookies, no cache, a connect and a read timeout, a cap on the answer's size, and the redirect rule above. The secure channel is `rustls` with the root certificates the operating system trusts.
+- What comes back is copied into the project's `media/` folder and nothing else: no sound, no metadata and no token is sent anywhere else, and the app never uploads anything.
+
 ## Credentials
 
 - In-app chat uses agents the user has signed in to; we do not read their credentials or tokens. The chat starts only the command the user typed or picked (no shell, never from a project file or an agent), gives the agent the loopback MCP URL and its bearer token, and serves it no file or terminal capability. Note what the agent can do on its own: it runs with the user's rights in the project folder and asks permission through its own prompts, which the editor shows; the editor cannot sandbox it.
 - A direct provider mode (BYOK), if built, stores keys only in the OS secure store (Keychain, Credential Manager, Secret Service), reads them only in Rust, and never logs them or writes them to projects, exports, fixtures or error messages.
+- The Freesound token is the one credential the user types into the app today. It is a plain file in the config folder (not the OS secure store: the app has no keychain dependency yet), readable by the user only, and it goes to freesound.org and nowhere else. The user can remove it from the Connect tab at any time.
 
 ## Updates and supply chain
 

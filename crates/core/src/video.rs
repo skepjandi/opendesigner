@@ -152,6 +152,30 @@ pub struct Footage {
     pub in_ms: u64,
 }
 
+/// The sound under a video's picture: one audio file from the project's `media/` folder, delayed
+/// to where it starts, at a volume, with optional fades in and out.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AudioTrack {
+    /// `media/<name>.mp3|wav|m4a|aac|ogg`
+    pub file: String,
+    /// When it starts, counted from the beginning of the video.
+    #[serde(default)]
+    pub start_ms: u32,
+    /// The volume: 1 is as recorded, 0 is silent, 2 is twice as loud.
+    #[serde(default = "one")]
+    pub gain: f32,
+    /// How long it takes to reach its volume, and how long it takes to leave.
+    #[serde(default)]
+    pub fade_in_ms: u32,
+    #[serde(default)]
+    pub fade_out_ms: u32,
+}
+
+fn one() -> f32 {
+    1.0
+}
+
 /// What a clip shows: a design frame, or footage (exactly one).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
@@ -164,6 +188,10 @@ pub struct ClipSource {
 
 pub const MAX_OVERLAYS: usize = 200;
 pub const MAX_IN_MS: u64 = 24 * 60 * 60 * 1000;
+/// How late a sound track may start, and how long its fades may be.
+pub const MAX_AUDIO_MS: u32 = 600_000;
+/// The loudest a sound track may be played.
+pub const MAX_AUDIO_GAIN: f32 = 2.0;
 
 /// A design frame drawn over the whole video for a while, fading in and out: a title, a lower
 /// third, a call-out. A frame with no fill is transparent, so only what is drawn on it shows.
@@ -215,6 +243,9 @@ pub struct Video {
     pub clips: Vec<Clip>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub overlays: Vec<Overlay>,
+    /// The sound under the picture (none for a silent video).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio: Option<AudioTrack>,
 }
 
 /// Where a clip sits on the timeline.
@@ -284,6 +315,9 @@ impl Video {
         }
         for o in &self.overlays {
             check_overlay(o)?;
+        }
+        if let Some(a) = &self.audio {
+            check_audio(a)?;
         }
         for clip in &self.clips {
             check_source(&ClipSource {
@@ -400,13 +434,48 @@ pub fn check_motion(m: &Motion) -> Result<(), OpError> {
     Ok(())
 }
 
+/// A sound track names a file in `media/`, starts inside the video and is played at a volume
+/// between silence and twice the recording.
+pub fn check_audio(a: &AudioTrack) -> Result<(), OpError> {
+    crate::media::audio_name(&a.file)?;
+    if a.start_ms > MAX_AUDIO_MS {
+        return Err(OpError::OutOfBounds {
+            what: "audio start_ms",
+            detail: format!("{} is later than {} ms", a.start_ms, MAX_AUDIO_MS),
+        });
+    }
+    for (what, ms) in [
+        ("audio fade_in_ms", a.fade_in_ms),
+        ("audio fade_out_ms", a.fade_out_ms),
+    ] {
+        if ms > MAX_AUDIO_MS {
+            return Err(OpError::OutOfBounds {
+                what,
+                detail: format!("{ms} is longer than {MAX_AUDIO_MS} ms"),
+            });
+        }
+    }
+    if !a.gain.is_finite() || !(0.0..=MAX_AUDIO_GAIN).contains(&a.gain) {
+        return Err(OpError::OutOfBounds {
+            what: "audio gain",
+            detail: format!("{} is not a number from 0 to {MAX_AUDIO_GAIN}", a.gain),
+        });
+    }
+    Ok(())
+}
+
 /// One settable property of a video. Serialized as `{"name": "fps", "value": 30}`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "name", content = "value", rename_all = "snake_case")]
 pub enum VideoProperty {
     Name(String),
     Fps(u32),
-    Size { width: u32, height: u32 },
+    Size {
+        width: u32,
+        height: u32,
+    },
+    /// The sound under the picture (`null` for a silent video).
+    Audio(Option<AudioTrack>),
 }
 
 /// One settable property of a clip. Serialized as `{"name": "duration_ms", "value": 3000}`.
@@ -547,6 +616,7 @@ pub(crate) fn apply(
                 height: *height,
                 clips: Vec::new(),
                 overlays: Vec::new(),
+                audio: None,
             };
             video.check_fields()?;
             let id = video.id.clone();
@@ -617,6 +687,13 @@ pub(crate) fn apply(
                     };
                     (video.width, video.height) = (*width, *height);
                     (old, prop.clone())
+                }
+                VideoProperty::Audio(audio) => {
+                    if let Some(a) = audio {
+                        check_audio(a)?;
+                    }
+                    let old = std::mem::replace(&mut video.audio, audio.clone());
+                    (VideoProperty::Audio(old), prop.clone())
                 }
             };
             if let Err(e) = video.check_fields() {

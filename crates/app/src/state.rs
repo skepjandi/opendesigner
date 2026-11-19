@@ -1663,6 +1663,33 @@ impl EditorState {
         od_agent::device::set_enabled_in(&dir, on).map_err(|e| e.to_string())
     }
 
+    /// Whether the user has added a Freesound token. The token itself never reaches the UI: it
+    /// is a credential, and the agent only needs to know that there is one.
+    pub fn freesound_token_set() -> bool {
+        od_agent::freesound::has_token()
+    }
+
+    /// Stores the Freesound token the user pasted. Only the user can do this.
+    pub fn set_freesound_token(value: &str) -> Res<()> {
+        od_agent::freesound::save_token(value).map_err(|e| e.to_string())
+    }
+
+    /// Forgets the Freesound token.
+    pub fn clear_freesound_token() -> Res<()> {
+        od_agent::freesound::clear_token().map_err(|e| e.to_string())
+    }
+
+    /// Takes the sound track off a video (the user does this from the Video tab). It is an
+    /// operation, so it is attributed, undoable and checkpointed like any other edit.
+    pub fn remove_video_audio(&mut self, video: &str) -> Res<()> {
+        let id = parse_id(video)?;
+        self.apply_user(&[Operation::SetVideo {
+            id,
+            prop: od_core::VideoProperty::Audio(None),
+        }])?;
+        Ok(())
+    }
+
     pub fn skill_status(&self) -> Res<Value> {
         let home = skill::home_dir().map_err(|e| e.to_string())?;
         skill_status_in(&home)
@@ -3252,5 +3279,76 @@ mod tests {
             "off"
         );
         assert!(s.chat_send("hello?").is_err());
+    }
+
+    #[test]
+    fn the_freesound_token_is_stored_in_the_config_folder_and_can_be_removed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("freesound/token");
+        assert!(!od_agent::freesound::has_token_in(&path));
+        assert!(od_agent::freesound::token_in(&path).is_err());
+        od_agent::freesound::save_token_in(&path, " a-token ").unwrap();
+        assert!(od_agent::freesound::has_token_in(&path));
+        assert_eq!(od_agent::freesound::token_in(&path).unwrap(), "a-token");
+        od_agent::freesound::clear_token_in(&path).unwrap();
+        assert!(!od_agent::freesound::has_token_in(&path));
+        // an empty token is not a token
+        assert!(od_agent::freesound::save_token_in(&path, "  ").is_err());
+    }
+
+    #[test]
+    fn the_user_can_take_the_sound_track_off_a_video() {
+        let (mut s, _t) = state();
+        let video = s
+            .with_ws(|ws| {
+                let receipt = ws
+                    .session
+                    .apply(
+                        Actor::User,
+                        None,
+                        &[Operation::CreateVideo {
+                            name: "Teaser".into(),
+                            fps: 30,
+                            width: 400,
+                            height: 300,
+                        }],
+                    )
+                    .map_err(|e| e.to_string())?;
+                Ok(receipt.created[0].clone())
+            })
+            .unwrap();
+        s.with_ws(|ws| {
+            ws.session
+                .apply(
+                    Actor::User,
+                    None,
+                    &[Operation::SetVideo {
+                        id: video.clone(),
+                        prop: od_core::VideoProperty::Audio(Some(od_core::AudioTrack {
+                            file: "media/song.mp3".into(),
+                            start_ms: 0,
+                            gain: 1.0,
+                            fade_in_ms: 0,
+                            fade_out_ms: 0,
+                        })),
+                    }],
+                )
+                .map_err(|e| e.to_string())
+        })
+        .unwrap();
+        let videos: Value = serde_json::from_str(&s.snapshot().videos).unwrap();
+        assert_eq!(videos[0]["audio"]["file"], "media/song.mp3");
+
+        s.remove_video_audio(&video.to_string()).unwrap();
+        let videos: Value = serde_json::from_str(&s.snapshot().videos).unwrap();
+        assert!(
+            videos[0]["audio"].is_null(),
+            "the sound track should be gone"
+        );
+
+        // it is an undoable edit like any other
+        s.undo().unwrap();
+        let videos: Value = serde_json::from_str(&s.snapshot().videos).unwrap();
+        assert_eq!(videos[0]["audio"]["file"], "media/song.mp3");
     }
 }

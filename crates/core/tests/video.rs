@@ -2,8 +2,8 @@
 
 use od_core::video::{self, MAX_CLIP_MS};
 use od_core::{
-    Actor, ClipProperty, Document, Motion, NewNode, NodeId, NodeKind, OpError, Operation, Session,
-    Transition, TransitionKind, VideoProperty, project,
+    Actor, AudioTrack, ClipProperty, Document, Motion, NewNode, NodeId, NodeKind, OpError,
+    Operation, Session, Transition, TransitionKind, VideoProperty, project,
 };
 
 fn frame(s: &mut Session, root: &NodeId, name: &str) -> NodeId {
@@ -561,4 +561,131 @@ fn overlays_fade_in_and_out_hold_a_frame_and_undo_cleanly() {
         ),
         Err(OpError::InternalOnly(_))
     ));
+}
+
+fn audio(file: &str) -> AudioTrack {
+    AudioTrack {
+        file: file.into(),
+        start_ms: 0,
+        gain: 1.0,
+        fade_in_ms: 0,
+        fade_out_ms: 0,
+    }
+}
+
+#[test]
+fn a_video_can_have_one_sound_track_and_undoing_takes_it_away() {
+    let (mut s, v, a, _b) = fixture();
+    add_clip(&mut s, &v, &a, 2000);
+    let track = AudioTrack {
+        file: "media/song.mp3".into(),
+        start_ms: 500,
+        gain: 0.8,
+        fade_in_ms: 200,
+        fade_out_ms: 400,
+    };
+    s.apply(
+        Actor::User,
+        None,
+        &[Operation::SetVideo {
+            id: v.clone(),
+            prop: VideoProperty::Audio(Some(track.clone())),
+        }],
+    )
+    .unwrap();
+    let video = s.document().video(&v).unwrap();
+    assert_eq!(video.audio.as_ref(), Some(&track));
+
+    // it is one undoable step
+    s.undo(Actor::User).unwrap();
+    assert!(s.document().video(&v).unwrap().audio.is_none());
+    s.redo(Actor::User).unwrap();
+    assert_eq!(s.document().video(&v).unwrap().audio.as_ref(), Some(&track));
+
+    // taking it away is an edit too
+    s.apply(
+        Actor::User,
+        None,
+        &[Operation::SetVideo {
+            id: v.clone(),
+            prop: VideoProperty::Audio(None),
+        }],
+    )
+    .unwrap();
+    assert!(s.document().video(&v).unwrap().audio.is_none());
+    s.undo(Actor::User).unwrap();
+    assert_eq!(s.document().video(&v).unwrap().audio.as_ref(), Some(&track));
+}
+
+#[test]
+fn a_sound_track_names_a_media_file_and_stays_within_its_bounds() {
+    let (mut s, v, a, _b) = fixture();
+    add_clip(&mut s, &v, &a, 2000);
+    let mut set = |track: AudioTrack| {
+        s.apply(
+            Actor::User,
+            None,
+            &[Operation::SetVideo {
+                id: v.clone(),
+                prop: VideoProperty::Audio(Some(track)),
+            }],
+        )
+    };
+    for bad in [
+        "song.mp3",
+        "media/../song.mp3",
+        "media/song.txt",
+        "media/song.mp3/x.mp3",
+    ] {
+        assert!(set(audio(bad)).is_err(), "{bad} should be refused");
+    }
+    assert!(set(audio("media/song.mp3")).is_ok());
+    for extension in ["wav", "m4a", "aac", "ogg"] {
+        assert!(
+            set(audio(&format!("media/song.{extension}"))).is_ok(),
+            "{extension} should be allowed"
+        );
+    }
+    let mut loud = audio("media/song.mp3");
+    loud.gain = 2.5;
+    assert!(
+        set(loud.clone()).is_err(),
+        "a gain above two should be refused"
+    );
+    loud.gain = -1.0;
+    assert!(set(loud).is_err(), "a negative gain should be refused");
+    let mut late = audio("media/song.mp3");
+    late.start_ms = 600_001;
+    assert!(
+        set(late).is_err(),
+        "a start beyond ten minutes should be refused"
+    );
+    let mut faded = audio("media/song.mp3");
+    faded.fade_in_ms = 600_001;
+    assert!(
+        set(faded).is_err(),
+        "a fade beyond ten minutes should be refused"
+    );
+}
+
+#[test]
+fn a_video_with_a_sound_track_survives_saving_and_loading() {
+    let (mut s, v, a, _b) = fixture();
+    add_clip(&mut s, &v, &a, 2000);
+    s.apply(
+        Actor::User,
+        None,
+        &[Operation::SetVideo {
+            id: v.clone(),
+            prop: VideoProperty::Audio(Some(audio("media/song.mp3"))),
+        }],
+    )
+    .unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    project::save(&dir.path().join("p.od"), &s).unwrap();
+    let loaded = od_core::project::load(&dir.path().join("p.od")).unwrap();
+    assert_eq!(
+        loaded.document().video(&v).unwrap().audio,
+        Some(audio("media/song.mp3"))
+    );
 }
