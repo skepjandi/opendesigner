@@ -32,6 +32,21 @@ Item {
     }
     readonly property var unrendered: editor.unrendered ? JSON.parse(editor.unrendered) : []
     readonly property var overflows: editor.overflows ? JSON.parse(editor.overflows) : []
+    JsonModel { id: unrenderedModel }
+    JsonModel { id: overflowsModel }
+    JsonModel { id: changedModel }
+    JsonModel { id: notesModel }
+    onUnrenderedChanged: unrenderedModel.sync(unrendered)
+    onOverflowsChanged: overflowsModel.sync(overflows)
+    onChangedRectsChanged: changedModel.sync(changedRects)
+    onNotesChanged: notesModel.sync(notes)
+    Component.onCompleted: {
+        if (editor.canvas !== "") back.source = editor.canvas
+        unrenderedModel.sync(unrendered)
+        overflowsModel.sync(overflows)
+        changedModel.sync(changedRects)
+        notesModel.sync(notes)
+    }
     readonly property real renderScale: zoom * Screen.devicePixelRatio
 
     function toFrame(vx, vy) { return Qt.point((vx - panX) / zoom, (vy - panY) / zoom) }
@@ -51,18 +66,31 @@ Item {
     }
     function zoomCenter(factor) { zoomAt(factor, width / 2, height / 2) }
 
-    onFwChanged: fitTimer.restart()
-    onFhChanged: fitTimer.restart()
-    onWidthChanged: if (!userMoved) fitTimer.restart()
+    // The view fits when a frame is opened (and while the user has not moved it, when the window
+    // resizes); an edit that changes the frame's size must not move the view under the user.
     property bool userMoved: false
-    Timer { id: fitTimer; interval: 30; onTriggered: { root.userMoved = false; root.fit() } }
+    property string fittedFrame: ""
+    onFwChanged: fitIfNewFrame()
+    onFhChanged: fitIfNewFrame()
+    onWidthChanged: if (!userMoved) fitTimer.restart()
+    function fitIfNewFrame() {
+        if (fw > 0 && fh > 0 && editor.activeFrame !== fittedFrame) {
+            fittedFrame = editor.activeFrame
+            userMoved = false
+            fitTimer.restart()
+        }
+    }
+    Connections { target: root.editor; function onActiveFrameChanged() { root.fitIfNewFrame() } }
+    Timer { id: fitTimer; interval: 30; onTriggered: root.fit() }
 
     // ask the core to redraw once the picture has settled
+    // A zoom waits until it settles; edits redraw at most every 90 ms, so a burst of an agent's
+    // changes shows as it goes rather than only after it ends.
     Timer { id: renderTimer; interval: 90; onTriggered: root.editor.renderCanvas(root.renderScale) }
     onRenderScaleChanged: renderTimer.restart()
     Connections {
         target: root.editor
-        function onRevisionChanged() { renderTimer.restart() }
+        function onRevisionChanged() { if (!renderTimer.running) renderTimer.start() }
         function onActiveFrameChanged() { renderTimer.restart() }
     }
 
@@ -84,26 +112,47 @@ Item {
         border.width: 1
         border.color: Theme.border
     }
-    Image {
-        id: picture
+    // The picture is drawn by two images that take turns. A new drawing loads into the one that is
+    // hidden and replaces the other only when it is ready, so the canvas is never blank or half
+    // loaded while it updates (an image given a new source drops the old one first).
+    property int shown: 0
+    readonly property var buffers: [bufferA, bufferB]
+    readonly property Image front: buffers[shown]
+    readonly property Image back: buffers[1 - shown]
+    readonly property bool pictureReady: front.status === Image.Ready
+    function swapWhenReady(buffer) {
+        if (buffer === back && buffer.status === Image.Ready) shown = 1 - shown
+    }
+    Connections {
+        target: root.editor
+        function onCanvasChanged() {
+            if (root.editor.canvas === "") return
+            root.back.source = root.editor.canvas
+            root.swapWhenReady(root.back)
+        }
+    }
+    component Buffer: Image {
         x: root.panX
         y: root.panY
         width: root.fw * root.zoom
         height: root.fh * root.zoom
-        source: root.editor.canvas
         cache: false
         smooth: true
         mipmap: true
-        asynchronous: false
-        visible: root.fw > 0
+        asynchronous: true
+        visible: root.fw > 0 && root.front === this
+        onStatusChanged: root.swapWhenReady(this)
     }
+    Buffer { id: bufferA }
+    Buffer { id: bufferB }
 
     // images the renderer cannot draw (no file, unreadable file) are marked here with the reason
     Repeater {
-        model: root.unrendered
+        model: unrenderedModel
         delegate: Item {
             id: ph
-            required property var modelData
+            required property string json
+            readonly property var modelData: JSON.parse(json)
             x: root.panX + modelData.x * root.zoom
             y: root.panY + modelData.y * root.zoom
             width: modelData.width * root.zoom
@@ -128,10 +177,11 @@ Item {
 
     // text that runs past its box: the box is outlined and says by how much
     Repeater {
-        model: root.overflows
+        model: overflowsModel
         delegate: Item {
             id: ov
-            required property var modelData
+            required property string json
+            readonly property var modelData: JSON.parse(json)
             x: root.panX + modelData.x * root.zoom
             y: root.panY + modelData.y * root.zoom
             width: modelData.width * root.zoom
@@ -155,9 +205,10 @@ Item {
 
     // what agents changed
     Repeater {
-        model: root.changedRects
+        model: changedModel
         delegate: Item {
-            required property var modelData
+            required property string json
+            readonly property var modelData: JSON.parse(json)
             x: root.panX + modelData.x * root.zoom
             y: root.panY + modelData.y * root.zoom
             width: modelData.width * root.zoom
@@ -176,10 +227,11 @@ Item {
 
     // pinned notes
     Repeater {
-        model: root.notes
+        model: notesModel
         delegate: Item {
             id: pin
-            required property var modelData
+            required property string json
+            readonly property var modelData: JSON.parse(json)
             x: root.panX + modelData.bounds.x * root.zoom
             y: root.panY + modelData.bounds.y * root.zoom
             width: modelData.bounds.width * root.zoom

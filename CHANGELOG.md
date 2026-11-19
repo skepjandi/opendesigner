@@ -8,6 +8,18 @@ All notable changes to OpenDesigner are documented here.
 
 ## 2026-11-19
 
+### fix(ui): the canvas and the panels update without flashing or jumping
+
+**Area:** `fix(ui)`
+
+**Problem:** While an agent edited (or the user did), the canvas flashed, the layers list, chat and notes were rebuilt on every change (losing scroll position and flickering), and the view jumped when an edit changed the frame's size.
+
+**Cause and fix:** (1) A QML `Image` given a new `source` drops its old picture while the new one loads (a `data:` URL always loads asynchronously), so the canvas went blank for a moment each redraw. The picture is now drawn by two images that take turns: the new drawing loads in the hidden one and replaces the other only when ready. (2) Every list was a fresh JavaScript array each time its JSON changed, which rebuilds every delegate. `JsonModel` (new) syncs an array into a `ListModel` and touches only the rows that changed, moved, appeared or went; layers, notes, activity, restore points, chat lines, plan, permission buttons, frame tabs and the canvas overlays use it. (3) The view now fits only when a different frame is opened, not when a frame is resized, and redraws are throttled (at most every 90 ms during a burst of changes) instead of debounced until the burst ends.
+
+**Verified:** the window session now checks that a changed list builds only its new rows (changed and moved rows keep their delegates) and that the picture in front stays ready while a new one loads (three redraws); app tests pass on macOS. **Not verified:** by eye (no screenshots are used as evidence here); the user's report is the reference, so please say if any flash remains.
+
+**PR:** n/a
+
 ### feat(video): videos of design frames, an ffmpeg export, Apple app-preview rules
 
 **Area:** `feat(core)`, `feat(render)`, `feat(media)`, `feat(mcp)`, `feat(cli)`, `feat(store)`

@@ -10,6 +10,12 @@ Rectangle {
     signal toast(string text)
     color: Theme.panel
 
+    JsonModel { id: notesModel }
+    JsonModel { id: checkpointsModel }
+    JsonModel { id: logModel }
+    onNotesChanged: notesModel.sync(notes)
+    onCheckpointsChanged: checkpointsModel.sync(checkpoints.slice().reverse().slice(0, 6))
+    onLogChanged: logModel.sync(log)
     readonly property var notes: editor.annotations ? JSON.parse(editor.annotations) : []
     readonly property var log: editor.log ? JSON.parse(editor.log) : []
     readonly property var checkpoints: editor.checkpoints ? JSON.parse(editor.checkpoints) : []
@@ -20,7 +26,12 @@ Rectangle {
     property alias tab: bar.currentIndex
 
     function refreshSkill() { skillRows = JSON.parse(editor.skillStatus()) }
-    Component.onCompleted: refreshSkill()
+    Component.onCompleted: {
+        refreshSkill()
+        notesModel.sync(notes)
+        checkpointsModel.sync(checkpoints.slice().reverse().slice(0, 6))
+        logModel.sync(log)
+    }
 
     function copy(text) {
         clipboard.text = text
@@ -81,13 +92,14 @@ Rectangle {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     clip: true
-                    model: root.notes
+                    model: notesModel
                     spacing: 6
                     topMargin: 8
                     ScrollBar.vertical: ScrollBar {}
                     delegate: Rectangle {
                         id: card
-                        required property var modelData
+                        required property string json
+                        readonly property var modelData: JSON.parse(json)
                         x: 8
                         width: ListView.view.width - 16
                         height: col.implicitHeight + 16
@@ -187,9 +199,10 @@ Rectangle {
                     Layout.leftMargin: 10
                 }
                 Repeater {
-                    model: root.checkpoints.slice().reverse().slice(0, 6)
+                    model: checkpointsModel
                     delegate: RowLayout {
-                        required property var modelData
+                        required property string json
+                        readonly property var modelData: JSON.parse(json)
                         Layout.fillWidth: true
                         Layout.leftMargin: 10
                         Layout.rightMargin: 10
@@ -216,10 +229,11 @@ Rectangle {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     clip: true
-                    model: root.log
+                    model: logModel
                     ScrollBar.vertical: ScrollBar {}
                     delegate: Rectangle {
-                        required property var modelData
+                        required property string json
+                        readonly property var modelData: JSON.parse(json)
                         width: ListView.view.width
                         height: 34
                         color: "transparent"
