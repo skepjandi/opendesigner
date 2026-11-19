@@ -57,6 +57,10 @@ pub struct Chat {
     first_prompt: bool,
     /// Sent as soon as the agent is ready (the task the user typed on the start screen).
     waiting_prompt: Option<String>,
+    /// Messages typed while the agent was working; each goes out when the turn ends.
+    queued: std::collections::VecDeque<String>,
+    /// Answer the agent's permission requests with "allow" without asking.
+    auto_allow: bool,
 }
 
 /// A coding agent the chat knows how to start.
@@ -135,6 +139,20 @@ pub fn presets_json() -> String {
     serde_json::Value::Array(rows).to_string()
 }
 
+/// The option to pick for "allow": always, else once, else the first that is not a rejection.
+fn best_allow(options: Option<&Vec<Value>>) -> Option<String> {
+    let options = options?;
+    let pick = |kind: &str| options.iter().find(|o| o["kind"] == kind);
+    pick("allow_always")
+        .or_else(|| pick("allow_once"))
+        .or_else(|| {
+            options
+                .iter()
+                .find(|o| !o["kind"].as_str().unwrap_or("").starts_with("reject"))
+        })
+        .and_then(|o| o["id"].as_str().map(str::to_string))
+}
+
 /// Splits a command line into program and arguments: spaces separate, single or double quotes
 /// group. No shell is involved, so nothing is expanded or piped.
 pub fn split_command(line: &str) -> Result<(String, Vec<String>), String> {
@@ -189,6 +207,8 @@ impl Chat {
             plan: Vec::new(),
             first_prompt: true,
             waiting_prompt: None,
+            queued: Default::default(),
+            auto_allow: false,
         })
     }
 
@@ -211,6 +231,7 @@ impl Chat {
         self.plan.clear();
         self.first_prompt = true;
         self.waiting_prompt = None;
+        self.queued.clear();
         self.status = Status::Starting;
         let (tx, mut rx) = mpsc::unbounded_channel::<ChatEvent>();
         self.events = Some(tx.clone());
@@ -239,14 +260,45 @@ impl Chat {
         if text.is_empty() {
             return Ok(());
         }
+        if self.status == Status::Busy {
+            // typed while the agent works: it goes out when the turn ends
+            self.queued.push_back(text.to_string());
+            self.push(json!({"role": "user", "text": text, "queued": true}));
+            return Ok(());
+        }
+        self.send_now(text)?;
+        Ok(())
+    }
+
+    /// Sends the next queued message if the agent is free.
+    fn send_queued(&mut self) {
+        if self.status != Status::Ready {
+            return;
+        }
+        let Some(text) = self.queued.pop_front() else {
+            return;
+        };
+        // it was shown where it was typed; show it again where the agent now answers it
+        if let Some(at) = self.messages.iter().position(|m| m["queued"] == true) {
+            self.messages.remove(at);
+        }
+        if let Err(e) = self.send_now(&text) {
+            self.push(json!({"role": "error", "text": e}));
+        }
+    }
+
+    fn send_now(&mut self, text: &str) -> Result<(), String> {
         let (session, events) = match (&self.session, &self.events) {
             (Some(s), Some(e)) if self.status == Status::Ready => (Arc::clone(s), e.clone()),
-            _ if self.status == Status::Busy => {
-                return Err("the agent is still working; cancel it or wait".into());
-            }
             _ => return Err("the chat is not connected".into()),
         };
-        self.push(json!({"role": "user", "text": text}));
+        if !self
+            .messages
+            .iter()
+            .any(|m| m["queued"] == true && m["text"] == text)
+        {
+            self.push(json!({"role": "user", "text": text}));
+        }
         self.plan.clear();
         let prompt = if std::mem::take(&mut self.first_prompt) {
             format!("{PREAMBLE}{text}")
@@ -267,9 +319,29 @@ impl Chat {
         Ok(())
     }
 
-    pub fn cancel(&self) {
+    /// Stops the agent's turn; messages typed meanwhile are dropped.
+    pub fn cancel(&mut self) {
+        self.queued.clear();
+        self.messages.retain(|m| m["queued"] != true);
         if let Some(s) = &self.session {
             s.cancel();
+        }
+    }
+
+    /// Turns "always allow" on or off. Turning it on also answers a request that is waiting.
+    pub fn set_auto_allow(&mut self, on: bool) {
+        self.auto_allow = on;
+        if on {
+            if let Some(p) = self.permission.clone() {
+                let request = p["request"].as_str().and_then(|r| r.parse::<u64>().ok());
+                let option = best_allow(p["options"].as_array());
+                if let (Some(request), Some(option), Some(session)) =
+                    (request, option, self.session.as_ref())
+                {
+                    session.answer_permission(request, Some(&option));
+                    self.permission = None;
+                }
+            }
         }
     }
 
@@ -341,6 +413,15 @@ impl Chat {
                     .iter()
                     .map(|o| json!({"id": o.id, "name": o.name, "kind": o.kind}))
                     .collect();
+                if self.auto_allow {
+                    if let (Some(option), Some(session)) =
+                        (best_allow(Some(&options)), self.session.as_ref())
+                    {
+                        session.answer_permission(request, Some(&option));
+                        self.push(json!({"role": "note", "text": format!("Allowed: {title}")}));
+                        return;
+                    }
+                }
                 self.permission = Some(json!({
                     "request": request.to_string(), "title": title, "options": options,
                 }));
@@ -353,6 +434,7 @@ impl Chat {
                 if reason != "end_turn" {
                     self.push(json!({"role": "note", "text": format!("Stopped: {reason}")}));
                 }
+                self.send_queued();
             }
             ChatEvent::Failed(message) => {
                 if self.status == Status::Busy {
@@ -360,6 +442,7 @@ impl Chat {
                 }
                 self.permission = None;
                 self.push(json!({"role": "error", "text": message}));
+                self.send_queued();
             }
             ChatEvent::Exited(why) => {
                 self.session = None;
@@ -385,7 +468,7 @@ impl Chat {
 
     /// What the panel shows before any chat was started.
     pub fn idle_view() -> Value {
-        json!({"status": "off", "messages": [], "permission": null, "plan": []})
+        json!({"status": "off", "messages": [], "permission": null, "plan": [], "auto_allow": false, "queued": 0})
     }
 
     pub fn view(&self) -> Value {
@@ -394,6 +477,8 @@ impl Chat {
             "messages": self.messages,
             "permission": self.permission,
             "plan": self.plan,
+            "auto_allow": self.auto_allow,
+            "queued": self.queued.len(),
         })
     }
 }
@@ -517,21 +602,51 @@ mod tests {
         assert_eq!(v["permission"]["request"], "7");
         assert_eq!(v["permission"]["options"][0]["id"], "yes");
         assert!(
-            c.send("more").is_err(),
-            "no new message while the agent works"
+            c.send("more").is_ok(),
+            "typing while the agent works queues the message"
         );
+        assert_eq!(c.view()["queued"], 1);
 
         c.apply(ChatInput::Event(ChatEvent::Failed("rate limited".into())));
         let v = c.view();
         assert_eq!(v["status"], "ready");
         assert!(v["permission"].is_null());
-        assert_eq!(v["messages"][0]["role"], "error");
+        assert!(
+            v["messages"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|m| m["role"] == "error")
+        );
 
         c.apply(ChatInput::Event(ChatEvent::Exited("exit status: 1".into())));
         assert_eq!(c.view()["status"], "off");
         assert!(
             c.send("hello?").is_err(),
             "not connected after the agent exits"
+        );
+    }
+
+    #[test]
+    fn best_allow_prefers_always_then_once_and_never_a_rejection() {
+        let opts = |kinds: &[&str]| -> Vec<Value> {
+            kinds
+                .iter()
+                .enumerate()
+                .map(|(i, k)| json!({"id": format!("o{i}"), "kind": k}))
+                .collect()
+        };
+        assert_eq!(
+            best_allow(Some(&opts(&["reject_once", "allow_once", "allow_always"]))).as_deref(),
+            Some("o2")
+        );
+        assert_eq!(
+            best_allow(Some(&opts(&["reject_once", "allow_once"]))).as_deref(),
+            Some("o1")
+        );
+        assert_eq!(
+            best_allow(Some(&opts(&["reject_once", "reject_always"]))),
+            None
         );
     }
 

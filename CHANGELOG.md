@@ -8,6 +8,16 @@ All notable changes to OpenDesigner are documented here.
 
 ## 2026-11-19
 
+### fix(app): chat while the agent works, always allow, scrollable panels, and a 20x faster export in dev builds
+
+**Area:** `fix(app)`, `perf(render)`, `build(repo)`
+
+**Change:** (1) You can type while the agent is working: the message is queued (shown "queued"), sent when the turn ends, and dropped if you press Cancel. (2) "Always allow" in the chat answers the agent's permission questions with Allow (always, else once; never a rejection) and notes each one. (3) The Connect and Inspector panels always leave room below their last control (a layout cannot know the height of wrapped text at its final width), and the start panel scrolls. (4) Export: a debug build of the pixel code was about 30 times slower than release, so a 5.4 s 886x1920 video took 3.5 minutes; the rendering and media crates and all dependencies are now optimized in dev builds, and while nothing moves (no zoom, transition or fade) the export draws a frame once and re-sends it. Same video: 11 s in a dev build.
+
+**Verified:** chat unit and scripted-agent tests (queue order, no duplicate, always-allow answers waiting and later questions, `best_allow`), a render test for the held-frame signature, the 5.4 s export timed before and after, window session. **Not verified:** the panels by eye (only reasoned: layouts underestimate wrapped text; the extra room is a safety margin, not a measured fix), footage exports (every frame differs there, so only the build speed helps).
+
+**PR:** n/a
+
 ### feat(app): workspaces: several deliverables side by side in one repository
 
 **Area:** `feat(mcp)`, `feat(app)`

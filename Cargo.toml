@@ -37,3 +37,18 @@ expect_used = "deny"
 panic = "deny"
 dbg_macro = "deny"
 todo = "deny"
+
+# Rendering and encoding video is pixel work: a debug build of it is 30 times slower, which made
+# a short export take minutes. Dependencies and the rendering crates are optimized even in
+# development builds (the editor's own code still builds fast and debuggable).
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.dev.package.opendesigner-render]
+opt-level = 3
+
+[profile.dev.package.opendesigner-media]
+opt-level = 3
+
+[profile.dev.package.opendesigner-core]
+opt-level = 2

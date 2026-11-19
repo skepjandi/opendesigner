@@ -84,6 +84,17 @@ Item {
                 BusyIndicator { id: busy; running: visible; visible: root.chat.status === "busy"; implicitWidth: 18; implicitHeight: 18; anchors.verticalCenter: parent.verticalCenter }
             }
             Btn { text: "Cancel"; visible: root.chat.status === "busy"; onClicked: root.editor.chatCancel() }
+            CheckBox {
+                id: allowBox
+                checked: root.chat.auto_allow === true
+                text: "Always allow"
+                font.pixelSize: 11
+                onToggled: root.editor.chatAutoAllow(checked)
+                ToolTip.visible: hovered
+                ToolTip.delay: 500
+                ToolTip.text: "Answer the agent's permission questions with Allow, without asking each time"
+                contentItem: Text { text: parent.text; font: parent.font; color: Theme.muted; leftPadding: parent.indicator.width + 4; verticalAlignment: Text.AlignVCenter }
+            }
             Btn { text: "Disconnect"; onClicked: root.editor.chatStop() }
         }
 
@@ -148,7 +159,7 @@ Item {
                     font.italic: modelData.role === "thought"
                     color: modelData.role === "agent" || modelData.role === "user" ? Theme.text
                          : modelData.role === "error" ? "#ff9a9a" : Theme.muted
-                    text: modelData.role === "tool" ? (modelData.status === "completed" ? "✓ " : modelData.status === "failed" ? "✗ " : "… ") + modelData.title
+                    text: modelData.queued ? "You (queued): " + modelData.text : modelData.role === "tool" ? (modelData.status === "completed" ? "✓ " : modelData.status === "failed" ? "✗ " : "… ") + modelData.title
                         : modelData.role === "user" ? "You: " + modelData.text
                         : modelData.text
                 }
@@ -201,8 +212,8 @@ Item {
             Field {
                 id: input
                 Layout.fillWidth: true
-                placeholderText: "Ask for a change (your selection and notes are sent along)"
-                enabled: root.chat.status === "ready"
+                placeholderText: root.chat.status === "busy" ? "Type now; it is sent when the agent is done" : "Ask for a change (your selection and notes are sent along)"
+                enabled: root.chat.status === "ready" || root.chat.status === "busy"
                 onAccepted: send()
                 function send() {
                     if (text.trim() === "") return
@@ -210,7 +221,7 @@ Item {
                     text = ""
                 }
             }
-            Btn { text: "Send"; primary: true; enabled: root.chat.status === "ready" && input.text.trim() !== ""; onClicked: input.send() }
+            Btn { text: "Send"; primary: true; enabled: (root.chat.status === "ready" || root.chat.status === "busy") && input.text.trim() !== ""; onClicked: input.send() }
         }
     }
 }
