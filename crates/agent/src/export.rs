@@ -148,11 +148,25 @@ pub fn export_assets(
     let render = |frame: &NodeId| od_render::render_frame(doc, frame, scale, ws.dir());
 
     let mut warnings = Vec::new();
+    // a frame with no background is transparent; an export that flattens it is white there
+    let mut notes: Vec<String> = Vec::new();
+    let note_transparency = |frame: &NodeId, pixmap: &Pixmap, notes: &mut Vec<String>| {
+        let share = od_render::transparent_share(pixmap);
+        if share > 0.02 {
+            notes.push(format!(
+                "{} has no background: {:.0}% of it is transparent, so the file is {} there. Give the frame a fill, or export with alpha.",
+                frame,
+                share * 100.0,
+                if alpha { "transparent" } else { "white" }
+            ));
+        }
+    };
     let (names, images): (Vec<String>, Vec<Pixmap>) = match plan {
         Plan::Frame { frame, file } => {
             let name = export_name(file)?.to_string();
             let rendered = render(frame)?;
             warnings.extend(rendered.warnings);
+            note_transparency(frame, &rendered.pixmap, &mut notes);
             (vec![name], vec![rendered.pixmap])
         }
         Plan::Set { frames, prefix } => {
@@ -161,6 +175,7 @@ pub fn export_assets(
             for frame in *frames {
                 let rendered = render(frame)?;
                 warnings.extend(rendered.warnings);
+                note_transparency(frame, &rendered.pixmap, &mut notes);
                 images.push(rendered.pixmap);
             }
             (names, images)
@@ -173,6 +188,7 @@ pub fn export_assets(
             let names = numbered(&stem(prefix, locale), *slices as usize)?;
             let rendered = render(frame)?;
             warnings.extend(rendered.warnings);
+            note_transparency(frame, &rendered.pixmap, &mut notes);
             (names, od_render::slice_columns(&rendered.pixmap, *slices)?)
         }
     };
@@ -241,7 +257,11 @@ pub fn export_assets(
                 bytes: i.png.len(),
             })
             .collect(),
-        warnings: warnings.iter().map(ToString::to_string).collect(),
+        warnings: warnings
+            .iter()
+            .map(ToString::to_string)
+            .chain(notes)
+            .collect(),
         preset_verified: target
             .map(|p| matches!(p.verification, od_store::Verification::PrimaryChecked(_))),
     })

@@ -8,6 +8,16 @@ All notable changes to OpenDesigner are documented here.
 
 ## 2026-11-19
 
+### fix(app): a frame with no background is transparent, not a white screen
+
+**Area:** `fix(app)`, `fix(mcp)`, `fix(render)`
+
+**Why:** "its a white screen even after a export": the design frames the agent made for the video had no background (they sit over the footage), and the editor flattened them onto white, so the canvas showed a white screen and the exported PNG was white too. **Change:** The canvas keeps the picture's alpha and draws a checkerboard behind it, so a transparent frame reads as empty rather than broken. The export says how much of the frame is transparent and whether the file is white or see-through there, and the export dialog has a "keep the transparency" option.
+
+**Verified:** a render test (a frame with no fill is fully transparent, one with a fill is not, the checkerboard encodes), an MCP test (the export of a frame with no background warns, a filled frame does not), the window session. **Not verified:** by eye (the canvas was never looked at); the export with alpha was not written and inspected.
+
+**PR:** n/a
+
 ### feat(app): the chat can change the agent's model and effort, run its commands, and starts from a direction the user picks
 
 **Area:** `feat(acp)`, `feat(app)`, `feat(agent)`

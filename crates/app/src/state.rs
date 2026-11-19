@@ -949,7 +949,9 @@ impl EditorState {
             let scale = scale.clamp(0.01, MAX_CANVAS_SIDE / longest).min(16.0);
             let rendered = od_render::render_frame(doc, frame, scale as f32, ws.dir())
                 .map_err(|e| e.to_string())?;
-            let png = od_render::encode_png(&rendered.pixmap, false).map_err(|e| e.to_string())?;
+            // keep the alpha: a frame with no background is transparent, and the canvas shows
+            // that as a checkerboard instead of a white screen
+            let png = od_render::encode_png(&rendered.pixmap, true).map_err(|e| e.to_string())?;
             Ok(format!("data:image/png;base64,{}", STANDARD.encode(png)))
         })
     }
@@ -958,7 +960,14 @@ impl EditorState {
     /// frame on the open frame's page, in drawing order, as `<name>-01.png`, ...) or `panorama`
     /// (the open frame cut into `slices` columns). With a preset, nothing is written unless every
     /// image and the count meet it.
-    pub fn export(&self, mode: &str, preset: Option<&str>, name: &str, slices: u32) -> Res<Value> {
+    pub fn export(
+        &self,
+        mode: &str,
+        preset: Option<&str>,
+        name: &str,
+        slices: u32,
+        alpha: bool,
+    ) -> Res<Value> {
         let frame = self.active_frame.clone().ok_or("no frame is open")?;
         self.with_ws(|ws| {
             let siblings: Vec<NodeId>;
@@ -995,7 +1004,7 @@ impl EditorState {
                 &plan,
                 preset,
                 None,
-                false,
+                alpha,
                 self.language.as_deref().filter(|l| ws.session.document().locales.contains_key(*l)),
             ).map_err(|e| e.0)?;
             let files: Vec<Value> = out
@@ -2137,13 +2146,13 @@ mod tests {
         assert!(big.len() < 40_000_000);
 
         let err = s
-            .export("frame", Some("apple-iphone-6.9"), "shot.png", 1)
+            .export("frame", Some("apple-iphone-6.9"), "shot.png", 1, false)
             .unwrap_err();
         assert!(err.contains("1260x2736"), "{err}");
-        let ok = s.export("frame", None, "draft.png", 1).unwrap();
+        let ok = s.export("frame", None, "draft.png", 1, false).unwrap();
         assert_eq!(ok["files"][0]["path"], "exports/draft.png");
-        assert!(s.export("frame", None, "../x.png", 1).is_err());
-        assert!(s.export("zip", None, "x", 1).is_err());
+        assert!(s.export("frame", None, "../x.png", 1, false).is_err());
+        assert!(s.export("zip", None, "x", 1, false).is_err());
     }
 
     #[test]
@@ -2152,7 +2161,7 @@ mod tests {
         s.create_node("frame", 0.0, 0.0, 400.0, 300.0).unwrap();
         let exports = t.path().join("p.od/exports");
 
-        let set = s.export("set", None, "slide", 1).unwrap();
+        let set = s.export("set", None, "slide", 1, false).unwrap();
         let paths: Vec<&str> = set["files"]
             .as_array()
             .unwrap()
@@ -2168,14 +2177,14 @@ mod tests {
         // Google phone screenshots need 2 to 8 images of at most 2:1; 400x300 is fine on shape
         // but the preset's size rules refuse it, so nothing is written
         let refused = s
-            .export("set", Some("google-phone"), "play", 1)
+            .export("set", Some("google-phone"), "play", 1, false)
             .unwrap_err();
         assert!(refused.contains("play-01.png"), "{refused}");
         assert!(!exports.join("play-01.png").exists());
 
-        let pano = s.export("panorama", None, "wide", 2).unwrap();
+        let pano = s.export("panorama", None, "wide", 2, false).unwrap();
         assert_eq!(pano["files"][0]["width"], 200);
-        assert!(s.export("panorama", None, "odd", 7).is_err());
+        assert!(s.export("panorama", None, "odd", 7, false).is_err());
         assert!(!exports.join("odd-01.png").exists());
     }
 
@@ -2673,7 +2682,7 @@ mod tests {
 
         // exports follow the active language and name their files after it
         s.switch_language("ja").unwrap();
-        let out = s.export("set", None, "tr", 1).unwrap();
+        let out = s.export("set", None, "tr", 1, false).unwrap();
         assert_eq!(out["files"][0]["path"], "exports/tr-ja-01.png");
 
         // removing the language is one undoable step; an undo can also pull it from under the editor
