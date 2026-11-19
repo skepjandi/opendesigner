@@ -80,7 +80,12 @@ enum Command {
         /// Keep the alpha channel (stores reject it for screenshots).
         #[arg(long)]
         alpha: bool,
+        /// Show this language's translations.
+        #[arg(long)]
+        locale: Option<String>,
     },
+    /// List the project's languages and the text nodes each still lacks a translation for.
+    Locales { dir: PathBuf },
     /// Render several frames into the project's exports/ as <prefix>-01.png, -02, ... and
     /// validate them as a set; nothing is written unless all of them pass.
     ExportSet {
@@ -94,6 +99,9 @@ enum Command {
         preset: Option<String>,
         #[arg(long, default_value_t = 1.0)]
         scale: f32,
+        /// Export this language's translations (files are named <prefix>-<locale>-NN.png).
+        #[arg(long)]
+        locale: Option<String>,
     },
     /// Render one wide frame and cut it into equal slides (a panorama) in the project's exports/.
     ExportPanorama {
@@ -108,6 +116,9 @@ enum Command {
         preset: Option<String>,
         #[arg(long, default_value_t = 1.0)]
         scale: f32,
+        /// Export this language's translations (files are named <prefix>-<locale>-NN.png).
+        #[arg(long)]
+        locale: Option<String>,
     },
     /// Print a device frame as a `create` node for `apply`: phone, phone-punch-hole, tablet or
     /// tablet-wide.
@@ -324,8 +335,36 @@ fn run(cli: Cli) -> Result<(), CliError> {
             preset: preset_id,
             scale,
             alpha,
+            locale,
         } => {
-            export(&dir, &frame, &out, preset_id.as_deref(), scale, alpha)?;
+            export(
+                &dir,
+                &frame,
+                &out,
+                preset_id.as_deref(),
+                scale,
+                alpha,
+                locale.as_deref(),
+            )?;
+        }
+        Command::Locales { dir } => {
+            let ws = Workspace::open(&dir)?;
+            let rows = od_core::view::locales(ws.session.document());
+            if rows.is_empty() {
+                println!("no languages yet; add translations with set_localized_text operations");
+            }
+            for r in rows {
+                println!(
+                    "{}\t{} translated\tmissing: {}",
+                    r.locale,
+                    r.translated,
+                    if r.missing.is_empty() {
+                        "none".to_string()
+                    } else {
+                        r.missing.join(", ")
+                    }
+                );
+            }
         }
         Command::ExportSet {
             dir,
@@ -333,6 +372,7 @@ fn run(cli: Cli) -> Result<(), CliError> {
             prefix,
             preset: preset_id,
             scale,
+            locale,
         } => {
             let ws = Workspace::open(&dir)?;
             let frames = if frames.is_empty() {
@@ -350,7 +390,7 @@ fn run(cli: Cli) -> Result<(), CliError> {
                 frames: &frames,
                 prefix: &prefix,
             };
-            run_export(&ws, &plan, preset_id.as_deref(), scale)?;
+            run_export(&ws, &plan, preset_id.as_deref(), scale, locale.as_deref())?;
         }
         Command::ExportPanorama {
             dir,
@@ -359,6 +399,7 @@ fn run(cli: Cli) -> Result<(), CliError> {
             prefix,
             preset: preset_id,
             scale,
+            locale,
         } => {
             let ws = Workspace::open(&dir)?;
             let frame = NodeId::parse(&frame)?;
@@ -367,7 +408,7 @@ fn run(cli: Cli) -> Result<(), CliError> {
                 slices,
                 prefix: &prefix,
             };
-            run_export(&ws, &plan, preset_id.as_deref(), scale)?;
+            run_export(&ws, &plan, preset_id.as_deref(), scale, locale.as_deref())?;
         }
         Command::Device {
             kind,
@@ -525,8 +566,9 @@ fn run_export(
     plan: &Plan,
     preset_id: Option<&str>,
     scale: f32,
+    locale: Option<&str>,
 ) -> Result<(), CliError> {
-    let out = export_assets(ws, plan, preset_id, Some(scale), false).map_err(|e| {
+    let out = export_assets(ws, plan, preset_id, Some(scale), false, locale).map_err(|e| {
         if e.0.starts_with("not written") {
             CliError::Violations(e.0)
         } else {
@@ -555,11 +597,22 @@ fn export(
     preset_id: Option<&str>,
     scale: f32,
     alpha: bool,
+    locale: Option<&str>,
 ) -> Result<(), CliError> {
     let target = preset_id.map(preset).transpose()?;
     let session: Session = project::load(dir)?;
     let frame_id = NodeId::parse(frame)?;
-    let rendered = od_render::render_frame(session.document(), &frame_id, scale, Some(dir))?;
+    let localized;
+    let doc = match locale {
+        Some(l) => {
+            localized = session.document().localized(l).ok_or_else(|| {
+                CliError::Invalid(format!("the project has no translations for {l:?}"))
+            })?;
+            &localized
+        }
+        None => session.document(),
+    };
+    let rendered = od_render::render_frame(doc, &frame_id, scale, Some(dir))?;
     for warning in &rendered.warnings {
         eprintln!("warning: {warning}");
     }

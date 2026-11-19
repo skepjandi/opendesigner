@@ -96,6 +96,21 @@ Item {
                    check(JSON.parse(editor.tokens).length === 1, "the token should still be there")
         },
         function () {
+            editor.addLanguage("ja")
+            editor.setNodeProperty(ids.text, "text", '"守る"')
+            const row = JSON.parse(editor.languages).find(l => l.locale === "ja")
+            editor.select(ids.text)
+            return check(editor.language === "ja" && row && row.translated >= 1, "the language should exist and be active: " + editor.message) &&
+                   check(insp().text === "守る" && insp().translated === true, "the inspector should show the translation")
+        },
+        function () {
+            const set = JSON.parse(editor.exportAssets("set", "", "tr", 1))
+            editor.switchLanguage("")
+            const back = insp().text !== "守る"
+            return check(!set.error && set.files[0].path === "exports/tr-ja-01.png", "an export in a language is named after it: " + JSON.stringify(set)) &&
+                   check(back, "the default text must be untouched by a translation") && check(pngReady(), "the canvas should still render")
+        },
+        function () {
             const id = editor.importImage("file://" + folder + "/fixture.png")
             return check(id !== "", "the image was not imported: " + editor.message) &&
                    check(insp().image === "media/fixture.png", "the image node should point at the media copy") &&

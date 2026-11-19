@@ -92,6 +92,13 @@ struct Pending {
     height: u32,
 }
 
+fn stem(prefix: &str, locale: Option<&str>) -> String {
+    match locale {
+        Some(l) => format!("{prefix}-{l}"),
+        None => prefix.to_string(),
+    }
+}
+
 fn numbered(prefix: &str, count: usize) -> Result<Vec<String>, ToolError> {
     if count == 0 || count > MAX_SET_FILES {
         return fail(format!(
@@ -104,18 +111,38 @@ fn numbered(prefix: &str, count: usize) -> Result<Vec<String>, ToolError> {
 }
 
 /// Renders `plan`, validates every image against `preset_id` (and, for sets and panoramas, the
-/// count rule), and only then writes the files.
+/// count rule), and only then writes the files. With `locale`, text nodes show that language's
+/// translations, and the files of a set or panorama are named `<prefix>-<locale>-01.png`, ....
 pub fn export_assets(
     ws: &Workspace,
     plan: &Plan,
     preset_id: Option<&str>,
     scale: Option<f32>,
     alpha: bool,
+    locale: Option<&str>,
 ) -> Result<ExportOutcome, ToolError> {
     let dir = exports_dir(ws)?;
     let target = preset_id.map(preset).transpose()?;
     let scale = scale.unwrap_or(1.0);
-    let doc = ws.session.document();
+    let localized;
+    let doc = match locale {
+        Some(l) => {
+            localized = ws.session.document().localized(l).ok_or_else(|| {
+                ToolError(format!(
+                    "the project has no translations for {l:?}; languages: {}",
+                    ws.session
+                        .document()
+                        .locales
+                        .keys()
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ))
+            })?;
+            &localized
+        }
+        None => ws.session.document(),
+    };
     let render = |frame: &NodeId| od_render::render_frame(doc, frame, scale, ws.dir());
 
     let mut warnings = Vec::new();
@@ -127,7 +154,7 @@ pub fn export_assets(
             (vec![name], vec![rendered.pixmap])
         }
         Plan::Set { frames, prefix } => {
-            let names = numbered(prefix, frames.len())?;
+            let names = numbered(&stem(prefix, locale), frames.len())?;
             let mut images = Vec::new();
             for frame in *frames {
                 let rendered = render(frame)?;
@@ -141,7 +168,7 @@ pub fn export_assets(
             slices,
             prefix,
         } => {
-            let names = numbered(prefix, *slices as usize)?;
+            let names = numbered(&stem(prefix, locale), *slices as usize)?;
             let rendered = render(frame)?;
             warnings.extend(rendered.warnings);
             (names, od_render::slice_columns(&rendered.pixmap, *slices)?)

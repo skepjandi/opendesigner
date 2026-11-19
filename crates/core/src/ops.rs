@@ -373,6 +373,14 @@ pub enum Operation {
         #[serde(default)]
         value: Option<String>,
     },
+    /// Set the translation of a text node in a language (`text: null` removes it). The node's own
+    /// `text` is the default every language falls back to.
+    SetLocalizedText {
+        locale: String,
+        id: NodeId,
+        #[serde(default)]
+        text: Option<String>,
+    },
     /// Put back an existing subtree with its original ids. Written by the history when it
     /// resolves a `Create` or inverts a `Delete`; front ends cannot issue it.
     Restore {
@@ -391,6 +399,7 @@ impl Operation {
             Operation::Reparent { .. } => "reparent",
             Operation::Delete { .. } => "delete",
             Operation::SetToken { .. } => "set_token",
+            Operation::SetLocalizedText { .. } => "set_localized_text",
             Operation::Restore { .. } => "restore",
         }
     }
@@ -578,6 +587,18 @@ pub fn apply(
             })
         }
         Operation::SetToken { name, value } => set_token(doc, name, value.as_deref()),
+        Operation::SetLocalizedText { locale, id, text } => {
+            let old = doc.set_locale_text(locale, id, text.as_deref())?;
+            Ok(AppliedOp {
+                forward: op.clone(),
+                inverse: Operation::SetLocalizedText {
+                    locale: locale.clone(),
+                    id: id.clone(),
+                    text: old,
+                },
+                touched: vec![id.clone()],
+            })
+        }
         Operation::Reparent { id, parent, index } => reparent(doc, id, parent, *index),
         Operation::Delete { id } => {
             let loc = node_loc(doc, id)?;

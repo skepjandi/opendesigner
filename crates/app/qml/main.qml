@@ -122,6 +122,24 @@ ApplicationWindow {
                     ToolTip.delay: 600
                     ToolTip.text: "Named colors (design tokens): change one and everything that uses it follows"
                 }
+                ComboBox {
+                    id: languageBox
+                    visible: backend.hasProject
+                    implicitWidth: 150
+                    implicitHeight: Theme.row
+                    readonly property var tags: ["", ...(backend.languages ? JSON.parse(backend.languages).map(l => l.locale) : [])]
+                    model: tags.map(t => t === "" ? "Default text" : t)
+                    currentIndex: Math.max(0, tags.indexOf(backend.language))
+                    onActivated: i => backend.switchLanguage(tags[i])
+                    ToolTip.visible: hovered
+                    ToolTip.delay: 600
+                    ToolTip.text: "The language the canvas, the text field and exports show"
+                }
+                Btn {
+                    text: "Languages…"
+                    enabled: backend.hasProject
+                    onClicked: languagesDialog.open()
+                }
                 Item { Layout.fillWidth: true }
                 Btn { text: "Undo"; enabled: backend.canUndo; onClicked: backend.undo() }
                 Btn { text: "Redo"; enabled: backend.canRedo; onClicked: backend.redo() }
@@ -357,6 +375,60 @@ ApplicationWindow {
             if (nodeId !== "") backend.addPin(noteText.text.trim(), nodeId)
             else backend.addRegionPin(noteText.text.trim(), rx, ry, rw, rh)
             agent.tab = 0
+        }
+    }
+
+    Modal {
+        id: languagesDialog
+        title: "Languages"
+        width: 520
+        height: 440
+        standardButtons: Dialog.Close
+        readonly property var rows: backend.languages ? JSON.parse(backend.languages) : []
+        contentItem: ColumnLayout {
+            spacing: 8
+            Label {
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+                color: Theme.muted
+                font.pixelSize: 11
+                text: "Adding a language copies every text layer's current text as a starting point. Pick the language in the toolbar, then edit the text of each layer; exports use the language you picked. Agents can translate too, and every change can be undone."
+            }
+            ListView {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                clip: true
+                spacing: 4
+                model: languagesDialog.rows
+                delegate: RowLayout {
+                    id: langRow
+                    required property var modelData
+                    width: ListView.view.width
+                    spacing: 8
+                    Label { text: langRow.modelData.locale; color: Theme.text; font.bold: true; Layout.preferredWidth: 80 }
+                    Label {
+                        Layout.fillWidth: true
+                        color: Theme.muted
+                        font.pixelSize: 12
+                        text: langRow.modelData.translated + " translated, " + langRow.modelData.missing.length + " still the default"
+                    }
+                    Btn { text: "Use"; onClicked: backend.switchLanguage(langRow.modelData.locale) }
+                    Btn { text: "Remove"; onClicked: backend.removeLanguage(langRow.modelData.locale) }
+                }
+            }
+            RowLayout {
+                spacing: 8
+                Field { id: newLanguage; Layout.fillWidth: true; placeholderText: "Language tag, for example ja or pt-BR" }
+                Btn {
+                    text: "Add"
+                    primary: true
+                    enabled: newLanguage.text.trim() !== ""
+                    onClicked: {
+                        backend.addLanguage(newLanguage.text)
+                        if (!backend.messageIsError) newLanguage.text = ""
+                    }
+                }
+            }
         }
     }
 

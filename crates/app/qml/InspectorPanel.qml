@@ -236,7 +236,13 @@ Rectangle {
                 visible: root.node && root.node.kind === "text"
                 Layout.fillWidth: true
                 spacing: 4
-                Label { text: "Text"; color: Theme.muted; font.pixelSize: 12 }
+                Label {
+                    text: root.node && root.node.translated !== undefined
+                          ? "Text (" + editor.language + (root.node.translated ? "" : ", not translated yet") + ")"
+                          : "Text"
+                    color: Theme.muted
+                    font.pixelSize: 12
+                }
                 TextArea {
                     Layout.fillWidth: true
                     Layout.preferredHeight: 80

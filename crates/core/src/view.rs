@@ -3,7 +3,7 @@
 
 use serde::Serialize;
 
-use crate::model::{Document, Node, NodeKind};
+use crate::model::{Document, Node, NodeId, NodeKind};
 
 /// One row of the layers panel. Pages and nodes share the list; a page row has kind `page`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -102,6 +102,66 @@ pub fn tokens(doc: &Document) -> Vec<TokenRow> {
             name: name.clone(),
             value: value.clone(),
             used_by: doc.token_users(name).len(),
+        })
+        .collect()
+}
+
+/// A text node with its default text, for the translation worklist.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct TextRow {
+    pub id: String,
+    pub name: String,
+    pub text: String,
+}
+
+/// Every text node in the document, in layer order (pages in order, parents before children).
+pub fn text_nodes(doc: &Document) -> Vec<TextRow> {
+    fn walk(n: &Node, out: &mut Vec<TextRow>) {
+        if n.kind == NodeKind::Text {
+            out.push(TextRow {
+                id: n.id.to_string(),
+                name: n.name.clone(),
+                text: n.text.clone().unwrap_or_default(),
+            });
+        }
+        for c in &n.children {
+            walk(c, out);
+        }
+    }
+    let mut out = Vec::new();
+    for page in &doc.pages {
+        walk(&page.root, &mut out);
+    }
+    out
+}
+
+/// One language and how much of the document it covers.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct LocaleRow {
+    pub locale: String,
+    /// Text nodes that have a translation in this language.
+    pub translated: usize,
+    /// Text nodes that still show the default text in this language.
+    pub missing: Vec<String>,
+}
+
+/// The languages of the document, sorted by tag, with what each still lacks. Translations of
+/// nodes that no longer exist are not counted.
+pub fn locales(doc: &Document) -> Vec<LocaleRow> {
+    let texts = text_nodes(doc);
+    doc.locales
+        .iter()
+        .map(|(locale, map)| {
+            let missing: Vec<String> = texts
+                .iter()
+                .filter(|t| NodeId::parse(&t.id).is_ok_and(|id| !map.contains_key(&id)))
+                .map(|t| t.id.clone())
+                .collect();
+            LocaleRow {
+                locale: locale.clone(),
+                translated: texts.len() - missing.len(),
+                missing,
+            }
         })
         .collect()
 }

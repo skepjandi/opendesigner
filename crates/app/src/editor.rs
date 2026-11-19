@@ -28,6 +28,8 @@ pub mod qobject {
         #[qproperty(QString, changed)]
         #[qproperty(QString, unrendered)]
         #[qproperty(QString, tokens)]
+        #[qproperty(QString, languages)]
+        #[qproperty(QString, language)]
         #[qproperty(bool, can_undo, cxx_name = "canUndo")]
         #[qproperty(bool, can_redo, cxx_name = "canRedo")]
         #[qproperty(bool, mcp_running, cxx_name = "mcpRunning")]
@@ -114,6 +116,15 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "toggleVisible"]
         fn toggle_visible(self: Pin<&mut Self>, id: &QString);
+        #[qinvokable]
+        #[cxx_name = "switchLanguage"]
+        fn switch_language(self: Pin<&mut Self>, tag: &QString);
+        #[qinvokable]
+        #[cxx_name = "addLanguage"]
+        fn add_language(self: Pin<&mut Self>, tag: &QString);
+        #[qinvokable]
+        #[cxx_name = "removeLanguage"]
+        fn remove_language(self: Pin<&mut Self>, tag: &QString);
         #[qinvokable]
         #[cxx_name = "setToken"]
         fn set_token(self: Pin<&mut Self>, name: &QString, value: &QString);
@@ -218,6 +229,8 @@ pub struct EditorRust {
     changed: QString,
     unrendered: QString,
     tokens: QString,
+    languages: QString,
+    language: QString,
     can_undo: bool,
     can_redo: bool,
     mcp_running: bool,
@@ -322,6 +335,8 @@ impl qobject::Editor {
         self.as_mut().set_changed(q(&snap.changed));
         self.as_mut().set_unrendered(q(&snap.unrendered));
         self.as_mut().set_tokens(q(&snap.tokens));
+        self.as_mut().set_languages(q(&snap.languages));
+        self.as_mut().set_language(q(&snap.language));
         self.as_mut().set_can_undo(snap.can_undo);
         self.as_mut().set_can_redo(snap.can_redo);
         self.as_mut().set_mcp_running(snap.mcp_running);
@@ -473,6 +488,21 @@ impl qobject::Editor {
     pub fn toggle_visible(mut self: Pin<&mut Self>, id: &QString) {
         let id = id.to_string();
         self.as_mut().act(|s| s.toggle_visible(&id));
+    }
+
+    pub fn switch_language(mut self: Pin<&mut Self>, tag: &QString) {
+        let tag = tag.to_string();
+        self.as_mut().act(|s| s.switch_language(&tag));
+    }
+
+    pub fn add_language(mut self: Pin<&mut Self>, tag: &QString) {
+        let tag = tag.to_string();
+        self.as_mut().act(|s| s.add_language(&tag));
+    }
+
+    pub fn remove_language(mut self: Pin<&mut Self>, tag: &QString) {
+        let tag = tag.to_string();
+        self.as_mut().act(|s| s.remove_language(&tag));
     }
 
     pub fn set_token(mut self: Pin<&mut Self>, name: &QString, value: &QString) {
