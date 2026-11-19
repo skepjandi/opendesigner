@@ -41,7 +41,10 @@ Kino's MCP endpoint is a useful precedent for the UX (fixed loopback port, keep 
 
 
 **Implemented** in `crates/agent/src/server.rs`: bind to `127.0.0.1` only; every request must pass `guard` before any handler: any `Origin` header is refused (`403`), `Host` must be `127.0.0.1:<port>` or `localhost:<port>` (`403`), `Authorization: Bearer <token>` is compared in constant time (`401` with `WWW-Authenticate: Bearer`), then the protocol version header is checked (`400`). Bodies over 4 MB are refused (`413`). The token is 32 random bytes from the OS (`getrandom`), stored in the per-user config directory with mode `0600` on Unix (on Windows the user profile's default permissions apply; not hardened further), never printed unless `--show-token` is given, and replaced with `--rotate-token`. Tests: `crates/agent/tests/server.rs` and `crates/cli/tests/serve.rs`.
+
 ## Skill installer
+
+**Implemented** in `crates/agent/src/skill.rs` (tests in `crates/agent/tests/skill.rs` and `crates/cli/tests/skill.rs`): every bullet below except the first-run consent UI, which waits for the Qt app. The tests snapshot a temporary home folder and assert that an install adds files only under `.claude/skills/opendesigner/` and `.agents/skills/opendesigner/`, leaves every other file byte-identical (agent settings included), and that uninstall restores the snapshot.
 
 - Writes only `<skills dir>/opendesigner/` under user-approved agent locations, after showing every path.
 - Never writes outside those directories, never edits agent config, credentials, history or other skills.

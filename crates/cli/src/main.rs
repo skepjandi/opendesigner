@@ -11,6 +11,7 @@ use od_core::{
     project,
 };
 mod serve;
+mod skillcmd;
 
 use od_render::RenderError;
 use od_store::{ImageFacts, Preset, Verification};
@@ -137,6 +138,11 @@ enum Command {
         /// Replace the token first; agents must be reconnected.
         #[arg(long)]
         rotate_token: bool,
+    },
+    /// Install, inspect or remove the Agent Skill that teaches coding agents to use OpenDesigner.
+    Skill {
+        #[command(subcommand)]
+        action: skillcmd::SkillAction,
     },
 }
 
@@ -341,6 +347,7 @@ fn run(cli: Cli) -> Result<(), CliError> {
             show_token,
             rotate_token,
         } => serve::run(&dir, port, show_token, rotate_token)?,
+        Command::Skill { action } => skillcmd::run(action)?,
     }
     Ok(())
 }

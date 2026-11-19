@@ -4,6 +4,7 @@
 pub mod error;
 pub mod mcp;
 pub mod server;
+pub mod skill;
 pub mod token;
 pub mod tools;
 
