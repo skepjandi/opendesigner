@@ -8,6 +8,16 @@ All notable changes to OpenDesigner are documented here.
 
 ## 2026-11-19
 
+### feat(app): the agent's memory tab; the skill learns from public agent skills
+
+**Area:** `feat(app)`, `feat(skill)`
+
+**Change:** A Memory tab lists the pictures in the project's `media/` folder with thumbnails and whether the design uses them; "Add pictures" (or dropping on the window) copies files there for the agent (`list_media`). The generated skill gained "You decide the shape" (the agent names and sizes everything), a subject-and-taste section and a video section. Sources read on 2026-11-19: anthropics/skills `frontend-design` (ground in the subject, avoid generated-art tells), ParthJadhav/app-store-screenshots (screenshots are ads; copy rules; deck arc; thumbnail test), and the video-editing skills affaan-m/ECC `video-editing`, kajisho5/ffmpeg-skill and arhen/motion-film (probe first, keep originals, plan-run-check, one motion language, never invent captions). Advice was paraphrased, no text copied.
+
+**Verified:** an app test for the memory list; skill tests pass. **Not verified:** the tab by hand; whether agents behave better with the new text (no agent turn was run on it). Footage (video files) cannot be imported yet: `media/` takes pictures only.
+
+**PR:** n/a
+
 ### feat(app): start screen: choose the working folder, the agent and the first task
 
 **Area:** `feat(app)`
