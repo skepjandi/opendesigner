@@ -24,14 +24,16 @@ const MAX_MESSAGES: usize = 400;
 
 /// What every in-app session starts with, so the quality bar applies whether or not the agent
 /// has the skill installed (`od_agent::playbook`).
-fn preamble() -> String {
+fn preamble(servers: &[McpServer]) -> String {
+    let names: Vec<String> = servers.iter().map(|s| s.name.clone()).collect();
     format!(
         "You are connected to OpenDesigner, a design and video editor, through its MCP server. \
          Call get_guidance first: it returns what the user has selected, the notes they pinned, \
          the workspace's brief and what they changed by hand since your last turn. Change the \
          design with apply_ops, look at it with render_preview, and say in the user's terms what \
-         you changed.\n\n{}\n\n",
-        od_agent::playbook::QUALITY_BAR
+         you changed.\n\n{}\n\n{}\n\n",
+        od_agent::playbook::QUALITY_BAR,
+        od_agent::mcp_servers::agent_note(&names)
     )
 }
 
@@ -424,7 +426,7 @@ impl Chat {
         }
         self.plan.clear();
         let prompt = if std::mem::take(&mut self.first_prompt) {
-            format!("{}{text}", preamble())
+            format!("{}{text}", preamble(&self.servers))
         } else {
             text.to_string()
         };
@@ -678,6 +680,25 @@ impl Chat {
 mod tests {
     use super::*;
     use od_agent::acp::PermissionOption;
+
+    #[test]
+    fn the_first_message_names_the_users_servers_and_never_their_commands_or_values() {
+        let server = McpServer {
+            name: "minimax-mcp".into(),
+            command: "uvx".into(),
+            args: vec!["minimax-mcp".into()],
+            env: vec![od_agent::mcp_servers::EnvVar {
+                name: "MINIMAX_API_KEY".into(),
+                value: "sk-secret-value".into(),
+            }],
+        };
+        let text = preamble(&[server]);
+        assert!(text.contains("minimax-mcp = MiniMax speech"));
+        assert!(text.contains("make_sound") && text.contains("search_sounds"));
+        assert!(!text.contains("uvx") && !text.contains("MINIMAX_API_KEY"));
+        assert!(!text.contains("sk-secret-value"));
+        assert!(!preamble(&[]).contains("also added these MCP servers"));
+    }
 
     #[test]
     fn commands_split_on_spaces_and_respect_quotes_without_a_shell() {

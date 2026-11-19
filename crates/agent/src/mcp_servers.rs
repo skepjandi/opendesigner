@@ -218,6 +218,55 @@ fn is_env_name(name: &str) -> bool {
         && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
+/// What the agent is told about sounds: where they come from and how they get under a video.
+pub const SOUND_NOTE: &str = "Sounds: make_sound synthesizes clicks, whooshes, risers, hits, chimes, a drone, a tick, a beat and a stinger (no licence). search_sounds and import_sound bring in Freesound sounds (needs the user's Freesound token; if there is none, say so and use make_sound or ask the user). import_file with an audio file brings in the user's own sound or music. list_sounds shows what is in media/. Put one under a video with set_video audio {file, start_ms, gain, fade_in_ms, fade_out_ms}; never leave a video silent unless asked.";
+
+/// What a server is for, when its name says (the user may name it anything).
+pub fn hint(name: &str) -> Option<&'static str> {
+    if name.to_ascii_lowercase().contains("minimax") {
+        Some(
+            "MiniMax speech: text to speech, voice cloning and design, transcription. Use it for \
+             voice-overs; ask the user before spending credits on long text.",
+        )
+    } else {
+        None
+    }
+}
+
+/// The servers the user added as the agent sees them: their names and, for known ones, what they
+/// are for. Never a command, an argument or an environment variable.
+pub fn describe(names: &[String]) -> serde_json::Value {
+    serde_json::Value::Array(
+        names
+            .iter()
+            .map(|n| match hint(n) {
+                Some(about) => serde_json::json!({"name": n, "about": about}),
+                None => serde_json::json!({"name": n}),
+            })
+            .collect(),
+    )
+}
+
+/// The lines added to the in-app chat's first message: the servers the user added (names only)
+/// and the sound tools.
+pub fn agent_note(names: &[String]) -> String {
+    let mut out = String::new();
+    if !names.is_empty() {
+        out.push_str("The user also added these MCP servers, which you may call: ");
+        let parts: Vec<String> = names
+            .iter()
+            .map(|n| match hint(n) {
+                Some(about) => format!("{n} = {about}"),
+                None => n.clone(),
+            })
+            .collect();
+        out.push_str(&parts.join(" "));
+        out.push('\n');
+    }
+    out.push_str(SOUND_NOTE);
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -328,5 +377,20 @@ mod tests {
         assert_eq!(value["env"][0]["name"], "MINIMAX_API_KEY");
         assert_eq!(value["env"][0]["value"], "secret");
         assert!(value.get("cwd").is_none());
+    }
+
+    #[test]
+    fn the_agent_hears_names_and_hints_but_never_commands_or_values() {
+        let names = vec!["minimax-mcp".to_string(), "my-notes".to_string()];
+        let note = agent_note(&names);
+        assert!(note.contains("minimax-mcp = MiniMax speech"));
+        assert!(note.contains("voice-overs") && note.contains("credits"));
+        assert!(note.contains("my-notes") && note.contains("make_sound"));
+        let v = describe(&names);
+        assert_eq!(v[0]["name"], "minimax-mcp");
+        assert!(v[0]["about"].as_str().unwrap().contains("text to speech"));
+        assert!(v[1].get("about").is_none());
+        assert!(agent_note(&[]).starts_with("Sounds:"));
+        assert_eq!(describe(&[]), serde_json::json!([]));
     }
 }

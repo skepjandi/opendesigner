@@ -16,7 +16,9 @@ find_files, import_file). Never invent facts, numbers, reviews or features.\n\
 one hero frame, look at it, fix it, and only then the rest.\n\
 4. Check, do not hope: render_preview (also at 160 to 320 px), review_frame on every frame and fix \
 what it finds, render_video_frame at each beat and mid-transition, read the story in list_videos. \
-Iterate at least once after you first look.\n\
+Iterate at least once after you first look. A video also gets sound unless the user asked for \
+silence: make_sound for effects, search_sounds or the user's own file for a music bed (gain 0.15 to \
+0.3 under a voice, fades 300 to 800 ms), then set_video audio.\n\
 5. Use every tool that helps (media, device frames, tokens, languages, presets, workspaces, \
 exports). Sizes the user chose are theirs: change them only through set_format, which asks. If they \
 chose nothing, pick from list_formats and record it with set_format.\n\
@@ -81,6 +83,8 @@ mod tests {
             "list_media",
             "find_files",
             "import_file",
+            "make_sound",
+            "search_sounds",
             "render_preview",
             "review_frame",
             "render_video_frame",
@@ -111,6 +115,8 @@ mod tests {
                                 | "review"
                                 | "export"
                                 | "find"
+                                | "make"
+                                | "search"
                                 | "import"
                                 | "create"
                                 | "open"

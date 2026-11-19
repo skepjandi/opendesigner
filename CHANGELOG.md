@@ -8,6 +8,16 @@ All notable changes to OpenDesigner are documented here.
 
 ## 2026-11-19
 
+### feat(mcp): audio in import_file, a built-in sound maker, and the agent is told what it has
+
+**Area:** `feat(mcp)`, `feat(skill)`, `feat(app)`
+
+**Why:** An agent without a Freesound token gave up on sound (it thought of ffmpeg, then doubted that `import_file` takes audio), and never knew about the `minimax-mcp` server the user added. **Change:** `find_files` and `import_file` take audio (`.mp3 .wav .m4a .aac .ogg`, first bytes checked); `list_sounds` lists all audio in `media/` with length and source; new `make_sound` (`crates/agent/src/synth.rs`: click, pop, tick, whoosh, swoosh up/down, riser, hit, chime, drone, beat, stinger; 16-bit 44.1 kHz WAV, normalized, faded, deterministic per seed, no licence); the chat's first message and `get_guidance` (`extra_mcp_servers`, names only) tell the agent about the user's MCP servers and the sound tools; the video and motion playbooks get a *Sound* section and the quality bar a line on sound.
+
+**Verified:** unit tests for every kind (length, peak at most 0.89, non-silent, exact zero at both ends, determinism, loop seam of the drone, kick on every beat, WAV header), audio sniffing and import rules, the server hints; an MCP test that imports a wav, makes a sound, sets it as the track and exports an MP4 with a real ffmpeg and asserts an audio stream; `cargo test -p opendesigner-agent`. **Not verified:** how any sound *sounds* (nobody listened; only waveform properties were checked numerically); the minimax-mcp hint against a real MiniMax server.
+
+**PR:** n/a
+
 ### fix(app): the start screen's model and effort selectors work
 
 **Area:** `fix(app)`

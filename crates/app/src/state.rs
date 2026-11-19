@@ -34,6 +34,7 @@ struct Server {
     url: String,
     token_file: PathBuf,
     jobs: Arc<Jobs>,
+    handler: Arc<Handler>,
 }
 
 pub struct EditorState {
@@ -1311,7 +1312,11 @@ impl EditorState {
             .build()
             .map_err(|e| e.to_string())?;
         let running = runtime
-            .block_on(od_agent::start(handler, secret, od_agent::DEFAULT_PORT))
+            .block_on(od_agent::start(
+                Arc::clone(&handler),
+                secret,
+                od_agent::DEFAULT_PORT,
+            ))
             .map_err(|e| e.to_string())?;
         let url = running.url();
         self.server = Some(Server {
@@ -1320,6 +1325,7 @@ impl EditorState {
             url: url.clone(),
             token_file: token_file.to_path_buf(),
             jobs,
+            handler,
         });
         Ok(url)
     }
@@ -1445,6 +1451,7 @@ impl EditorState {
             .server
             .as_ref()
             .ok_or("turn on the agent connection first")?;
+        let handler = Arc::clone(&server.handler);
         let mcp = McpEndpoint {
             url: server.url.clone(),
             token: token::load_or_create(&server.token_file).map_err(|e| e.to_string())?,
@@ -1454,6 +1461,8 @@ impl EditorState {
             Ok(list) => (list, None),
             Err(e) => (Vec::new(), Some(e)),
         };
+        // get_guidance tells the agent which servers the user added (names only)
+        handler.set_extra_servers(servers.iter().map(|s| s.name.clone()).collect());
         if self.chat.is_none() {
             self.chat = Some(Chat::new()?);
         }

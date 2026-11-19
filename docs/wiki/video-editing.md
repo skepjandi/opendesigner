@@ -45,6 +45,17 @@ Where we deliberately differ: local-only and open files (Kino stores footage in 
 - **Sound track.** A video carries at most one sound track: `Video.audio {file: media/<name>.mp3|wav|m4a|aac|ogg, start_ms (0-600,000), gain (0-2, 1 by default), fade_in_ms, fade_out_ms}`. It is set with `set_video` (`prop {name: "audio", value: {...}}`; `null` takes it away), so it is an attributed, undoable, checkpointed edit like any other, and it is stored with the video in `videos/<id>.json`. The file must be a plain name in the project's `media/` folder (the same rule an image node follows), and the video's own length rules: the track never makes the video longer, it is cut at the end.
 - **Mixing.** After the picture is encoded, `od_media::add_audio` mixes the sound under it in one ffmpeg pass (`atrim`, `volume`, `afade`, `adelay`, `amix`): the track's gain is a `volume` filter, its fades are `afade` in and out, and it starts at `start_ms`. The picture is copied, not re-encoded. Footage sound is mixed the same way, at volume 1 and without fades.
 
+## Audio sources
+
+A video's sound track is any file in `media/` named `.mp3`, `.wav`, `.m4a`, `.aac` or `.ogg`. Four ways to get one there, none of which needs the others:
+
+- **`make_sound`** (`crates/agent/src/synth.rs`): the built-in sound maker. Kinds `click`, `pop`, `tick`, `whoosh`, `swoosh_up`, `swoosh_down`, `riser`, `hit` (alias `impact`), `chime`, `drone` (alias `pad`; loops without a seam), `beat` (kick on every beat, hat between; `bpm` 40-240 and `bars`) and `stinger` (2 or 3 notes). Arguments `{kind, duration_ms?, seed?, pitch_hz?, bpm?, bars?, stereo?, name?}`. Pure Rust, no dependency: sines, noise, filters and envelopes, written as 16-bit PCM WAV at 44.1 kHz into `media/<name>.wav` with `media/<name>.synth.json` beside it (kind, seed, "synthesized, no third-party licence"). Every sound is normalized to a peak of 0.89 (about -1 dBFS), starts and ends at exactly zero after a short fade (2 ms for the drone, 8 ms otherwise), and is deterministic for a given kind, length, pitch and seed. It makes effects and simple loops, not music or speech.
+- **`search_sounds` / `import_sound`**: Freesound, below. Needs the user's token; music beds are better from here.
+- **`import_file` with an audio file** (`find_files` `kind: "audio"`): copies the user's own `.mp3 .wav .m4a .aac .ogg` into `media/`. The first bytes must match the extension (`ID3` or an MPEG frame for mp3, `RIFF…WAVE`, `ftyp` with an audio brand `M4A `/`M4B ` for m4a, an ADTS header for aac, `OggS`); a video container renamed `.m4a` is refused. Up to 512 MB, never overwritten, never modified.
+- **A voice-over** from a speech MCP server the user added in the Connect tab (for example `minimax-mcp`), imported with `import_file` once it exists on disk.
+
+`list_sounds` lists everything audio in `media/`: file, size, length (when ffmpeg is installed), `source` (`synthesized`, `freesound` or `imported`) and, for Freesound sounds, the attribution line. Any of them is set with `set_video` `audio`. The skill's *Sound* sections give the craft: a bed under a voice at gain 0.15 to 0.3, fades of 300 to 800 ms, hits on cuts, silence as a tool, never a silent video unless asked.
+
 ## Finding sounds: Freesound
 
 The agent can put music and sound effects on a video. It finds them on [Freesound](https://freesound.org), a library of Creative Commons sounds, through its API v2 (`crates/agent/src/freesound.rs`).

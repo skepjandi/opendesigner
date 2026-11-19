@@ -364,8 +364,11 @@ folder. `{"op": "set_video", "video": "v_20", "prop": {"name": "audio", "value":
 "media/song.mp3", "start_ms": 0, "gain": 1.0, "fade_in_ms": 500, "fade_out_ms": 500}}}` sets it
 (`gain` is 0 to 2, the fades are milliseconds; `"value": null` takes the track away). The track
 never makes the video longer: it is cut at the end. To find music or sound effects, use
-`search_sounds` (Freesound; it needs the user's token, and the answer says so if there is none),
-`import_sound` to bring one into `media/`, then set the track. A Freesound sound keeps its
+`make_sound` (synthesized in the project: click, pop, tick, whoosh, swoosh_up, swoosh_down, riser,
+hit, chime, drone, beat, stinger; no licence, but no music), `search_sounds` (Freesound; it needs
+the user's token, and the answer says so if there is none), `import_sound` to bring one into
+`media/`, or `import_file` with a sound file of the user's (`find_files` kind audio); `list_sounds`
+shows them all. Then set the track. A Freesound sound keeps its
 author's license: show the attribution the tool gives you (title, author, license, link) wherever
 the sound is used, and prefer CC0.
 "##;
