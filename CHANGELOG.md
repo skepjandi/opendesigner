@@ -8,6 +8,16 @@ All notable changes to OpenDesigner are documented here.
 
 ## 2026-11-19
 
+### feat(mcp): exports tell the agent when a frame was never reviewed or changed since
+
+**Area:** `feat(mcp)`
+
+**Why:** The quality bar asks agents to check their work; an agent that skips it should be told at the moment it exports. **Change:** `export`, `export_set` and `export_panorama` add `before_you_call_it_done` when a frame was never checked with `review_frame` or anything inside it changed afterwards. The export still goes through.
+
+**Verified:** MCP test (never reviewed, reviewed, unrelated change, change inside the frame, set export). **Not verified:** whether agents act on the note; video exports do not carry it (their export runs on a detached copy).
+
+**PR:** n/a
+
 ### feat(app): a fully rearrangeable layout: tabs, splits, windows of their own, hidden panels
 
 **Area:** `feat(app)`
