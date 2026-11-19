@@ -288,16 +288,26 @@ Item {
                 Label { text: "Plan"; color: Theme.text; font.pixelSize: 11; font.bold: true }
                 Repeater {
                     model: planModel
-                    delegate: Label {
+                    delegate: RowLayout {
                         required property string json
                         readonly property var modelData: JSON.parse(json)
                         Layout.fillWidth: true
-                        wrapMode: Text.Wrap
-                        textFormat: Text.PlainText
-                        font.pixelSize: 11
-                        color: modelData.status === "in_progress" ? Theme.accent : Theme.muted
-                        font.bold: modelData.status === "in_progress"
-                        text: (modelData.status === "completed" ? "✓ " : modelData.status === "in_progress" ? "▸ " : "○ ") + modelData.content
+                        spacing: 4
+                        Icon {
+                            Layout.alignment: Qt.AlignTop
+                            name: modelData.status === "completed" ? "check" : modelData.status === "in_progress" ? "chevron-right" : "circle"
+                            size: 12
+                            color: modelData.status === "in_progress" ? Theme.accent : Theme.muted
+                        }
+                        Label {
+                            Layout.fillWidth: true
+                            wrapMode: Text.Wrap
+                            textFormat: Text.PlainText
+                            font.pixelSize: 11
+                            color: modelData.status === "in_progress" ? Theme.accent : Theme.muted
+                            font.bold: modelData.status === "in_progress"
+                            text: modelData.content
+                        }
                     }
                 }
             }
@@ -327,6 +337,7 @@ Item {
                     id: body
                     anchors.fill: parent
                     anchors.margins: 6
+                    leftPadding: modelData.role === "tool" ? 18 : 0
                     readOnly: true
                     selectByMouse: true
                     wrapMode: TextEdit.Wrap
@@ -337,10 +348,18 @@ Item {
                          : modelData.role === "error" ? "#ff9a9a" : Theme.muted
                     selectionColor: Theme.accentStrong
                     selectedTextColor: Theme.textOnAccent
-                    text: modelData.queued ? "You (queued): " + modelData.text : modelData.role === "tool" ? (modelData.status === "completed" ? "✓ " : modelData.status === "failed" ? "✗ " : "… ") + modelData.title
+                    text: modelData.queued ? "You (queued): " + modelData.text : modelData.role === "tool" ? modelData.title
                         : modelData.role === "user" ? "You: " + modelData.text
                         : modelData.text
                     onLinkActivated: link => root.openLink(link)
+                }
+                Icon {
+                    visible: modelData.role === "tool"
+                    x: 6
+                    y: 8
+                    name: modelData.status === "completed" ? "check" : modelData.status === "failed" ? "x" : "ellipsis"
+                    size: 12
+                    color: modelData.status === "failed" ? Theme.danger : Theme.muted
                 }
             }
         }
@@ -435,20 +454,20 @@ Item {
 
             Btn {
                 text: "Direction"
+                iconName: "compass"
                 onClicked: direction.open()
                 ToolTip.visible: hovered
                 ToolTip.delay: 500
                 ToolTip.text: "Pick a look, colors, type and mood; they go into the prompt"
             }
             Btn {
-                text: "⚙"
+                iconName: "settings"
+                Accessible.name: "Options"
                 implicitWidth: 34
                 leftPadding: 0
                 rightPadding: 0
                 onClicked: optionsMenu.popup(this, 0, -optionsMenu.implicitHeight)
-                ToolTip.visible: hovered
-                ToolTip.delay: 500
-                ToolTip.text: "Model, effort, mode and the agent's commands"
+                tip: "Model, effort, mode and the agent's commands"
                 enabled: (root.chat.config || []).length > 0 || (root.chat.commands || []).length > 0
             }
             ScrollView {
@@ -479,6 +498,7 @@ Item {
             }
             Btn {
                 text: "Send"
+                iconName: "send"
                 primary: true
                 enabled: (root.chat.status === "ready" || root.chat.status === "busy") && inputText.text.trim() !== ""
                 onClicked: root.send()

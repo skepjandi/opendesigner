@@ -171,7 +171,7 @@ Rectangle {
             visible: !!root.video
             Layout.leftMargin: 10
             Layout.rightMargin: 10
-            Btn { text: root.playing ? "Pause" : "Play"; onClicked: root.playing = !root.playing }
+            Btn { text: root.playing ? "Pause" : "Play"; iconName: root.playing ? "pause" : "play"; onClicked: root.playing = !root.playing }
             Slider {
                 Layout.fillWidth: true
                 from: 0
@@ -252,10 +252,11 @@ Rectangle {
                 anchors.fill: parent
                 anchors.margins: 6
                 spacing: 8
+                Icon { visible: !!(root.video && root.video.audio); name: "music"; size: 14; color: Theme.text }
                 Label {
                     Layout.fillWidth: true
                     text: root.video && root.video.audio
-                        ? "♪ " + root.video.audio.file.replace("media/", "")
+                        ? root.video.audio.file.replace("media/", "")
                           + " · from " + (root.video.audio.start_ms / 1000).toFixed(1) + " s"
                           + " · volume " + root.video.audio.gain.toFixed(2)
                           + (root.video.audio.fade_in_ms > 0 ? " · fades in " + (root.video.audio.fade_in_ms / 1000).toFixed(1) + " s" : "")
@@ -337,14 +338,19 @@ Rectangle {
                         color: Qt.rgba(1, 1, 1, 0.16)
                         border.width: 1
                         border.color: Qt.rgba(1, 1, 1, 0.4)
-                        Label { anchors.centerIn: parent; text: "⤳"; color: Theme.text; font.pixelSize: 12; visible: parent.width > 14 }
+                        Icon { anchors.centerIn: parent; name: "arrow-right-left"; size: 12; color: Theme.text; visible: parent.width > 14 }
                     }
                     Column {
                         x: (clipItem.c.transition_ms / 1000 * root.zoom) + 5
                         y: 4
                         width: parent.width - x - 4
                         spacing: 1
-                        Label { width: parent.width; text: clipItem.c.footage !== "" ? "▶ " + clipItem.c.footage.replace("media/", "") : "▢ " + clipItem.c.frame_name; color: Theme.text; font.pixelSize: 11; elide: Text.ElideRight }
+                        Row {
+                            width: parent.width
+                            spacing: 4
+                            Icon { name: clipItem.c.footage !== "" ? "play" : "frame"; size: 11; color: Theme.text; anchors.verticalCenter: parent.verticalCenter }
+                            Label { width: parent.width - 15; text: clipItem.c.footage !== "" ? clipItem.c.footage.replace("media/", "") : clipItem.c.frame_name; color: Theme.text; font.pixelSize: 11; elide: Text.ElideRight }
+                        }
                         Label { width: parent.width; visible: clipItem.c.transition_ms > 0; text: clipItem.c.transition.kind.replace("_", " ") + " " + (clipItem.c.transition_ms / 1000).toFixed(1) + " s"; color: Theme.muted; font.pixelSize: 10; elide: Text.ElideRight }
                         Label { width: parent.width; visible: clipItem.c.motion.scale_from !== clipItem.c.motion.scale_to; text: "zoom " + clipItem.c.motion.scale_from.toFixed(2) + " → " + clipItem.c.motion.scale_to.toFixed(2); color: Theme.muted; font.pixelSize: 10; elide: Text.ElideRight }
                     }

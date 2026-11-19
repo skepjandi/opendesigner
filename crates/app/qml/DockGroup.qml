@@ -88,7 +88,9 @@ Rectangle {
                 id: menuButton
                 anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
-                text: "⋯"
+                iconName: "ellipsis"
+                Accessible.name: "Panel menu"
+                tip: "Panel menu"
                 implicitWidth: 30
                 implicitHeight: 24
                 leftPadding: 0

@@ -78,13 +78,18 @@ Rectangle {
                             color: Theme.text
                             font.pixelSize: Theme.fontSize
                         }
-                        Label {
+                        RowLayout {
                             visible: !!card.modelData.resolution
                             Layout.fillWidth: true
-                            text: "✓ " + (card.modelData.resolved_by || "").replace("agent:", "") + ": " + card.modelData.resolution
-                            wrapMode: Text.WordWrap
-                            color: Theme.success
-                            font.pixelSize: 12
+                            spacing: 4
+                            Icon { Layout.alignment: Qt.AlignTop; name: "check"; size: 12; color: Theme.success }
+                            Label {
+                                Layout.fillWidth: true
+                                text: (card.modelData.resolved_by || "").replace("agent:", "") + ": " + card.modelData.resolution
+                                wrapMode: Text.WordWrap
+                                color: Theme.success
+                                font.pixelSize: 12
+                            }
                         }
                         RowLayout {
                             spacing: 4
