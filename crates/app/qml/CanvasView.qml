@@ -155,6 +155,20 @@ Item {
         visible: root.fw > 0 && root.front === this
         onStatusChanged: root.swapWhenReady(this)
     }
+    // A frame with no background is transparent. The picture keeps its alpha and the
+    // checkerboard shows through, so the canvas does not look like a broken white screen.
+    Image {
+        x: root.panX
+        y: root.panY
+        width: root.fw * root.zoom
+        height: root.fh * root.zoom
+        visible: root.fw > 0
+        source: root.editor.checkerboard
+        fillMode: Image.Tile
+        sourceSize.width: 32
+        sourceSize.height: 32
+        cache: true
+    }
     Buffer { id: bufferA }
     Buffer { id: bufferB }
 

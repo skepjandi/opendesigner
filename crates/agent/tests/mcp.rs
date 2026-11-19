@@ -1361,3 +1361,39 @@ fn an_export_says_when_the_frame_was_never_reviewed_or_changed_since() {
     let set = f.ok("export_set", json!({"frames": [frame], "prefix": "s"}));
     assert!(set["before_you_call_it_done"].is_string());
 }
+
+#[test]
+fn an_export_of_a_frame_with_no_background_says_so() {
+    let f = fixture();
+    // a frame with a fill is fine
+    let filled = f.create_frame();
+    let out = f.ok("export", json!({"frame": filled, "file": "filled.png"}));
+    assert!(
+        !out["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w.as_str().unwrap().contains("no background")),
+        "{out:?}"
+    );
+    // a frame without one is transparent, and the file is white there
+    let bare = f.ok(
+        "apply_ops",
+        json!({"ops": [{"op":"create","parent":f.root,"node":{
+            "kind":"frame","name":"Bare","width":600,"height":600}}]}),
+    );
+    let id = bare["created"][0].as_str().unwrap();
+    let out = f.ok("export", json!({"frame": id, "file": "bare.png"}));
+    let warnings: Vec<String> = out["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|w| w.as_str().unwrap().to_string())
+        .collect();
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.contains("no background") && w.contains("white")),
+        "{warnings:?}"
+    );
+}

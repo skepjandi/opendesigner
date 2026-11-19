@@ -34,6 +34,7 @@ pub mod qobject {
         #[qproperty(QString, workspaces)]
         #[qproperty(QString, brief)]
         #[qproperty(QString, layout)]
+        #[qproperty(QString, checkerboard)]
         #[qproperty(QString, tokens)]
         #[qproperty(QString, languages)]
         #[qproperty(QString, language)]
@@ -275,6 +276,7 @@ pub mod qobject {
             preset: &QString,
             name: &QString,
             slices: i32,
+            alpha: bool,
         ) -> QString;
 
         #[qinvokable]
@@ -369,6 +371,7 @@ pub struct EditorRust {
     workspaces: QString,
     brief: QString,
     layout: QString,
+    checkerboard: QString,
     tokens: QString,
     languages: QString,
     language: QString,
@@ -382,6 +385,17 @@ pub struct EditorRust {
     message_is_error: bool,
     message_seq: i32,
     revision: i32,
+}
+
+/// The checkerboard pattern as a data URL, for the canvas to tile behind a transparent frame.
+fn checkerboard_data_url() -> String {
+    match od_render::checkerboard_png() {
+        Some(png) => format!(
+            "data:image/png;base64,{}",
+            base64::Engine::encode(&base64::engine::general_purpose::STANDARD, png)
+        ),
+        None => String::new(),
+    }
 }
 
 fn q(s: &str) -> QString {
@@ -481,6 +495,7 @@ impl qobject::Editor {
         self.as_mut().set_videos(q(&snap.videos));
         self.as_mut().set_jobs(q(&snap.jobs));
         self.as_mut().set_workspaces(q(&snap.workspaces));
+        self.as_mut().set_checkerboard(q(&checkerboard_data_url()));
         self.as_mut().set_brief(q(&snap.brief));
         self.as_mut().set_tokens(q(&snap.tokens));
         self.as_mut().set_languages(q(&snap.languages));
@@ -1017,11 +1032,15 @@ impl qobject::Editor {
         preset: &QString,
         name: &QString,
         slices: i32,
+        alpha: bool,
     ) -> QString {
         let (mode, preset, name) = (mode.to_string(), preset.to_string(), name.to_string());
         let preset = (!preset.is_empty()).then_some(preset);
         let slices = u32::try_from(slices).unwrap_or(0);
-        let json = match self.state.export(&mode, preset.as_deref(), &name, slices) {
+        let json = match self
+            .state
+            .export(&mode, preset.as_deref(), &name, slices, alpha)
+        {
             Ok(v) => v,
             Err(e) => serde_json::json!({"error": e}),
         };

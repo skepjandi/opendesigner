@@ -713,17 +713,26 @@ ApplicationWindow {
                 font.pixelSize: 12
             }
             Field { id: fileField; Layout.fillWidth: true }
+            CheckBox {
+                id: alphaBox
+                text: "Keep the transparency (a frame with no background stays see-through)"
+                font.pixelSize: 12
+                visible: exportDialog.mode !== "panorama"
+                contentItem: Text { text: parent.text; font: parent.font; color: Theme.text; leftPadding: parent.indicator.width + 4; verticalAlignment: Text.AlignVCenter }
+                ToolTip.visible: hovered
+                ToolTip.text: "Stores reject images with an alpha channel, so this is only for pictures you will put on something else."
+            }
             Label {
                 Layout.fillWidth: true
                 wrapMode: Text.WordWrap
                 color: Theme.muted
                 font.pixelSize: 11
-                text: "With a store chosen, every image and the number of images must meet its rules or nothing is written; you are told which rule each file breaks."
+                text: "With a store chosen, every image and the number of images must meet its rules or nothing is written; you are told which rule each file breaks. A frame with no background is transparent: the file is white there unless you keep the transparency."
             }
         }
         onAccepted: {
             const preset = presetBox.currentIndex > 0 ? exportDialog.presets[presetBox.currentIndex - 1].id : ""
-            backend.exportAssets(exportDialog.mode, preset, fileField.text.trim(), slicesBox.value)
+            backend.exportAssets(exportDialog.mode, preset, fileField.text.trim(), slicesBox.value, alphaBox.checked)
         }
     }
 

@@ -97,6 +97,14 @@ The diagram above is only the **default**. Every panel (layers, canvas, inspecto
 - **Kept.** The arrangement is saved to `layout.json` in the app's config folder after every change (window position and size after you stop moving a window) and restored on launch; a file that is missing, from another version or not valid gives the default.
 - **Limits.** Moving a panel between groups recreates it (a half-typed chat message is lost; the chat history is not, it lives in the app). Keyboard shortcuts work in the main window only (a floating window has no shortcuts of its own, so typing in it can never trigger "delete the selection"). Dragging across windows hit-tests the registered groups in creation order, so a window stacked over another may lose a drop to the one underneath. KDDockWidgets would do all of this but is GPL-only, so the dock is ours ([Licensing](#licensing)).
 
+## Transparency on the canvas
+
+A frame with no fill is transparent, not white. The canvas keeps the picture's alpha and draws a
+checkerboard behind it, so a frame meant to sit over footage reads as empty instead of as a broken
+white screen. Exports flatten onto white unless the export dialog's "keep the transparency" is
+ticked, and the export result says how much of the frame was transparent and what the file shows
+there.
+
 ## Agent-first interface and shortcuts
 
 > **Status: Implemented (macOS).** The app is for pointing and correcting, not for drawing: an agent creates the frames, shapes, text and videos and decides their names and sizes. The toolbar therefore has **Select**, **Hand** and **Note** (pin) plus undo/redo, zoom, language, **Export** and a "⋯" menu (colors, languages, open another project, save, shortcuts). There are no rectangle, ellipse, text, frame, image or device tools, and the window shows no size or name prompts. What a user can still do by hand: select, move and resize (drag or arrow keys), edit any property in the inspector, delete, pin notes, undo, change colors (tokens) and languages, and drop files in the window, which go to the agent's memory (the project's `media/` folder) and are never placed on the design.

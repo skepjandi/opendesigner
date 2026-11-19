@@ -147,7 +147,7 @@ Item {
                    check(insp().text === "守る" && insp().translated === true, "the inspector should show the translation")
         },
         function () {
-            const set = JSON.parse(editor.exportAssets("set", "", "tr", 1))
+            const set = JSON.parse(editor.exportAssets("set", "", "tr", 1, false))
             editor.switchLanguage("")
             const back = insp().text !== "守る"
             return check(!set.error && set.files[0].path === "exports/tr-ja-01.png", "an export in a language is named after it: " + JSON.stringify(set)) &&
@@ -160,16 +160,16 @@ Item {
                    check(JSON.parse(editor.unrendered).length === 0, "a readable image needs no placeholder")
         },
         function () {
-            const r = JSON.parse(editor.exportAssets("frame", "apple-iphone-6.9", "shot.png", 1))
+            const r = JSON.parse(editor.exportAssets("frame", "apple-iphone-6.9", "shot.png", 1, false))
             return check(!r.error && r.files.length === 1 && r.files[0].path === "exports/shot.png" && r.files[0].width === 1320, "validated export failed: " + JSON.stringify(r))
         },
         function () {
-            const r = JSON.parse(editor.exportAssets("frame", "google-feature-graphic", "bad.png", 1))
+            const r = JSON.parse(editor.exportAssets("frame", "google-feature-graphic", "bad.png", 1, false))
             return check(!!r.error && r.error.indexOf("1024x500") >= 0, "a wrong preset must be refused")
         },
         function () {
-            const set = JSON.parse(editor.exportAssets("set", "apple-iphone-6.9", "slide", 1))
-            const pano = JSON.parse(editor.exportAssets("panorama", "", "pano", 2))
+            const set = JSON.parse(editor.exportAssets("set", "apple-iphone-6.9", "slide", 1, false))
+            const pano = JSON.parse(editor.exportAssets("panorama", "", "pano", 2, false))
             return check(!set.error && set.files.length === 1 && set.files[0].path === "exports/slide-01.png", "set export failed: " + JSON.stringify(set)) &&
                    check(!pano.error && pano.files.length === 2 && pano.files[0].width === 660, "panorama export failed: " + JSON.stringify(pano))
         },

@@ -485,6 +485,39 @@ pub fn slice_columns(pixmap: &Pixmap, count: u32) -> Result<Vec<Pixmap>, RenderE
 
 /// Encodes a PNG. With `alpha` false the image is flattened onto white and written as RGB, which
 /// is what the stores require for screenshots.
+/// How much of the picture is fully transparent (0 to 1). A frame without a background is
+/// transparent, and an export that flattens it onto white then looks like a white screen.
+pub fn transparent_share(pixmap: &Pixmap) -> f64 {
+    let total = pixmap.width() as usize * pixmap.height() as usize;
+    if total == 0 {
+        return 0.0;
+    }
+    let clear = pixmap
+        .data()
+        .chunks_exact(4)
+        .filter(|px| px[3] == 0)
+        .count();
+    clear as f64 / total as f64
+}
+
+/// A small checkerboard (32 x 32, two greys) as a PNG, for the canvas to show behind a frame
+/// that has no background.
+pub fn checkerboard_png() -> Option<Vec<u8>> {
+    const CELL: u32 = 16;
+    const SIZE: u32 = 32;
+    let mut data = Vec::with_capacity((SIZE * SIZE * 4) as usize);
+    for y in 0..SIZE {
+        for x in 0..SIZE {
+            let light = ((x / CELL) + (y / CELL)) % 2 == 0;
+            let v = if light { 0x3a } else { 0x2e };
+            data.extend([v, v, v, 255]);
+        }
+    }
+    let mut pixmap = Pixmap::new(SIZE, SIZE)?;
+    pixmap.data_mut().copy_from_slice(&data);
+    pixmap.as_ref().encode_png().ok()
+}
+
 pub fn encode_png(pixmap: &Pixmap, alpha: bool) -> Result<Vec<u8>, RenderError> {
     if alpha {
         return pixmap
@@ -1191,5 +1224,55 @@ mod tests {
         assert_eq!(band_count(node, 40), 1, "too short to split");
         let (plain, id) = frame_session();
         assert_eq!(band_count(plain.document().node(&id).unwrap(), 50), 1);
+    }
+
+    #[test]
+    fn a_frame_without_a_background_is_transparent_and_the_checkerboard_encodes() {
+        let mut s = Session::new(Document::new("t"));
+        let page = s.add_page("p").unwrap();
+        let root = s.document().page(&page).unwrap().root.id.clone();
+        let mut frame = NewNode::new(NodeKind::Frame);
+        (frame.width, frame.height) = (100.0, 100.0);
+        let id = s
+            .apply(
+                Actor::User,
+                None,
+                &[Operation::Create {
+                    parent: root,
+                    index: None,
+                    node: frame,
+                }],
+            )
+            .unwrap()
+            .created[0]
+            .clone();
+        let rendered = render_frame(s.document(), &id, 1.0, None).unwrap();
+        assert!(
+            transparent_share(&rendered.pixmap) > 0.99,
+            "no fill means fully transparent"
+        );
+
+        // with a fill the frame is opaque
+        let mut filled = NewNode::new(NodeKind::Frame);
+        (filled.width, filled.height) = (100.0, 100.0);
+        filled.fill = Paint::parse("#204060").ok();
+        let id2 = s
+            .apply(
+                Actor::User,
+                None,
+                &[Operation::Create {
+                    parent: s.document().page(&page).unwrap().root.id.clone(),
+                    index: None,
+                    node: filled,
+                }],
+            )
+            .unwrap()
+            .created[0]
+            .clone();
+        let rendered = render_frame(s.document(), &id2, 1.0, None).unwrap();
+        assert!(transparent_share(&rendered.pixmap) < 0.01);
+
+        let png = checkerboard_png().expect("the checkerboard encodes");
+        assert!(png.starts_with(&[0x89, b'P', b'N', b'G']));
     }
 }
