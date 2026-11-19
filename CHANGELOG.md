@@ -8,6 +8,14 @@ All notable changes to OpenDesigner are documented here.
 
 ## 2026-11-19
 
+### feat(video): videos of design frames, an ffmpeg export, Apple app-preview rules
+
+**Area:** `feat(core)`, `feat(render)`, `feat(media)`, `feat(mcp)`, `feat(cli)`, `feat(store)`
+
+**Change:** A video is a timeline of clips that show design frames, with transitions (cut, fade, slide) and a zoom, changed only through undoable operations (`create_video`, `add_clip`, `set_clip`, ...). `od_render::video` draws any moment; the new `crates/media` pipes frames to `ffmpeg` for an H.264 MP4 (OS encoder first). MCP: `list_videos`, `render_video_frame`, `export_video`, `list_video_presets`; CLI: `videos`, `export-video`, `video-presets`; the skill teaches it. `od_store::video` checks Apple's app-preview rules (read 2026-11-19). Invariant 10 is reworded and the decision logged: ffmpeg runs as a separate process.
+
+**Verified (macOS arm64):** core tests (overlap maths, bounds, undo/redo, persistence, a clip on a missing frame refused to load), render tests (cut, fade, slide, zoom, cover-and-crop), media tests with a stand-in ffmpeg and with Homebrew's real ffmpeg 9.0.1, MCP and CLI end-to-end encodes, preset refusals before encoding, and a real 886x1920 30 fps export probed with ffprobe (h264, 162 frames). **Not verified:** other encoders (Media Foundation, NVENC, VAAPI), Windows/Linux, a bundled LGPL ffmpeg, playback in the editor (not built), audio (none is written), footage clips (not built).
+
 ### build(repo): a Linux build-and-test container; the ACP test no longer guesses where `target/` puts the mock agent
 
 **Area:** `build(repo)`, `test(agent)`

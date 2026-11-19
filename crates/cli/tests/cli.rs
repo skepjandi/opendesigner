@@ -310,3 +310,71 @@ fn a_translation_exports_from_the_command_line() {
         .success()
     );
 }
+
+#[test]
+fn videos_are_built_with_operations_listed_and_exported_to_an_mp4() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("v.od");
+    let dir_s = s(&dir);
+    ok(&["new", dir_s, "--name", "Videos"]);
+    assert!(ok(&["videos", dir_s]).contains("no videos yet"));
+
+    let apply = |ops: serde_json::Value| {
+        let file = tmp.path().join("ops.json");
+        fs::write(&file, ops.to_string()).unwrap();
+        ok(&["apply", dir_s, s(&file)])
+    };
+    let made = apply(serde_json::json!([
+        {"op": "create", "parent": "n_2", "node": {"kind": "frame", "name": "One", "width": 200, "height": 400, "fill": "#ff0000"}},
+        {"op": "create", "parent": "n_2", "node": {"kind": "frame", "name": "Two", "width": 200, "height": 400, "fill": "#0000ff"}},
+        {"op": "create_video", "name": "Teaser", "fps": 10, "width": 100, "height": 200}
+    ]));
+    let created: serde_json::Value = serde_json::from_str(&made).unwrap();
+    let ids: Vec<&str> = created["created"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    let video = ids.iter().find(|i| i.starts_with("v_")).unwrap();
+    apply(serde_json::json!([
+        {"op": "add_clip", "video": video, "frame": ids[0], "duration_ms": 1000},
+        {"op": "add_clip", "video": video, "frame": ids[1], "duration_ms": 1000,
+         "transition": {"kind": "fade", "duration_ms": 400}}
+    ]));
+    let listing = ok(&["videos", dir_s]);
+    assert!(
+        listing.contains("Teaser\t100x200 at 10 fps\t1.6 s\t16 frames"),
+        "{listing}"
+    );
+    assert!(
+        listing.contains("starts 600 ms"),
+        "the fade overlaps 400 ms: {listing}"
+    );
+
+    // Without ffmpeg the export says what to do and writes nothing.
+    let out = Command::new(env!("CARGO_BIN_EXE_opendesigner"))
+        .args(["export-video", dir_s, "--video", video, "--file", "t.mp4"])
+        .env("OPENDESIGNER_FFMPEG", tmp.path().join("no-such-ffmpeg"))
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("did not run as ffmpeg"));
+    assert!(!dir.join("exports/t.mp4").exists());
+
+    // With one (this machine's, when it has one) the MP4 appears.
+    if od_media_available() {
+        let printed = ok(&["export-video", dir_s, "--video", video, "--file", "t.mp4"]);
+        assert!(
+            printed.starts_with("exports/t.mp4\t100x200 at 10 fps\t16 frames"),
+            "{printed}"
+        );
+        assert_eq!(&fs::read(dir.join("exports/t.mp4")).unwrap()[4..8], b"ftyp");
+    } else {
+        eprintln!("skipped the encode: no ffmpeg on this machine");
+    }
+}
+
+fn od_media_available() -> bool {
+    od_media::Ffmpeg::locate().is_ok_and(|f| f.h264_encoder().is_ok())
+}

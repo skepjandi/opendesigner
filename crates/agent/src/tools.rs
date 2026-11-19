@@ -173,7 +173,13 @@ pub fn definitions() -> Vec<Value> {
              image (a media/ path from list_media), image_fit (cover, contain or fill), {op:'move', id, x, y}, \
              {op:'reparent', id, parent, index?}, {op:'delete', id}, \
              {op:'set_token', name, value} (a named color '#rrggbb'; value null removes an unused token), \
-             {op:'set_localized_text', locale, id, text} (a translation of a text node; text null removes it). Colors are '#rrggbb', '#rrggbbaa' or \
+             {op:'set_localized_text', locale, id, text} (a translation of a text node; text null removes it), \
+             and for videos (see list_videos): {op:'create_video', name, fps, width, height} (even sizes), {op:'delete_video', id}, \
+             {op:'set_video', id, prop:{name, value}} with name one of name, fps, size (value {width, height}), \
+             {op:'add_clip', video, frame, duration_ms, index?, transition?, motion?} (a clip shows a frame), \
+             {op:'remove_clip', video, clip}, {op:'move_clip', video, clip, index}, \
+             {op:'set_clip', video, clip, prop:{name, value}} with name one of duration_ms, frame, \
+             transition (value {kind: cut|fade|slide_left|slide_right, duration_ms}), motion (value {scale_from, scale_to}, 1 to 3). Colors are '#rrggbb', '#rrggbbaa' or \
              '{token.name}'. Ids are minted for you; the result lists the created ids. A checkpoint is taken \
              before your first change in a turn so the user can restore it.",
             json!({
@@ -304,6 +310,49 @@ pub fn definitions() -> Vec<Value> {
             true,
         ),
         tool(
+            "list_videos",
+            "The project's videos: each is a timeline of clips that show design frames, with the \
+             time every clip starts, its transition (which overlaps the clip before it) and its zoom. \
+             Change them with apply_ops (create_video, add_clip, set_clip, ...); look at one moment \
+             with render_video_frame and write the MP4 with export_video.",
+            json!({}),
+            &[],
+            true,
+        ),
+        tool(
+            "list_video_presets",
+            "Store rules for videos (app previews): sizes, length, frame rate and file size, with the \
+             page each was read from and what is not checked.",
+            json!({}),
+            &[],
+            true,
+        ),
+        tool(
+            "render_video_frame",
+            "Render one moment of a video to an image so you can look at the result.",
+            json!({
+                "video": id("Id of a video from list_videos."),
+                "time_ms": {"type": "integer", "minimum": 0, "description": "Milliseconds from the start."},
+                "max_side": {"type": "integer", "minimum": 16, "maximum": 2048},
+                "locale": id("A language from list_locales.")
+            }),
+            &["video", "time_ms"],
+            true,
+        ),
+        tool(
+            "export_video",
+            "Draw every frame of a video and write it as an H.264 MP4 to exports/<file>. Needs ffmpeg \
+             on the user's computer (the error says what to install). This can take a while.",
+            json!({
+                "video": id("Id of a video from list_videos."),
+                "file": id("File name ending in .mp4, for example preview.mp4."),
+                "preset": id("A preset id from list_video_presets: the video is checked against the store's rules and nothing is written if it breaks one."),
+                "locale": id("A language from list_locales: text nodes show that language.")
+            }),
+            &["video", "file"],
+            false,
+        ),
+        tool(
             "validate_export",
             "Check exported PNGs in exports/ as one set against a store preset.",
             json!({"preset": id("A preset id."), "files": {"type": "array", "items": {"type": "string"}, "maxItems": 100}}),
@@ -342,6 +391,12 @@ pub fn call(ctx: &mut CallCtx, name: &str, args: Value) -> Result<Output, ToolEr
         "restore_checkpoint" => restore_checkpoint(ctx, parse(args)?),
         "list_export_presets" => Ok(Output::json(&presets_json())),
         "list_media" => list_media(ctx),
+        "list_videos" => Ok(Output::json(&to_json(&od_core::view::videos(
+            ctx.ws.session.document(),
+        ))?)),
+        "list_video_presets" => Ok(Output::json(&video_presets_json())),
+        "render_video_frame" => render_video_frame(ctx, parse(args)?),
+        "export_video" => export_video_tool(ctx, parse(args)?),
         "list_locales" => {
             let doc = ctx.ws.session.document();
             Ok(Output::json(&json!({
@@ -930,4 +985,117 @@ fn validate_export(ctx: &mut CallCtx, a: ValidateArgs) -> Result<Output, ToolErr
         "violations": list,
         "source": p.source,
     })))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct VideoFrameArgs {
+    video: String,
+    time_ms: u64,
+    #[serde(default)]
+    max_side: Option<u32>,
+    #[serde(default)]
+    locale: Option<String>,
+}
+
+fn render_video_frame(ctx: &mut CallCtx, a: VideoFrameArgs) -> Result<Output, ToolError> {
+    let id = node_id(&a.video)?;
+    let (png, width, height, warnings) = crate::video_export::video_frame_png(
+        ctx.ws,
+        &id,
+        a.time_ms,
+        a.locale.as_deref(),
+        a.max_side.unwrap_or(768),
+    )?;
+    let mut note = format!(
+        "{width}x{height} picture of {} at {} ms",
+        a.video, a.time_ms
+    );
+    if !warnings.is_empty() {
+        note.push_str(&format!("; warnings: {}", warnings.join("; ")));
+    }
+    Ok(Output {
+        content: vec![
+            Content::Image {
+                data: STANDARD.encode(png),
+                mime: "image/png",
+            },
+            Content::Text(note),
+        ],
+    })
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ExportVideoArgs {
+    video: String,
+    file: String,
+    #[serde(default)]
+    preset: Option<String>,
+    #[serde(default)]
+    locale: Option<String>,
+}
+
+fn export_video_tool(ctx: &mut CallCtx, a: ExportVideoArgs) -> Result<Output, ToolError> {
+    let id = node_id(&a.video)?;
+    crate::video_export::check_export(
+        ctx.ws,
+        &id,
+        &a.file,
+        a.locale.as_deref(),
+        a.preset.as_deref(),
+    )?;
+    let ffmpeg = od_media::Ffmpeg::locate().map_err(|e| ToolError(e.to_string()))?;
+    let out = crate::video_export::export_video(
+        ctx.ws,
+        &id,
+        &a.file,
+        a.locale.as_deref(),
+        a.preset.as_deref(),
+        &ffmpeg,
+        &mut |_, _| true,
+    )?;
+    Ok(Output::json(&video_outcome_json(&out)))
+}
+
+/// The result of a video export as the tools and the CLI report it.
+pub fn video_outcome_json(out: &crate::video_export::VideoOutcome) -> Value {
+    json!({
+        "path": out.path,
+        "width": out.width,
+        "height": out.height,
+        "fps": out.fps,
+        "frames": out.frames,
+        "duration_ms": out.duration_ms,
+        "bytes": out.bytes,
+        "preset": out.preset,
+        "preset_rules_read_on": out.preset_checked,
+        "preset_does_not_check": out.preset_not_checked,
+        "encoder": out.encoder,
+        "ffmpeg": out.ffmpeg,
+        "ffmpeg_is_gpl_build": out.ffmpeg_gpl,
+        "warnings": out.warnings,
+    })
+}
+
+fn video_presets_json() -> Value {
+    Value::Array(
+        od_store::video::VIDEO_PRESETS
+            .iter()
+            .map(|p| {
+                json!({
+                    "id": p.id,
+                    "description": p.description,
+                    "sizes": p.sizes.iter().map(|(w, h)| format!("{w}x{h}")).collect::<Vec<_>>(),
+                    "min_seconds": p.min_ms / 1000,
+                    "max_seconds": p.max_ms / 1000,
+                    "max_fps": p.max_fps,
+                    "max_megabytes": p.max_bytes / 1_000_000,
+                    "source": p.source,
+                    "rules_read_on": p.checked,
+                    "not_checked": p.not_checked,
+                })
+            })
+            .collect(),
+    )
 }

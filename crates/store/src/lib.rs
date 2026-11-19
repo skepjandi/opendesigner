@@ -5,6 +5,7 @@
 //! store will reject (AGENTS.md invariant 9).
 
 pub mod devices;
+pub mod video;
 
 use thiserror::Error;
 

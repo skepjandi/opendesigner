@@ -357,8 +357,11 @@ impl Session {
         }
         if tx.kind == TransactionKind::Edit {
             for a in &tx.ops {
-                if let Operation::Restore { node, .. } = &a.forward {
-                    created.push(node.id.clone());
+                match &a.forward {
+                    Operation::Restore { node, .. } => created.push(node.id.clone()),
+                    Operation::RestoreVideo { video } => created.push(video.id.clone()),
+                    Operation::RestoreClip { clip, .. } => created.push(clip.id.clone()),
+                    _ => {}
                 }
             }
         }

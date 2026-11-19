@@ -166,6 +166,70 @@ pub fn locales(doc: &Document) -> Vec<LocaleRow> {
         .collect()
 }
 
+/// One clip of a video, placed on its timeline.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ClipRow {
+    pub id: String,
+    pub frame: String,
+    pub frame_name: String,
+    pub start_ms: u64,
+    pub duration_ms: u32,
+    pub transition: crate::video::Transition,
+    /// How long the transition into this clip really lasts.
+    pub transition_ms: u32,
+    pub motion: crate::video::Motion,
+}
+
+/// A video with its clips placed.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct VideoRow {
+    pub id: String,
+    pub name: String,
+    pub fps: u32,
+    pub width: u32,
+    pub height: u32,
+    pub duration_ms: u64,
+    pub frame_count: u64,
+    pub clips: Vec<ClipRow>,
+}
+
+/// Every video with its clips placed on the timeline.
+pub fn videos(doc: &Document) -> Vec<VideoRow> {
+    doc.videos
+        .iter()
+        .map(|v| {
+            let placed = v.placed();
+            VideoRow {
+                id: v.id.to_string(),
+                name: v.name.clone(),
+                fps: v.fps,
+                width: v.width,
+                height: v.height,
+                duration_ms: v.duration_ms(),
+                frame_count: v.frame_count(),
+                clips: v
+                    .clips
+                    .iter()
+                    .zip(&placed)
+                    .map(|(c, p)| ClipRow {
+                        id: c.id.to_string(),
+                        frame: c.frame.to_string(),
+                        frame_name: doc
+                            .node(&c.frame)
+                            .map(|n| n.name.clone())
+                            .unwrap_or_default(),
+                        start_ms: p.start_ms,
+                        duration_ms: c.duration_ms,
+                        transition: c.transition,
+                        transition_ms: p.overlap_ms,
+                        motion: c.motion,
+                    })
+                    .collect(),
+            }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
