@@ -72,7 +72,7 @@ One editor window; the same panel set OpenCut's desktop shell uses (browser, pre
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│ toolbar: tools · page · zoom · export · agent status         │
+│ toolbar: select · hand · note · language · zoom · export · ⋯  │
 ├───────────┬──────────────────────────────────┬───────────────┤
 │ layers /  │                                  │ inspector     │
 │ assets /  │   canvas (design) or             │ (properties,  │
@@ -87,6 +87,33 @@ One editor window; the same panel set OpenCut's desktop shell uses (browser, pre
 ```
 
 The agent panel is the core loop, not a sidebar: pins, open/resolved state, the turn list with per-turn diff, and restore ([Agent Integration](./agent-integration.md#guidance-context)).
+
+## Agent-first interface and shortcuts
+
+> **Status: Implemented (macOS).** The app is for pointing and correcting, not for drawing: an agent creates the frames, shapes, text and videos and decides their names and sizes. The toolbar therefore has **Select**, **Hand** and **Note** (pin) plus undo/redo, zoom, language, **Export** and a "⋯" menu (colors, languages, open another project, save, shortcuts). There are no rectangle, ellipse, text, frame, image or device tools, and the window shows no size or name prompts. What a user can still do by hand: select, move and resize (drag or arrow keys), edit any property in the inspector, delete, pin notes, undo, change colors (tokens) and languages, and drop files in the window, which go to the agent's memory (the project's `media/` folder) and are never placed on the design.
+
+Keys follow what Figma and Penpot agree on, read on 2026-11-19 from Penpot's shortcut tables (`penpot-docs` `user-guide/introduction/shortcuts.njk`) and Figma's help and community lists. macOS only; Qt writes Command as `Ctrl` in key sequences.
+
+| Action | Keys | Taken from |
+|--------|------|-----------|
+| Select / Hand / pin a Note | `V` / `H` / `C` | Figma and Penpot: V, H, and C for comments (our pins are notes) |
+| Pan | two-finger scroll, hold `Space` and drag, `H` and drag, middle-drag | Figma, Penpot |
+| Zoom | pinch, `⌘` or `⌥` + scroll, `⌘+` `⌘-`, `=` `-` | Figma (`⌘`), Penpot (`⌥` scroll, pinch, `+` `-`) |
+| Fit / zoom to selection / 100% | `⇧1` / `⇧2` / `⌘0` | Figma (`⇧1`, `⇧2`), Penpot (`⇧1`, `⇧2`); Figma lists `⌘0` for 100% (Penpot uses `⇧0`) |
+| Next / previous frame | `N` / `⇧N` | Figma |
+| Next / previous layer | `Tab` / `⇧Tab` | Figma |
+| Move the selection | arrows 1 px, `⇧` arrows 10 px | Figma, Penpot |
+| Bring forward / back, front / back | `⌘]` `⌘[`, `⌥⌘]` `⌥⌘[` | Figma (Penpot uses `⌘↑` `⌘↓`) |
+| Edit the selected text | `Return` | Penpot (start editing) |
+| Deselect | `Esc` | both |
+| Undo / redo | `⌘Z` / `⇧⌘Z` | both |
+| Delete | `⌫` | both |
+| Export | `⇧⌘E` | both |
+| Talk to the agent | `⌘L` | ours (as in editors with an agent chat) |
+| Open / Save | `⌘O` / `⌘S` | macOS |
+| Shortcut list | `?` or `⌘/` | Penpot (`?`), Figma (`⌘/`) |
+
+Gestures: two fingers on the trackpad pan, a pinch zooms around the pointer (Qt's `PinchHandler`), `⌘`/`⌥` + scroll zooms around the pointer, middle-drag pans. Not done: smart zoom (two-finger double tap) and rotation, which Qt does not deliver to QML as gestures; Magic Mouse swipes were not tried. The keys and gestures are not driven by the window session (it calls the editor's functions, not synthesized key events); they were not checked on a real keyboard here.
 
 ## Canvas rendering
 

@@ -87,6 +87,9 @@ pub mod qobject {
         #[cxx_name = "importImage"]
         fn import_image(self: Pin<&mut Self>, url: &QString) -> QString;
         #[qinvokable]
+        #[cxx_name = "importToMemory"]
+        fn import_to_memory(self: Pin<&mut Self>, url: &QString) -> QString;
+        #[qinvokable]
         #[cxx_name = "replaceImage"]
         fn replace_image(self: Pin<&mut Self>, url: &QString, id: &QString) -> QString;
         #[qinvokable]
@@ -460,6 +463,18 @@ impl qobject::Editor {
             .as_mut()
             .act(|s| s.create_node(&kind, x, y, w, h))
             .unwrap_or_default())
+    }
+
+    pub fn import_to_memory(mut self: Pin<&mut Self>, url: &QString) -> QString {
+        let path = path_from_url(&url.to_string());
+        let added = self
+            .as_mut()
+            .act(|s| s.import_to_memory(std::path::Path::new(&path)));
+        if let Some(reference) = &added {
+            self.as_mut()
+                .show(&format!("Added {reference} to the agent's memory"), false);
+        }
+        q(&added.unwrap_or_default())
     }
 
     pub fn import_image(self: Pin<&mut Self>, url: &QString) -> QString {

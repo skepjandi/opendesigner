@@ -34,20 +34,73 @@ ApplicationWindow {
     }
 
     // ---------- shortcuts ----------
+    // Keys follow Figma and Penpot where they agree (see docs/wiki/qt-desktop.md#shortcuts). On
+    // macOS Qt writes the Command key as "Ctrl" and Control as "Meta".
+    readonly property var selectedId: backend.selection ? (JSON.parse(backend.selection)[0] || "") : ""
+    readonly property bool canAct: backend.hasProject && !typing
+    function nudge(dx, dy) {
+        const n = inspectorNode()
+        if (n) backend.moveNode(n.id, n.x + dx, n.y + dy)
+    }
+    function inspectorNode() { return backend.inspector && backend.inspector !== "null" ? JSON.parse(backend.inspector) : null }
+    // the layer after (step 1) or before (step -1) the selected one, in the order the layers panel lists them
+    function stepLayer(step) {
+        const rows = (backend.layers ? JSON.parse(backend.layers) : []).filter(r => r.kind !== "page")
+        if (rows.length === 0) return
+        let i = rows.findIndex(r => r.id === selectedId)
+        i = i < 0 ? (step > 0 ? 0 : rows.length - 1) : (i + step + rows.length) % rows.length
+        if (rows[i].kind === "frame") backend.openFrame(rows[i].id)
+        backend.select(rows[i].id)
+    }
+    function stepFrame(step) {
+        if (frames.length === 0) return
+        let i = frames.findIndex(f => f.id === backend.activeFrame)
+        i = (i + step + frames.length) % frames.length
+        backend.openFrame(frames[i].id)
+        backend.select(frames[i].id)
+    }
+
+    // edit
     Shortcut { sequences: [StandardKey.Undo]; onActivated: backend.undo() }
     Shortcut { sequences: [StandardKey.Redo]; onActivated: backend.redo() }
     Shortcut { sequences: [StandardKey.Save]; onActivated: backend.saveProject() }
-    Shortcut { sequences: ["Delete", "Backspace"]; enabled: !win.typing && backend.hasProject; onActivated: backend.deleteSelected() }
+    Shortcut { sequences: ["Delete", "Backspace"]; enabled: win.canAct; onActivated: backend.deleteSelected() }
     Shortcut { sequences: ["Escape"]; onActivated: { win.tool = "select"; backend.select("") } }
-    Shortcut { sequence: "V"; enabled: !win.typing; onActivated: win.tool = "select" }
-    Shortcut { sequence: "R"; enabled: !win.typing; onActivated: win.tool = "rect" }
-    Shortcut { sequence: "O"; enabled: !win.typing; onActivated: win.tool = "ellipse" }
-    Shortcut { sequence: "T"; enabled: !win.typing; onActivated: win.tool = "text" }
-    Shortcut { sequence: "F"; enabled: !win.typing; onActivated: win.tool = "frame" }
-    Shortcut { sequence: "P"; enabled: !win.typing; onActivated: win.tool = "pin" }
-    Shortcut { sequences: [StandardKey.ZoomIn]; onActivated: canvas.zoomCenter(1.25) }
-    Shortcut { sequences: [StandardKey.ZoomOut]; onActivated: canvas.zoomCenter(0.8) }
-    Shortcut { sequence: "Ctrl+0"; onActivated: canvas.fit() }
+    Shortcut { sequence: "Return"; enabled: win.canAct && win.selectedId !== ""; onActivated: inspector.editText() }
+    Shortcut { sequence: "Left"; enabled: win.canAct; onActivated: win.nudge(-1, 0) }
+    Shortcut { sequence: "Right"; enabled: win.canAct; onActivated: win.nudge(1, 0) }
+    Shortcut { sequence: "Up"; enabled: win.canAct; onActivated: win.nudge(0, -1) }
+    Shortcut { sequence: "Down"; enabled: win.canAct; onActivated: win.nudge(0, 1) }
+    Shortcut { sequence: "Shift+Left"; enabled: win.canAct; onActivated: win.nudge(-10, 0) }
+    Shortcut { sequence: "Shift+Right"; enabled: win.canAct; onActivated: win.nudge(10, 0) }
+    Shortcut { sequence: "Shift+Up"; enabled: win.canAct; onActivated: win.nudge(0, -10) }
+    Shortcut { sequence: "Shift+Down"; enabled: win.canAct; onActivated: win.nudge(0, 10) }
+    Shortcut { sequence: "Tab"; enabled: win.canAct; onActivated: win.stepLayer(1) }
+    Shortcut { sequence: "Shift+Tab"; enabled: win.canAct; onActivated: win.stepLayer(-1) }
+    Shortcut { sequence: "Ctrl+]"; enabled: win.canAct && win.selectedId !== ""; onActivated: backend.reorder(win.selectedId, 1) }
+    Shortcut { sequence: "Ctrl+["; enabled: win.canAct && win.selectedId !== ""; onActivated: backend.reorder(win.selectedId, -1) }
+    Shortcut { sequence: "Ctrl+Alt+]"; enabled: win.canAct && win.selectedId !== ""; onActivated: backend.reorder(win.selectedId, 1000) }
+    Shortcut { sequence: "Ctrl+Alt+["; enabled: win.canAct && win.selectedId !== ""; onActivated: backend.reorder(win.selectedId, -1000) }
+
+    // tools
+    Shortcut { sequence: "V"; enabled: win.canAct; onActivated: win.tool = "select" }
+    Shortcut { sequence: "H"; enabled: win.canAct; onActivated: win.tool = "hand" }
+    Shortcut { sequence: "C"; enabled: win.canAct; onActivated: win.tool = "pin" }
+
+    // view
+    Shortcut { sequences: [StandardKey.ZoomIn, "="]; enabled: !win.typing; onActivated: canvas.zoomCenter(1.25) }
+    Shortcut { sequences: [StandardKey.ZoomOut, "-"]; enabled: !win.typing; onActivated: canvas.zoomCenter(0.8) }
+    Shortcut { sequence: "Ctrl+0"; onActivated: canvas.zoomTo(1) }
+    Shortcut { sequence: "Shift+1"; enabled: !win.typing; onActivated: canvas.fit() }
+    Shortcut { sequence: "Shift+2"; enabled: !win.typing; onActivated: canvas.fitSelection() }
+    Shortcut { sequence: "N"; enabled: win.canAct; onActivated: win.stepFrame(1) }
+    Shortcut { sequence: "Shift+N"; enabled: win.canAct; onActivated: win.stepFrame(-1) }
+
+    // app
+    Shortcut { sequences: [StandardKey.Open]; onActivated: openDialog.open() }
+    Shortcut { sequence: "Ctrl+Shift+E"; enabled: backend.hasProject; onActivated: exportDialog.openDialog() }
+    Shortcut { sequence: "Ctrl+L"; enabled: backend.hasProject; onActivated: agent.focusChat() }
+    Shortcut { sequences: ["?", "Ctrl+/"]; enabled: !win.typing; onActivated: shortcutsDialog.open() }
 
     // ---------- layout ----------
     ColumnLayout {
@@ -83,12 +136,9 @@ ApplicationWindow {
                 }
                 Repeater {
                     model: [
-                        { id: "select", label: "Select", key: "V" },
-                        { id: "rect", label: "Rectangle", key: "R" },
-                        { id: "ellipse", label: "Ellipse", key: "O" },
-                        { id: "text", label: "Text", key: "T" },
-                        { id: "frame", label: "Frame", key: "F" },
-                        { id: "pin", label: "Pin a note", key: "P" }
+                        { id: "select", label: "Select", key: "V", tip: "Select and move what the agent made" },
+                        { id: "hand", label: "Hand", key: "H", tip: "Drag to move the view (or hold Space)" },
+                        { id: "pin", label: "Note", key: "C", tip: "Pin a note for the agent on a layer or a region" }
                     ]
                     delegate: Btn {
                         required property var modelData
@@ -97,32 +147,8 @@ ApplicationWindow {
                         onClicked: win.tool = modelData.id
                         ToolTip.visible: hovered
                         ToolTip.delay: 600
-                        ToolTip.text: modelData.label + " (" + modelData.key + ")"
+                        ToolTip.text: modelData.tip + " (" + modelData.key + ")"
                     }
-                }
-                Btn {
-                    text: "Image…"
-                    enabled: backend.activeFrame !== ""
-                    onClicked: imageDialog.open()
-                    ToolTip.visible: hovered
-                    ToolTip.delay: 600
-                    ToolTip.text: "Add a PNG, JPEG or WebP image (or drop one on the canvas)"
-                }
-                Btn {
-                    text: "Device…"
-                    enabled: backend.activeFrame !== ""
-                    onClicked: deviceDialog.openDialog()
-                    ToolTip.visible: hovered
-                    ToolTip.delay: 600
-                    ToolTip.text: "Add a phone or tablet frame with a screen to drop a capture on"
-                }
-                Btn {
-                    text: "Colors…"
-                    enabled: backend.hasProject
-                    onClicked: tokensDialog.open()
-                    ToolTip.visible: hovered
-                    ToolTip.delay: 600
-                    ToolTip.text: "Named colors (design tokens): change one and everything that uses it follows"
                 }
                 ComboBox {
                     id: languageBox
@@ -137,11 +163,6 @@ ApplicationWindow {
                     ToolTip.delay: 600
                     ToolTip.text: "The language the canvas, the text field and exports show"
                 }
-                Btn {
-                    text: "Languages…"
-                    enabled: backend.hasProject
-                    onClicked: languagesDialog.open()
-                }
                 Item { Layout.fillWidth: true }
                 Btn { text: "Undo"; enabled: backend.canUndo; onClicked: backend.undo() }
                 Btn { text: "Redo"; enabled: backend.canRedo; onClicked: backend.redo() }
@@ -151,9 +172,28 @@ ApplicationWindow {
                 Btn { text: "+"; implicitWidth: 30; leftPadding: 0; rightPadding: 0; onClicked: canvas.zoomCenter(1.25) }
                 Btn { text: "Fit"; onClicked: canvas.fit() }
                 Rectangle { width: 1; height: 22; color: Theme.border; Layout.leftMargin: 6; Layout.rightMargin: 6 }
-                Btn { text: "Open…"; onClicked: openDialog.open() }
-                Btn { text: "Save"; onClicked: backend.saveProject() }
                 Btn { text: "Export…"; primary: true; onClicked: exportDialog.openDialog() }
+                Btn {
+                    text: "⋯"
+                    implicitWidth: 34
+                    leftPadding: 0
+                    rightPadding: 0
+                    onClicked: moreMenu.open()
+                    ToolTip.visible: hovered
+                    ToolTip.delay: 600
+                    ToolTip.text: "Project: colors, languages, open another project, shortcuts"
+                    Menu {
+                        id: moreMenu
+                        y: parent.height
+                        MenuItem { text: "Colors…"; onTriggered: tokensDialog.open() }
+                        MenuItem { text: "Languages…"; onTriggered: languagesDialog.open() }
+                        MenuSeparator {}
+                        MenuItem { text: "Open another project…\t⌘O"; onTriggered: openDialog.open() }
+                        MenuItem { text: "Save\t⌘S"; onTriggered: backend.saveProject() }
+                        MenuSeparator {}
+                        MenuItem { text: "Keyboard shortcuts\t?"; onTriggered: shortcutsDialog.open() }
+                    }
+                }
             }
         }
 
@@ -216,6 +256,7 @@ ApplicationWindow {
                 SplitView.maximumWidth: 520
                 handle: Rectangle { implicitHeight: 1; color: Theme.border }
                 InspectorPanel {
+                    id: inspector
                     editor: backend
                     SplitView.preferredHeight: 360
                     SplitView.minimumHeight: 160
@@ -495,35 +536,6 @@ ApplicationWindow {
     }
 
     Modal {
-        id: deviceDialog
-        title: "Add a device frame"
-        width: 440
-        standardButtons: Dialog.Ok | Dialog.Cancel
-        property var kinds: []
-        function openDialog() {
-            kinds = JSON.parse(backend.deviceKinds())
-            kindBox.currentIndex = 0
-            open()
-        }
-        contentItem: ColumnLayout {
-            spacing: 8
-            ComboBox {
-                id: kindBox
-                Layout.fillWidth: true
-                model: deviceDialog.kinds.map(k => k.label)
-            }
-            Label {
-                Layout.fillWidth: true
-                wrapMode: Text.WordWrap
-                color: Theme.muted
-                font.pixelSize: 11
-                text: "A generic outline with typical proportions, as large as fits the frame. Drop a screenshot on its screen to fill it; drop another to swap it."
-            }
-        }
-        onAccepted: backend.addDevice(deviceDialog.kinds[kindBox.currentIndex].id)
-    }
-
-    Modal {
         id: exportDialog
         title: "Export"
         width: 560
@@ -584,6 +596,62 @@ ApplicationWindow {
         onAccepted: {
             const preset = presetBox.currentIndex > 0 ? exportDialog.presets[presetBox.currentIndex - 1].id : ""
             backend.exportAssets(exportDialog.mode, preset, fileField.text.trim(), slicesBox.value)
+        }
+    }
+
+    // ---------- keyboard shortcuts ----------
+    Modal {
+        id: shortcutsDialog
+        title: "Keyboard shortcuts"
+        width: 560
+        standardButtons: Dialog.Close
+        readonly property var groups: [
+            { name: "View", rows: [
+                ["Pan", "two fingers on the trackpad, or hold Space and drag, or H"],
+                ["Zoom", "pinch, or ⌘ + scroll, or ⌥ + scroll"],
+                ["Zoom in / out", "⌘+  ⌘−   or   =  −"],
+                ["Fit the frame / the selection", "⇧1   /   ⇧2"],
+                ["Zoom to 100%", "⌘0"],
+                ["Next / previous frame", "N   /   ⇧N"]] },
+            { name: "Pointing", rows: [
+                ["Select", "V   (click a layer on the canvas)"],
+                ["Pin a note for the agent", "C   (click a layer, or drag a region)"],
+                ["Next / previous layer", "Tab   /   ⇧Tab"],
+                ["Edit the selected text", "Return"],
+                ["Deselect", "Esc"]] },
+            { name: "Edit", rows: [
+                ["Undo / redo", "⌘Z   /   ⇧⌘Z"],
+                ["Move the selection", "arrows 1 px,  ⇧ arrows 10 px"],
+                ["Bring forward / send back", "⌘]   /   ⌘["],
+                ["Bring to front / send to back", "⌥⌘]   /   ⌥⌘["],
+                ["Delete", "⌫"]] },
+            { name: "App", rows: [
+                ["Talk to the agent", "⌘L"],
+                ["Export", "⇧⌘E"],
+                ["Open a project", "⌘O"],
+                ["Save", "⌘S"],
+                ["Show this list", "?   or   ⌘/"]] }
+        ]
+        contentItem: ColumnLayout {
+            spacing: 10
+            Repeater {
+                model: shortcutsDialog.groups
+                delegate: ColumnLayout {
+                    required property var modelData
+                    Layout.fillWidth: true
+                    spacing: 3
+                    Label { text: modelData.name; color: Theme.accent; font.pixelSize: 11; font.bold: true }
+                    Repeater {
+                        model: modelData.rows
+                        delegate: RowLayout {
+                            required property var modelData
+                            Layout.fillWidth: true
+                            Label { text: modelData[0]; color: Theme.text; font.pixelSize: 12; Layout.preferredWidth: 220 }
+                            Label { text: modelData[1]; color: Theme.muted; font.pixelSize: 12; Layout.fillWidth: true; wrapMode: Text.WordWrap }
+                        }
+                    }
+                }
+            }
         }
     }
 

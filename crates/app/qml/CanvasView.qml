@@ -65,6 +65,18 @@ Item {
         panY = vy - fy * zoom
     }
     function zoomCenter(factor) { zoomAt(factor, width / 2, height / 2) }
+    // zoom to a scale (1 = 100%) around the middle of the view
+    function zoomTo(z) { zoomAt(z / zoom, width / 2, height / 2); userMoved = true }
+    // fit the selected layer (or the whole frame when nothing is selected)
+    function fitSelection() {
+        const r = selBounds
+        if (!r || r.width <= 0 || r.height <= 0) { fit(); return }
+        const z = Math.max(0.02, Math.min(8, Math.min((width - 160) / r.width, (height - 160) / r.height)))
+        zoom = z
+        panX = (width - r.width * z) / 2 - r.x * z
+        panY = (height - r.height * z) / 2 - r.y * z
+        userMoved = true
+    }
 
     // The view fits when a frame is opened (and while the user has not moved it, when the window
     // resizes); an edit that changes the frame's size must not move the view under the user.
@@ -349,7 +361,7 @@ Item {
         anchors.fill: parent
         acceptedButtons: Qt.LeftButton | Qt.MiddleButton
         hoverEnabled: true
-        cursorShape: root.spaceDown ? Qt.OpenHandCursor : (root.tool !== "select" ? Qt.CrossCursor : Qt.ArrowCursor)
+        cursorShape: root.spaceDown || root.tool === "hand" ? (pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor) : (root.tool === "pin" ? Qt.CrossCursor : Qt.ArrowCursor)
         z: -1
 
         property point startView
@@ -365,7 +377,7 @@ Item {
             startView = Qt.point(m.x, m.y)
             startFrame = root.toFrame(m.x, m.y)
             moved = false
-            panning = m.button === Qt.MiddleButton || root.spaceDown
+            panning = m.button === Qt.MiddleButton || root.spaceDown || root.tool === "hand"
             if (panning) { panStart = Qt.point(root.panX, root.panY); return }
             if (root.tool === "select") {
                 const id = root.editor.hitTest(startFrame.x, startFrame.y)
@@ -389,7 +401,7 @@ Item {
             if (root.tool === "select") {
                 if (dragNode && dragBounds && moved)
                     root.live = { x: dragBounds.x + dx, y: dragBounds.y + dy, width: dragBounds.width, height: dragBounds.height }
-            } else {
+            } else if (root.tool === "pin") {
                 band.visible = moved
                 band.x = Math.min(startView.x, m.x)
                 band.y = Math.min(startView.y, m.y)
@@ -414,12 +426,6 @@ Item {
                 else
                     root.requestPin(id, 0, 0, 0, 0)
                 root.toolFinished()
-            } else {
-                const w = Math.abs(end.x - startFrame.x), h = Math.abs(end.y - startFrame.y)
-                const x = Math.min(startFrame.x, end.x), y = Math.min(startFrame.y, end.y)
-                if (moved && w > 4 && h > 4) root.editor.createNode(root.tool, x, y, w, h)
-                else root.editor.createNode(root.tool, startFrame.x, startFrame.y, root.tool === "text" ? 400 : 200, root.tool === "text" ? 120 : 200)
-                root.toolFinished()
             }
         }
     }
@@ -432,9 +438,14 @@ Item {
             root.userMoved = true
         }
     }
+    // ⌘ (or Ctrl) and ⌥ with the scroll wheel or two fingers zoom around the pointer
     WheelHandler {
-        acceptedModifiers: Qt.ControlModifier | Qt.MetaModifier
-        onWheel: e => root.zoomAt(Math.pow(1.0015, e.angleDelta.y), point.position.x, point.position.y)
+        acceptedModifiers: Qt.ControlModifier | Qt.MetaModifier | Qt.AltModifier
+        onWheel: e => {
+            const d = e.pixelDelta.y !== 0 ? e.pixelDelta.y * 2 : e.angleDelta.y
+            root.zoomAt(Math.pow(1.0015, d), point.position.x, point.position.y)
+            root.userMoved = true
+        }
     }
     PinchHandler {
         id: pinch
@@ -447,12 +458,10 @@ Item {
             lastScale = scale
         }
     }
-    // dropping image files: onto an image (a device's screen) swaps its picture, elsewhere adds an image
+    // Files dropped here are not placed on the design: they go to the agent's memory (the media
+    // folder) for it to use when it needs them.
     DropArea {
         anchors.fill: parent
-        onDropped: drop => {
-            const p = root.toFrame(drop.x, drop.y)
-            for (const url of drop.urls) root.editor.dropImage(url.toString(), p.x, p.y)
-        }
+        onDropped: drop => { for (const url of drop.urls) root.editor.importToMemory(url.toString()) }
     }
 }

@@ -13,6 +13,7 @@ Item {
     JsonModel { id: messagesModel }
     JsonModel { id: planModel }
     JsonModel { id: optionsModel }
+    function focusInput() { if (connected) input.forceActiveFocus() }
     onChatChanged: {
         messagesModel.sync(chat.messages)
         planModel.sync(chat.plan || [])
