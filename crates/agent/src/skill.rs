@@ -358,6 +358,16 @@ write the file with `export_video`, which needs `ffmpeg` on the user's computer 
 is missing. For the App Store pass `preset` to `export_video` (see `list_video_presets`): sizes, 15 to 30
 seconds and 30 fps are checked before anything is encoded, and the preset says what it does not
 check (the audio track, the H.264 profile).
+
+Sound: a video can carry one sound track under its picture, a file in the project's `media/`
+folder. `{"op": "set_video", "video": "v_20", "prop": {"name": "audio", "value": {"file":
+"media/song.mp3", "start_ms": 0, "gain": 1.0, "fade_in_ms": 500, "fade_out_ms": 500}}}` sets it
+(`gain` is 0 to 2, the fades are milliseconds; `"value": null` takes the track away). The track
+never makes the video longer: it is cut at the end. To find music or sound effects, use
+`search_sounds` (Freesound; it needs the user's token, and the answer says so if there is none),
+`import_sound` to bring one into `media/`, then set the track. A Freesound sound keeps its
+author's license: show the attribution the tool gives you (title, author, license, link) wherever
+the sound is used, and prefer CC0.
 "##;
 
 fn store_specs_md() -> String {

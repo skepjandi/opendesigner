@@ -79,6 +79,28 @@ pub struct CallCtx<'a> {
 }
 
 fn tool(name: &str, description: &str, props: Value, required: &[&str], read_only: bool) -> Value {
+    tool_full(name, description, props, required, read_only, false)
+}
+
+/// A tool that reaches the network: it says so with `openWorldHint`.
+fn tool_net(
+    name: &str,
+    description: &str,
+    props: Value,
+    required: &[&str],
+    read_only: bool,
+) -> Value {
+    tool_full(name, description, props, required, read_only, true)
+}
+
+fn tool_full(
+    name: &str,
+    description: &str,
+    props: Value,
+    required: &[&str],
+    read_only: bool,
+    open_world: bool,
+) -> Value {
     json!({
         "name": name,
         "description": description,
@@ -88,7 +110,7 @@ fn tool(name: &str, description: &str, props: Value, required: &[&str], read_onl
             "required": required,
             "additionalProperties": false,
         },
-        "annotations": { "readOnlyHint": read_only, "openWorldHint": false },
+        "annotations": { "readOnlyHint": read_only, "openWorldHint": open_world },
     })
 }
 
@@ -236,6 +258,7 @@ pub fn definitions() -> Vec<Value> {
              {op:'set_localized_text', locale, id, text} (a translation of a text node; text null removes it), \
              and for videos (see list_videos): {op:'create_video', name, fps, width, height} (even sizes), {op:'delete_video', id}, \
              {op:'set_video', id, prop:{name, value}} with name one of name, fps, size (value {width, height}), \
+             audio (value {file:'media/x.mp3', start_ms?, gain? (0 to 2), fade_in_ms?, fade_out_ms?} for the sound under the picture; null takes it away), \
              {op:'add_clip', video, frame | footage:{file:'media/x.mp4', in_ms}, duration_ms, index?, transition?, motion?} (a clip shows a design frame or plays footage from list_footage), \
              {op:'remove_clip', video, clip}, {op:'move_clip', video, clip, index}, \
              {op:'set_clip', video, clip, prop:{name, value}} with name one of duration_ms, frame, \
@@ -375,6 +398,7 @@ pub fn definitions() -> Vec<Value> {
             "list_videos",
             "The project's videos: each is a timeline of clips that show design frames, with the \
              time every clip starts, its transition (which overlaps the clip before it) and its zoom. \
+             A video may also have one sound track (the file, when it starts and its volume). \
              Change them with apply_ops (create_video, add_clip, set_clip, ...); look at one moment \
              with render_video_frame and write the MP4 with export_video.",
             json!({}),
@@ -472,6 +496,45 @@ pub fn definitions() -> Vec<Value> {
             &[],
             true,
         ),
+        tool_net(
+            "search_sounds",
+            "Find music and sound effects on Freesound (https://freesound.org) for a video. \
+             Returns each sound's id, name, length, license, author and a preview to listen to. \
+             Freesound sounds are licensed by their authors, not by us: the license in the result \
+             is the license the user must obey, and you must show the attribution the result \
+             carries (title, author, license, link) wherever the sound is used. Prefer CC0. \
+             Needs the user's Freesound token (the Connect tab); without one the call says so.",
+            json!({
+                "query": id("Words to search for, for example \"soft piano loop\"."),
+                "duration_max_ms": {"type": "integer", "minimum": 1, "maximum": 600000, "description": "Keep only sounds no longer than this."},
+                "page": {"type": "integer", "minimum": 1, "maximum": 20, "description": "Which page of results (1 is the first)."}
+            }),
+            &["query"],
+            true,
+        ),
+        tool_net(
+            "import_sound",
+            "Download one Freesound sound (the preview recording, not the original file) into \
+             this project's media/ folder and write what it is next to it. Returns the media/ \
+             reference and the one line the user must show: \"Title by Author, License, link\". \
+             The license must be honoured: say who made it, under which license, and where it \
+             came from. The file is never overwritten. Then put it under a video with set_video \
+             prop {name: \"audio\", value: {file, start_ms, gain, fade_in_ms, fade_out_ms}}.",
+            json!({
+                "id": {"type": "integer", "minimum": 1, "description": "The id of a sound from search_sounds."},
+                "name": id("A plain file name for the sound, without the .mp3 ending.")
+            }),
+            &["id"],
+            false,
+        ),
+        tool(
+            "list_sounds",
+            "The Freesound sounds already imported into this project: the media/ file, and the \
+             attribution line the user must show for each.",
+            json!({}),
+            &[],
+            true,
+        ),
         tool(
             "list_video_presets",
             "Store rules for videos (app previews): sizes, length, frame rate and file size, with the \
@@ -562,6 +625,9 @@ pub fn call(ctx: &mut CallCtx, name: &str, args: Value) -> Result<Output, ToolEr
         "open_workspace" => switch_workspace(ctx, parse(args)?, false),
         "find_files" => find_files(ctx, parse(args)?),
         "import_file" => import_file(ctx, parse(args)?),
+        "search_sounds" => search_sounds(parse(args)?),
+        "import_sound" => import_sound(ctx, parse(args)?),
+        "list_sounds" => list_sounds(ctx),
         "render_video_frame" => render_video_frame(ctx, parse(args)?),
         "export_video" => export_video_tool(ctx, parse(args)?),
         "list_locales" => {
@@ -1679,6 +1745,82 @@ fn import_file(ctx: &mut CallCtx, a: ImportFileArgs) -> Result<Output, ToolError
     Ok(Output::json(
         &json!({"reference": reference, "copied_from": real.display().to_string()}),
     ))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SearchSoundsArgs {
+    query: String,
+    #[serde(default)]
+    duration_max_ms: Option<u32>,
+    #[serde(default)]
+    page: Option<u32>,
+}
+
+fn search_sounds(a: SearchSoundsArgs) -> Result<Output, ToolError> {
+    let sounds = crate::freesound::search(&a.query, a.duration_max_ms, a.page.unwrap_or(1))
+        .map_err(|e| ToolError(e.to_string()))?;
+    let rows: Vec<Value> = sounds
+        .iter()
+        .map(|s| {
+            json!({
+                "id": s.id,
+                "name": s.name,
+                "duration_ms": s.duration_ms,
+                "license": s.license,
+                "license_url": s.license_url,
+                "author": s.author,
+                "preview_url": s.preview_url,
+                "source_url": s.source_url,
+                "attribution": s.attribution(),
+            })
+        })
+        .collect();
+    Ok(Output::json(&json!({"count": rows.len(), "sounds": rows})))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ImportSoundArgs {
+    id: u64,
+    #[serde(default)]
+    name: Option<String>,
+}
+
+fn import_sound(ctx: &mut CallCtx, a: ImportSoundArgs) -> Result<Output, ToolError> {
+    let dir = ctx
+        .ws
+        .dir()
+        .map(std::path::Path::to_path_buf)
+        .ok_or_else(|| {
+            ToolError("the project has no folder, so nowhere to put the sound".into())
+        })?;
+    let imported = crate::freesound::import(&dir, a.id, a.name.as_deref())
+        .map_err(|e| ToolError(e.to_string()))?;
+    Ok(Output::json(&json!({
+        "file": imported.file,
+        "sidecar": imported.sidecar,
+        "attribution": imported.attribution,
+        "note": "show this attribution wherever the sound is used",
+    })))
+}
+
+fn list_sounds(ctx: &mut CallCtx) -> Result<Output, ToolError> {
+    let Some(dir) = ctx.ws.dir().map(std::path::Path::to_path_buf) else {
+        return Ok(Output::json(&json!([])));
+    };
+    let sounds = crate::freesound::list_imported(&dir).map_err(|e| ToolError(e.to_string()))?;
+    let rows: Vec<Value> = sounds
+        .iter()
+        .map(|s| {
+            json!({
+                "file": s.file,
+                "sidecar": s.sidecar,
+                "attribution": s.attribution,
+            })
+        })
+        .collect();
+    Ok(Output::json(&Value::Array(rows)))
 }
 
 fn list_workspaces(ctx: &mut CallCtx) -> Result<Output, ToolError> {
