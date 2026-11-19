@@ -119,6 +119,17 @@ fn tool_full(
 
 /// The `tools/list` result.
 pub fn definitions() -> Vec<Value> {
+    let mut all = core_definitions();
+    all.extend(crate::assets::tools::definitions());
+    all
+}
+
+/// `install_asset_pack` without the editor state, for the caller that shows it as a job.
+pub fn call_detached(args: &Value) -> Result<Output, ToolError> {
+    crate::assets::tools::call(None, "install_asset_pack", args.clone())
+}
+
+fn core_definitions() -> Vec<Value> {
     let id = |d: &str| json!({"type": "string", "description": d});
     vec![
         tool(
@@ -628,6 +639,10 @@ fn persist(ws: &Workspace) -> Result<(), ToolError> {
 pub fn call(ctx: &mut CallCtx, name: &str, args: Value) -> Result<Output, ToolError> {
     match name {
         "get_guidance" => get_guidance(ctx),
+        n if crate::assets::tools::handles(n) => {
+            let dir = ctx.ws.dir().map(std::path::Path::to_path_buf);
+            crate::assets::tools::call(dir.as_deref(), n, args)
+        }
         "get_playbook" => get_playbook(parse(args)?),
         "review_frame" => review_frame_tool(ctx, parse(args)?),
         "list_formats" => Ok(Output::json(&crate::formats::sections_json())),

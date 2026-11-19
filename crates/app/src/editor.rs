@@ -377,6 +377,21 @@ pub mod qobject {
         #[cxx_name = "removeMcpServer"]
         fn remove_mcp_server(self: Pin<&mut Self>, name: &QString) -> QString;
         #[qinvokable]
+        #[cxx_name = "assetPacks"]
+        fn asset_packs(self: &Self) -> QString;
+        #[qinvokable]
+        #[cxx_name = "installAssetPack"]
+        fn install_asset_pack(self: Pin<&mut Self>, id: &QString) -> QString;
+        #[qinvokable]
+        #[cxx_name = "unloadAssetPack"]
+        fn unload_asset_pack(self: Pin<&mut Self>, id: &QString) -> QString;
+        #[qinvokable]
+        #[cxx_name = "dismissAssetRequest"]
+        fn dismiss_asset_request(self: Pin<&mut Self>, id: &QString) -> QString;
+        #[qinvokable]
+        #[cxx_name = "recommendedServers"]
+        fn recommended_servers(self: &Self) -> QString;
+        #[qinvokable]
         #[cxx_name = "skillStatus"]
         fn skill_status(self: &Self) -> QString;
         #[qinvokable]
@@ -1359,6 +1374,44 @@ impl qobject::Editor {
                 q(&e)
             }
         }
+    }
+
+    /// The asset packs with their state, for the Connect tab.
+    pub fn asset_packs(&self) -> QString {
+        q(&crate::asset_packs::packs_json())
+    }
+
+    /// The user agreed to download a pack. The answer is the reason it could not start.
+    pub fn install_asset_pack(mut self: Pin<&mut Self>, id: &QString) -> QString {
+        self.as_mut()
+            .asset_pack_result(crate::asset_packs::install(&id.to_string()))
+    }
+
+    /// Deletes an installed pack from the cache.
+    pub fn unload_asset_pack(mut self: Pin<&mut Self>, id: &QString) -> QString {
+        self.as_mut()
+            .asset_pack_result(crate::asset_packs::unload(&id.to_string()))
+    }
+
+    /// The user declined a pack an agent asked for.
+    pub fn dismiss_asset_request(mut self: Pin<&mut Self>, id: &QString) -> QString {
+        self.as_mut()
+            .asset_pack_result(crate::asset_packs::dismiss(&id.to_string()))
+    }
+
+    fn asset_pack_result(mut self: Pin<&mut Self>, result: Result<(), String>) -> QString {
+        match result {
+            Ok(()) => q(""),
+            Err(e) => {
+                self.as_mut().show(&e, true);
+                q(&e)
+            }
+        }
+    }
+
+    /// The MCP servers worth adding, for the Connect tab.
+    pub fn recommended_servers(&self) -> QString {
+        q(&crate::asset_packs::recommended_json())
     }
 
     pub fn skill_status(&self) -> QString {

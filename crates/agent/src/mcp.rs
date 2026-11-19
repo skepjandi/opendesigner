@@ -388,6 +388,40 @@ impl Handler {
         }
     }
 
+    /// An approved pack download takes seconds: it runs without the editor state locked and
+    /// shows as a job the user can see.
+    fn install_pack_call(&self, id: Value, args: Value, label: String) -> Value {
+        let job = self.jobs.begin();
+        let report = |state: JobState| {
+            if let Some(hook) = &self.on_job {
+                hook(JobUpdate {
+                    id: job,
+                    label: label.clone(),
+                    done: u64::from(state == JobState::Finished),
+                    total: 1,
+                    state,
+                });
+            }
+        };
+        report(JobState::Running);
+        let result = tools::call_detached(&args);
+        match &result {
+            Ok(_) => report(JobState::Finished),
+            Err(e) => report(JobState::Failed(e.0.clone())),
+        }
+        match result {
+            Ok(out) => rpc_result(
+                id,
+                json!({"content": out.content.iter().map(content_json).collect::<Vec<_>>(),
+                       "isError": false}),
+            ),
+            Err(e) => rpc_result(
+                id,
+                json!({"content": [{"type": "text", "text": e.0}], "isError": true}),
+            ),
+        }
+    }
+
     fn tools_call(&self, id: Value, actor: Actor, params: &Value) -> Value {
         let Some(name) = params.get("name").and_then(Value::as_str) else {
             return rpc_error(id, -32602, "tools/call needs a tool name");
@@ -395,6 +429,11 @@ impl Handler {
         let args = params.get("arguments").cloned().unwrap_or(Value::Null);
         if name == "export_video" {
             return self.export_video_call(id, args);
+        }
+        if name == "install_asset_pack"
+            && let Some(label) = crate::assets::tools::will_download(&args)
+        {
+            return self.install_pack_call(id, args, label);
         }
         let extra_servers = self
             .extra_servers

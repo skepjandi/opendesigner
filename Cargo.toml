@@ -30,6 +30,10 @@ sha2 = "0.11"
 # certificates the operating system trusts. Both are permissive and audited by `cargo deny`.
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 rustls-native-certs = "0.8"
+# SVG to PNG at import (icons, blobs, backgrounds). Same tiny-skia family as the renderer; text and
+# raster-image support are off: an asset SVG is paths, and nothing it names is ever fetched.
+resvg = { version = "0.50", default-features = false }
+flate2 = "1"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

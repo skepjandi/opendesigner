@@ -154,9 +154,19 @@ pub fn encode_query_value(value: &str) -> String {
 /// Asks for `url` and returns the answer. Redirects are followed while they stay on the same
 /// site; an answer larger than `max_bytes` is refused.
 pub fn get(url: &str, max_bytes: u64) -> Result<Response, HttpError> {
+    get_with_referer(url, max_bytes, None)
+}
+
+/// Like [`get`], with a `Referer` header. Some download buttons only answer a request that says
+/// which page it came from (Kenney's does). Redirects stay on the same site, so it goes nowhere else.
+pub fn get_with_referer(
+    url: &str,
+    max_bytes: u64,
+    referer: Option<&str>,
+) -> Result<Response, HttpError> {
     let mut target = parse_url(url)?;
     for _ in 0..=MAX_REDIRECTS {
-        let (status, headers, body) = request(&target, max_bytes)?;
+        let (status, headers, body) = request(&target, max_bytes, referer)?;
         if is_redirect(status) {
             let location = headers
                 .iter()
@@ -221,7 +231,7 @@ fn resolve(from: &Url, location: &str) -> Result<Url, HttpError> {
 }
 
 /// One request and its answer.
-fn request(url: &Url, max_bytes: u64) -> Result<Answer, HttpError> {
+fn request(url: &Url, max_bytes: u64, referer: Option<&str>) -> Result<Answer, HttpError> {
     let address = (url.host.as_str(), url.port)
         .to_socket_addrs()
         .map_err(|e| HttpError::Connect {
@@ -256,9 +266,12 @@ fn request(url: &Url, max_bytes: u64) -> Result<Answer, HttpError> {
         format!("{}:{}", url.host, url.port)
     };
     let request = format!(
-        "GET {path} HTTP/1.1\r\nHost: {host}\r\nUser-Agent: OpenDesigner/{version}\r\nAccept: */*\r\nConnection: close\r\n\r\n",
+        "GET {path} HTTP/1.1\r\nHost: {host}\r\nUser-Agent: OpenDesigner/{version}\r\nAccept: */*\r\n{referer}Connection: close\r\n\r\n",
         path = url.path,
         host = host,
+        referer = referer
+            .filter(|r| r.bytes().all(|b| (0x21..=0x7e).contains(&b)))
+            .map_or(String::new(), |r| format!("Referer: {r}\r\n")),
         version = env!("CARGO_PKG_VERSION"),
     );
     if url.secure {

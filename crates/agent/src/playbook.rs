@@ -19,15 +19,18 @@ what it finds, render_video_frame at each beat and mid-transition, read the stor
 Iterate at least once after you first look. A video also gets sound unless the user asked for \
 silence: make_sound for effects, search_sounds or the user's own file for a music bed (gain 0.15 to \
 0.3 under a voice, fades 300 to 800 ms), then set_video audio.\n\
-5. Use every tool that helps (media, device frames, tokens, languages, presets, workspaces, \
+5. Assets: before drawing an icon, blob, background or texture by hand, search_assets, \
+import_asset (recolored to your tokens) and make_asset; one icon set per design; show the credit line \
+an import returns whenever it says attribution_required.\n\
+6. Use every tool that helps (media, device frames, tokens, languages, presets, workspaces, \
 exports). Sizes the user chose are theirs: change them only through set_format, which asks. If they \
 chose nothing, pick from list_formats and record it with set_format.\n\
-6. Memory: get_guidance lists the notes earlier runs left (list_memory, read_memory): read the \
+7. Memory: get_guidance lists the notes earlier runs left (list_memory, read_memory): read the \
 relevant ones before you build. Before you finish, write_memory what the next run should know \
 (brand facts such as colors, fonts and copy and where they came from, what the user corrected or \
 liked, what worked, mistakes to avoid, decisions) in brand.md, lessons.md, decisions.md or style.md. \
 Short and factual; never secrets or tokens.\n\
-7. End by saying what you made, what you decided for them and what you would try next.";
+8. End by saying what you made, what you decided for them and what you would try next.";
 
 pub const TOPICS: &[(&str, &str, &str)] = &[
     (
@@ -94,6 +97,9 @@ mod tests {
             "list_memory",
             "read_memory",
             "write_memory",
+            "search_assets",
+            "import_asset",
+            "make_asset",
         ] {
             assert!(QUALITY_BAR.contains(t), "the bar should mention {t}");
             assert!(tools.contains(&t), "{t} is not a tool");

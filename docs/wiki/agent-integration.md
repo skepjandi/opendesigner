@@ -86,6 +86,8 @@ Each row is data in `agent`'s target table, not code, so adding an agent is a on
 - **Telling the agent what it has.** The in-app chat's first message ends with the user's extra MCP servers (names only, never commands or environment values; known names get a hint, `minimax-mcp` is MiniMax speech for voice-overs, ask before spending credits on long text) and a line on the sound tools. The MCP `initialize` instructions cannot know the user's servers, so `get_guidance` returns them as `extra_mcp_servers` (`[{name, about?}]`) plus a `sound` line; the app gives the handler the names with `Handler::set_extra_servers` each time the chat starts.
 - **Sounds from Freesound.** `search_sounds {query, duration_max_ms?, page?}` asks Freesound for music and sound effects; `import_sound {id, name?}` downloads the preview into the project's `media/` folder and writes `media/<name>.freesound.json` beside it; `list_sounds` shows what is imported. They need the user's free Freesound token, which the user pastes into the Connect tab; without it every call answers "no Freesound token: ask the user to add one in the Connect tab; they can get one at https://freesound.org/apiv2/apply/". The token is a credential: it is stored in the per-user config folder and sent only to freesound.org ([Security](./security.md#network)). The sounds keep their authors' licenses, so the tool descriptions tell the agent to show the attribution it is given; see [Video Editing](./video-editing.md#finding-sounds-freesound).
 
+- **Assets.** `list_asset_sources`, `search_assets`, `make_asset`, `import_asset`, `list_asset_packs`, `install_asset_pack`, `unload_asset_pack` give the agent icons (Lucide built in; more sets and Kenney CC0 packs as downloads), generated blobs, gradients, auroras, grain, patterns and shapes, and sounds, written into `media/` as PNG (an SVG is recolored and drawn at the size asked for) or copied as is, each with a `media/<name>.asset.json` sidecar. `install_asset_pack` only asks the user (the Connect tab); the download is a job once approved. The MCP servers for 3D assets the user named are optional external servers added in the Connect tab. Full description, sources and licences: [Store Assets](./store-assets.md#asset-packs-icons-shapes-backgrounds-sounds).
+
 Deviations: `add_annotation` is not offered to agents, and there is no `transcribe` or timeline tool. Design tokens change through `apply_ops` with `set_token` (attributed, checkpointed and undoable like any edit); there is no separate token tool.
 
 ### Design (as originally specified)
@@ -175,6 +177,10 @@ The chat can hand the agent more MCP servers than the editor's own: programs the
 this computer (a speech model server, a search API, a database). They are listed in the
 **Connect** tab and are given to the agent with the session, so the agent can call them while it
 works.
+
+### Recommended servers
+
+Below the asset packs the Connect tab lists three servers worth adding for 3D assets (`3dassets`, `sozai`, `asset-gate`), each with a one-click **Add** that saves the exact command read from its README (`npx -y 3dassets-mcp`, `uvx --from git+https://github.com/kanaworksai-hue/sozai-search-mcp sozai`, `npx -y github:codepawl/asset-gate`; none needs a key). The click does what the user could type in the form: the app still never installs or starts them. What each is, its licence and what could not be verified are in [Store Assets](./store-assets.md#asset-packs-icons-shapes-backgrounds-sounds).
 
 ### What the user adds
 
