@@ -172,6 +172,18 @@ pub mod qobject {
         #[cxx_name = "setDeviceAccess"]
         fn set_device_access(self: Pin<&mut Self>, on: bool);
         #[qinvokable]
+        #[cxx_name = "freesoundTokenSet"]
+        fn freesound_token_set(self: &Self) -> bool;
+        #[qinvokable]
+        #[cxx_name = "setFreesoundToken"]
+        fn set_freesound_token(self: Pin<&mut Self>, token: &QString);
+        #[qinvokable]
+        #[cxx_name = "clearFreesoundToken"]
+        fn clear_freesound_token(self: Pin<&mut Self>);
+        #[qinvokable]
+        #[cxx_name = "removeVideoAudio"]
+        fn remove_video_audio(self: Pin<&mut Self>, video: &QString);
+        #[qinvokable]
         #[cxx_name = "cancelJob"]
         fn cancel_job(self: &Self, id: &QString);
         #[qinvokable]
@@ -813,6 +825,31 @@ impl qobject::Editor {
         if let Err(e) = EditorState::set_device_access(on) {
             self.as_mut().show(&e, true);
         }
+    }
+
+    pub fn freesound_token_set(&self) -> bool {
+        EditorState::freesound_token_set()
+    }
+
+    pub fn set_freesound_token(mut self: Pin<&mut Self>, token: &QString) {
+        if let Err(e) = EditorState::set_freesound_token(&token.to_string()) {
+            self.as_mut().show(&e, true);
+            return;
+        }
+        self.as_mut().show("Freesound token saved", false);
+    }
+
+    pub fn clear_freesound_token(mut self: Pin<&mut Self>) {
+        if let Err(e) = EditorState::clear_freesound_token() {
+            self.as_mut().show(&e, true);
+            return;
+        }
+        self.as_mut().show("Freesound token removed", false);
+    }
+
+    pub fn remove_video_audio(mut self: Pin<&mut Self>, video: &QString) {
+        self.as_mut()
+            .act(|s| s.remove_video_audio(&video.to_string()));
     }
 
     pub fn cancel_job(&self, id: &QString) {

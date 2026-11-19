@@ -236,6 +236,58 @@ Rectangle {
             font.pixelSize: 11
         }
 
+        // the sound under the picture
+        Rectangle {
+            visible: !!(root.video && root.video.audio)
+            Layout.fillWidth: true
+            Layout.leftMargin: 10
+            Layout.rightMargin: 10
+            implicitHeight: soundRow.implicitHeight + 12
+            radius: 4
+            color: Theme.field
+            border.width: 1
+            border.color: Theme.border
+            RowLayout {
+                id: soundRow
+                anchors.fill: parent
+                anchors.margins: 6
+                spacing: 8
+                Label {
+                    Layout.fillWidth: true
+                    text: root.video && root.video.audio
+                        ? "♪ " + root.video.audio.file.replace("media/", "")
+                          + " · from " + (root.video.audio.start_ms / 1000).toFixed(1) + " s"
+                          + " · volume " + root.video.audio.gain.toFixed(2)
+                          + (root.video.audio.fade_in_ms > 0 ? " · fades in " + (root.video.audio.fade_in_ms / 1000).toFixed(1) + " s" : "")
+                          + (root.video.audio.fade_out_ms > 0 ? " · fades out " + (root.video.audio.fade_out_ms / 1000).toFixed(1) + " s" : "")
+                        : ""
+                    color: Theme.text
+                    font.pixelSize: 11
+                    elide: Text.ElideRight
+                }
+                Btn { text: "Remove"; onClicked: root.editor.removeVideoAudio(root.video.id) }
+            }
+        }
+        RowLayout {
+            visible: !!root.video
+            Layout.leftMargin: 10
+            Layout.rightMargin: 10
+            Btn {
+                text: "Find a sound"
+                onClicked: {
+                    if (!root.video) return
+                    root.editor.chatSend("Find a sound (music or a sound effect) on Freesound for the video \"" + root.video.name + "\" (" + root.video.id + "), import it and put it under the video. Tell me the license and the attribution line I have to show.")
+                }
+            }
+            Label {
+                Layout.fillWidth: true
+                text: "The agent finds it; you keep the license and the attribution."
+                color: Theme.muted
+                font.pixelSize: 11
+                wrapMode: Text.WordWrap
+            }
+        }
+
         // ---- the timeline ----
         Flickable {
             id: flick

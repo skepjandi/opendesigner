@@ -127,6 +127,13 @@ Item {
             return check(JSON.parse(editor.selectionBounds).x === 120, "restore did not bring the position back")
         },
         function () {
+            editor.setFreesoundToken("selftest-token")
+            const saved = editor.freesoundTokenSet()
+            editor.clearFreesoundToken()
+            return check(saved, "the Freesound token should be saved") &&
+                   check(!editor.freesoundTokenSet(), "the Freesound token should be gone")
+        },
+        function () {
             editor.setToken("brand.gold", "#F2CA83")
             editor.setNodeProperty(ids.ellipse, "fill", '"{brand.gold}"')
             const row = JSON.parse(editor.tokens).find(t => t.name === "brand.gold")

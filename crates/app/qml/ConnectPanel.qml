@@ -242,6 +242,51 @@ Rectangle {
 
                 Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: Theme.border }
 
+                Label { text: "Sounds from Freesound"; color: Theme.text; font.pixelSize: Theme.fontSize; font.bold: true }
+                Label {
+                    Layout.fillWidth: true
+                    wrapMode: Text.WordWrap
+                    color: Theme.muted
+                    font.pixelSize: 11
+                    text: "Let the agent find music and sound effects on Freesound (freesound.org) for your videos. A token is free: ask for one at https://freesound.org/apiv2/apply/ and paste it below. It stays in this computer's config folder, and the only place it is sent is freesound.org."
+                }
+                RowLayout {
+                    Layout.fillWidth: true
+                    Field {
+                        id: freesoundToken
+                        Layout.fillWidth: true
+                        placeholderText: "Paste your Freesound token"
+                        echoMode: TextInput.Password
+                    }
+                    Btn {
+                        text: "Save"
+                        onClicked: {
+                            root.editor.setFreesoundToken(freesoundToken.text)
+                            freesoundToken.text = ""
+                        }
+                    }
+                }
+                RowLayout {
+                    visible: root.editor.freesoundTokenSet()
+                    Layout.fillWidth: true
+                    Label {
+                        Layout.fillWidth: true
+                        text: "A Freesound token is saved. The agent can find sounds; you can remove the token at any time."
+                        color: Theme.success
+                        font.pixelSize: 11
+                        wrapMode: Text.WordWrap
+                    }
+                    Btn { text: "Remove"; onClicked: root.editor.clearFreesoundToken() }
+                }
+                Label {
+                    Layout.fillWidth: true
+                    wrapMode: Text.WordWrap
+                    color: Theme.muted
+                    font.pixelSize: 11
+                    text: "Sounds come with their author's license. Whoever publishes the video must show the attribution the agent is given (title, author, license, link)."
+                }
+
+
                 Label { text: "Teach your agents"; color: Theme.text; font.pixelSize: Theme.fontSize; font.bold: true }
                 Label {
                     Layout.fillWidth: true
