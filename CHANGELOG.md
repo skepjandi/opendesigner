@@ -8,6 +8,16 @@ All notable changes to OpenDesigner are documented here.
 
 ## 2026-11-19
 
+### feat(agent): every agent gets the quality bar, playbooks, a design review tool and optional formats
+
+**Area:** `feat(mcp)`, `feat(app)`, `feat(skill)`
+
+**Why:** "Our agent output is ass": agents did not use our guidance unless the skill was installed and loaded, and the skill had no craft in it. **Change:** (1) The quality bar is sent with the MCP `initialize` instructions and the in-app chat's first prompt, so every agent gets it with or without the skill. (2) `get_playbook` serves five playbooks (design, style: eight named looks, video, motion, formats with safe zones) that are also `references/` in the installed skill; the skill description now covers video and motion. They are rewritten from public skills and platform pages (listed in the wiki). (3) `review_frame`: contrast, small or edge-hugging text, overlaps, overflow, misalignment, fonts, loose colors, size vs. the chosen format. (4) Formats: sections (Video, Store images, Social images, Web and icons) plus a custom size, chosen when starting or from the toolbar, or left to the agent (`list_formats`, `get_brief`, `set_format`); a format the user chose is enforced for videos and changes only through a request shown as Allow / Keep mine.
+
+**Verified:** unit tests (WCAG contrast, each review finding, the approval state machine, formats vs. store preset sizes, playbooks name only real tools), MCP tests (instructions carry the bar, guidance carries the brief, playbooks readable, review finds low contrast, a chosen video size is refused and a change waits for the answer), app test (choose, ask, answer, hand back), window session. **Not verified:** that agents behave better (no model turn compared before and after; only that the text reaches them), the format dialog and approval banner by eye, the safe-zone numbers beyond the pages they came from.
+
+**PR:** n/a
+
 ### feat(video): motion that is worth watching, and a timeline that shows what follows what
 
 **Area:** `feat(core)`, `feat(render)`, `feat(app)`, `feat(mcp)`

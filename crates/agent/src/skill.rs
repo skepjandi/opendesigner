@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::error::AgentError;
-use crate::tools;
+use crate::{playbook, tools};
 
 pub const SKILL_NAME: &str = "opendesigner";
 const MANIFEST_FILE: &str = ".opendesigner-install.json";
@@ -109,6 +109,26 @@ pub fn generate() -> Vec<SkillFile> {
             path: "references/style-guide.md",
             contents: STYLE_GUIDE.to_string(),
         },
+        SkillFile {
+            path: "references/design-direction.md",
+            contents: playbook::topic("design").unwrap_or_default().to_string(),
+        },
+        SkillFile {
+            path: "references/style-directions.md",
+            contents: playbook::topic("style").unwrap_or_default().to_string(),
+        },
+        SkillFile {
+            path: "references/video-direction.md",
+            contents: playbook::topic("video").unwrap_or_default().to_string(),
+        },
+        SkillFile {
+            path: "references/motion-playbook.md",
+            contents: playbook::topic("motion").unwrap_or_default().to_string(),
+        },
+        SkillFile {
+            path: "references/formats.md",
+            contents: playbook::topic("formats").unwrap_or_default().to_string(),
+        },
     ]
 }
 
@@ -116,16 +136,26 @@ fn skill_md() -> String {
     format!(
         "---\n\
 name: {SKILL_NAME}\n\
-description: \"Design and edit app store, Google Play and web assets (screenshots, feature graphics, icons, social cards) in the OpenDesigner editor through its MCP tools. Use when the user asks to create, change, review or export such assets, mentions notes or pins they left on the design, or refers to what they have selected in OpenDesigner.\"\n\
+description: \"Design images and make videos (app store and Google Play screenshots, feature graphics, icons, social cards, reels, app previews, explainers, motion graphics) in the OpenDesigner editor through its MCP tools, at studio quality. Use when the user asks to create, change, review, animate or export such assets, mentions notes or pins they left on the design, or refers to what they have selected in OpenDesigner.\"\n\
 license: MPL-2.0\n\
 compatibility: \"Needs the OpenDesigner editor (or `opendesigner serve-mcp <project>`) running and connected as the MCP server named opendesigner.\"\n\
 metadata:\n  version: \"{version}\"\n\
----\n\n{BODY}",
+---\n\n{body}",
         version = env!("CARGO_PKG_VERSION"),
+        body = BODY.replacen("<!--BAR-->", playbook::QUALITY_BAR, 1),
     )
 }
 
 const BODY: &str = "# OpenDesigner
+
+## The bar
+
+<!--BAR-->
+
+Read the playbooks before you build, through the `get_playbook` tool or the files next to this one:
+`references/design-direction.md` (images), `references/style-directions.md` (pick a named look),
+`references/video-direction.md` and `references/motion-playbook.md` (video), `references/formats.md`
+(sizes and safe zones).
 
 OpenDesigner is a design editor the user has open next to you. They guide you by **pointing**:
 selecting layers, pinning notes on the design, and fixing things by hand. You act through MCP tools;

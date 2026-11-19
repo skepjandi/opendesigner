@@ -17,6 +17,10 @@ ApplicationWindow {
     Editor { id: backend }
 
     property string tool: "select"
+    // what this workspace is for: the format, who chose it, and a change the agent asked for
+    readonly property var brief: backend.brief && backend.brief !== "null" ? JSON.parse(backend.brief) : null
+    readonly property var briefFormat: brief ? brief.format : null
+    readonly property var pendingFormat: brief ? brief.pending_request : null
     readonly property bool typing: activeFocusItem !== null && activeFocusItem.hasOwnProperty("cursorPosition")
     readonly property var frames: backend.frames ? JSON.parse(backend.frames) : []
     JsonModel { id: framesModel }
@@ -179,6 +183,14 @@ ApplicationWindow {
                     ToolTip.delay: 600
                     ToolTip.text: "The language the canvas, the text field and exports show"
                 }
+                Btn {
+                    visible: backend.hasProject
+                    text: win.briefFormat ? win.briefFormat.width + "×" + win.briefFormat.height + (win.briefFormat.fps ? " · " + win.briefFormat.fps + " fps" : "") : "Format: agent decides"
+                    onClicked: formatDialog.open()
+                    ToolTip.visible: hovered
+                    ToolTip.delay: 600
+                    ToolTip.text: win.briefFormat ? win.briefFormat.label + (win.brief.chosen_by === "user" ? " (you chose it; the agent asks before changing it)" : " (the agent chose it)") : "No size chosen: the agent picks what fits. Click to choose."
+                }
                 Item { Layout.fillWidth: true }
                 Btn { text: "Undo"; enabled: backend.canUndo; onClicked: backend.undo() }
                 Btn { text: "Redo"; enabled: backend.canRedo; onClicked: backend.redo() }
@@ -210,6 +222,31 @@ ApplicationWindow {
                         MenuItem { text: "Keyboard shortcuts\t?"; onTriggered: shortcutsDialog.open() }
                     }
                 }
+            }
+        }
+
+        // the agent wants to change a format you chose: nothing changes until you answer
+        Rectangle {
+            visible: win.pendingFormat !== null
+            Layout.fillWidth: true
+            implicitHeight: pendingRow.implicitHeight + 16
+            color: Theme.panelRaised
+            border.width: 1
+            border.color: Theme.agent
+            RowLayout {
+                id: pendingRow
+                anchors.fill: parent
+                anchors.margins: 8
+                spacing: 8
+                Label {
+                    Layout.fillWidth: true
+                    wrapMode: Text.WordWrap
+                    color: Theme.text
+                    font.pixelSize: Theme.fontSize
+                    text: win.pendingFormat ? "The agent asks to change the size from " + (win.briefFormat ? win.briefFormat.label : "?") + " to " + win.pendingFormat.format.label + " (" + win.pendingFormat.format.width + "×" + win.pendingFormat.format.height + "). Reason: " + win.pendingFormat.reason : ""
+                }
+                Btn { text: "Allow"; primary: true; onClicked: backend.answerFormat(true) }
+                Btn { text: "Keep mine"; onClicked: backend.answerFormat(false) }
             }
         }
 
@@ -620,6 +657,38 @@ ApplicationWindow {
                         to: Math.max(1, job.total)
                         value: job.done
                     }
+                }
+            }
+        }
+    }
+
+    Modal {
+        id: formatDialog
+        title: "Size and format"
+        width: 640
+        standardButtons: Dialog.Close
+        contentItem: ScrollView {
+            id: formatScroll
+            implicitHeight: Math.min(formatCol.implicitHeight + 8, 520)
+            contentWidth: availableWidth
+            contentHeight: formatCol.implicitHeight + 8
+            clip: true
+            ColumnLayout {
+                id: formatCol
+                width: formatScroll.availableWidth
+                spacing: 8
+                Label {
+                    Layout.fillWidth: true
+                    wrapMode: Text.WordWrap
+                    color: Theme.muted
+                    font.pixelSize: 12
+                    text: win.briefFormat ? "Now: " + win.briefFormat.label + " " + win.briefFormat.width + "×" + win.briefFormat.height + (win.brief.chosen_by === "user" ? ". You chose it, so the agent asks before changing it." : ". The agent chose it and may change it.") : "Nothing chosen: the agent picks what fits the work and tells you. Choose a size to make it keep to it."
+                }
+                FormatPicker {
+                    Layout.fillWidth: true
+                    editor: backend
+                    current: win.briefFormat && win.brief.chosen_by === "user" ? (win.briefFormat.id || "custom") : ""
+                    onPicked: f => backend.setFormat(f ? (f.id || "") : "", f ? (f.kind || "") : "", f ? (f.width || 0) : 0, f ? (f.height || 0) : 0, f ? (f.fps || 0) : 0)
                 }
             }
         }

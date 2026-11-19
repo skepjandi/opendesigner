@@ -21,10 +21,18 @@ pub type ChatHook = Arc<dyn Fn(ChatInput) + Send + Sync>;
 
 const MAX_MESSAGES: usize = 400;
 
-const PREAMBLE: &str = "You are connected to OpenDesigner, a design editor, through its MCP \
-server. Call get_guidance first: it returns what the user has selected, the notes they pinned \
-and what they changed by hand since your last turn. Change the design with apply_ops, look at it \
-with render_preview, and say in the user's terms what you changed.\n\n";
+/// What every in-app session starts with, so the quality bar applies whether or not the agent
+/// has the skill installed (`od_agent::playbook`).
+fn preamble() -> String {
+    format!(
+        "You are connected to OpenDesigner, a design and video editor, through its MCP server. \
+         Call get_guidance first: it returns what the user has selected, the notes they pinned, \
+         the workspace's brief and what they changed by hand since your last turn. Change the \
+         design with apply_ops, look at it with render_preview, and say in the user's terms what \
+         you changed.\n\n{}\n\n",
+        od_agent::playbook::QUALITY_BAR
+    )
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Status {
@@ -301,7 +309,7 @@ impl Chat {
         }
         self.plan.clear();
         let prompt = if std::mem::take(&mut self.first_prompt) {
-            format!("{PREAMBLE}{text}")
+            format!("{}{text}", preamble())
         } else {
             text.to_string()
         };

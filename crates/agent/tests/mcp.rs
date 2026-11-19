@@ -1146,3 +1146,176 @@ fn an_agent_keeps_separate_deliverables_in_separate_workspaces_and_switching_is_
     let (err, why) = call("open_workspace", json!({"name": "nope"}));
     assert!(err && why.as_str().unwrap().contains("there are:"));
 }
+
+#[test]
+fn every_agent_is_told_the_bar_when_it_connects_and_can_read_the_playbooks() {
+    let f = fixture();
+    let out = f.handler.handle(
+        None,
+        json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
+            "protocolVersion":"2025-06-18","capabilities":{},
+            "clientInfo":{"name":"some-agent","version":"1"}}}),
+    );
+    let instructions = out.body.unwrap()["result"]["instructions"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(instructions.contains("art director") && instructions.contains("get_playbook"));
+    assert!(instructions.contains("review_frame"));
+
+    let guidance = f.ok("get_guidance", json!({}));
+    assert_eq!(guidance["brief"]["chosen_by"], "none");
+    assert!(
+        guidance["before_you_build"]
+            .as_str()
+            .unwrap()
+            .contains("get_playbook")
+    );
+
+    let list = f.ok("get_playbook", json!({}));
+    for topic in ["design", "style", "video", "motion", "formats"] {
+        assert!(list.as_str().unwrap().contains(topic), "{topic}");
+        let (err, text) = f.tool("get_playbook", json!({"topic": topic}));
+        assert!(!err && text.len() > 1500, "{topic}");
+    }
+    assert!(f.tool("get_playbook", json!({"topic": "nope"})).0);
+}
+
+#[test]
+fn review_frame_finds_what_an_art_director_would_and_the_chosen_size() {
+    let f = fixture();
+    let frame = f.create_frame();
+    let r = f.ok("review_frame", json!({"frame": frame}));
+    assert_eq!(r["size"], json!([1320.0, 2868.0]));
+    assert!(r["findings"].is_array() && r["summary"].is_string());
+    // add dark text on the dark frame: contrast must be flagged
+    f.ok(
+        "apply_ops",
+        json!({"ops": [{"op":"create","parent":frame,"node":{
+            "kind":"text","name":"Headline","x":120,"y":900,"width":1000,"height":300,
+            "text":"Hello","font_size":120,"fill":"#0a1024"}}]}),
+    );
+    let r = f.ok("review_frame", json!({"frame": frame}));
+    let text = r["findings"].to_string();
+    assert!(
+        text.contains("contrast") && r["summary"].as_str().unwrap().starts_with("1 to fix"),
+        "{text}"
+    );
+
+    f.ok(
+        "set_format",
+        json!({"format": "google-phone", "reason": "play listing"}),
+    );
+    let r = f.ok("review_frame", json!({"frame": frame}));
+    assert!(
+        r["findings"].to_string().contains("you set"),
+        "a frame of another size is noted"
+    );
+    f.ok(
+        "set_format",
+        json!({"format": "apple-iphone-6.9", "reason": "the app store"}),
+    );
+    let r = f.ok("review_frame", json!({"frame": frame}));
+    assert!(
+        !r["findings"].to_string().contains("you set"),
+        "the right size is not"
+    );
+    assert!(f.tool("review_frame", json!({"frame": "n_99999"})).0);
+}
+
+#[test]
+fn a_format_the_user_chose_is_enforced_and_changes_only_with_their_answer() {
+    let f = fixture();
+    // nothing chosen: the agent picks and may change its own pick
+    let r = f.ok(
+        "set_format",
+        json!({"format": "reel", "reason": "for a reel"}),
+    );
+    assert_eq!(r["applied"], true);
+    let r = f.ok(
+        "set_format",
+        json!({"kind": "video", "width": 1080, "height": 1350, "fps": 24, "reason": "feed"}),
+    );
+    assert_eq!(r["applied"], true);
+    assert_eq!(f.ok("get_brief", json!({}))["chosen_by"], "agent");
+    assert!(
+        f.tool("set_format", json!({"format": "reel"})).0,
+        "a reason is required"
+    );
+    assert!(
+        f.tool("set_format", json!({"format": "nope", "reason": "x"}))
+            .0
+    );
+    assert!(
+        f.tool(
+            "set_format",
+            json!({"kind": "video", "width": 1081, "height": 1920, "reason": "x"})
+        )
+        .0
+    );
+
+    // the user chooses
+    let dir = f.ws.lock().unwrap().dir().unwrap().to_path_buf();
+    let mut brief = od_agent::formats::load_brief(&dir);
+    brief.user_set(od_agent::formats::find("reel").map(od_agent::formats::BriefFormat::from));
+    od_agent::formats::save_brief(&dir, &brief).unwrap();
+
+    let make = |w: u32, h: u32| {
+        f.tool(
+            "apply_ops",
+            json!({"ops": [{"op":"create_video","name":"Teaser","fps":30,"width":w,"height":h}]}),
+        )
+    };
+    let (err, text) = make(1920, 1080);
+    assert!(
+        err && text.contains("the user chose") && text.contains("set_format"),
+        "{text}"
+    );
+    assert!(!make(1080, 1920).0);
+
+    let r = f.ok(
+        "set_format",
+        json!({"format": "youtube", "reason": "the footage is landscape"}),
+    );
+    assert_eq!(r["applied"], false);
+    assert_eq!(r["waiting_for_user"], true);
+    let b = f.ok("get_brief", json!({}));
+    assert_eq!(b["chosen_by"], "user");
+    assert_eq!(
+        b["format"]["id"], "reel",
+        "unchanged until the user answers"
+    );
+    assert_eq!(b["pending_request"]["reason"], "the footage is landscape");
+
+    // the user approves in the window
+    let mut brief = od_agent::formats::load_brief(&dir);
+    brief.answer(true).unwrap();
+    od_agent::formats::save_brief(&dir, &brief).unwrap();
+    let b = f.ok("get_brief", json!({}));
+    assert_eq!(b["format"]["id"], "youtube");
+    assert!(b["last_decision"].as_str().unwrap().contains("approved"));
+    assert!(!make(1920, 1080).0);
+}
+
+#[test]
+fn the_formats_list_is_in_sections() {
+    let f = fixture();
+    let v = f.ok("list_formats", json!({}));
+    let names: Vec<&str> = v
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["section"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        names,
+        ["Video", "Store images", "Social images", "Web and icons"]
+    );
+    assert!(
+        v[0]["formats"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f["id"] == "reel" && f["width"] == 1080)
+    );
+}

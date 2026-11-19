@@ -16,11 +16,19 @@ pub const SUPPORTED_VERSIONS: &[&str] = &["2025-06-18", "2025-03-26", "2024-11-0
 
 const MAX_SESSIONS: usize = 64;
 
-const INSTRUCTIONS: &str = "OpenDesigner is a design editor. Call get_guidance first: it returns \
-the user's selection, the notes they pinned and the edits they made after your last turn. Change \
-the design only with apply_ops, look at the result with render_preview, resolve notes you acted \
-on, and validate store exports with export or validate_export. Every change you make is \
-attributed to you, checkpointed and reversible by the user.";
+/// Sent to every MCP client when it connects, so an agent that never installed the skill still
+/// gets the quality bar (`crate::playbook`).
+fn instructions() -> String {
+    format!(
+        "OpenDesigner is a design and video editor. Call get_guidance first: it returns the \
+         user's selection, the notes they pinned, the workspace's brief and the edits they made \
+         after your last turn. Change the design only with apply_ops, look at the result with \
+         render_preview, resolve notes you acted on, and validate store exports with export or \
+         validate_export. Every change you make is attributed to you, checkpointed and reversible \
+         by the user.\n\n{}",
+        crate::playbook::QUALITY_BAR
+    )
+}
 
 /// What changed, for front ends that show it (the editor outlines the touched nodes).
 #[derive(Debug, Clone)]
@@ -307,7 +315,7 @@ impl Handler {
                     "protocolVersion": version,
                     "capabilities": {"tools": {"listChanged": false}},
                     "serverInfo": {"name": "opendesigner", "version": env!("CARGO_PKG_VERSION")},
-                    "instructions": INSTRUCTIONS,
+                    "instructions": instructions(),
                 }),
             )),
             session_id: Some(sid),
@@ -399,7 +407,7 @@ impl Handler {
         };
         drop(state);
         drop(ws);
-        if !touched.is_empty() || switched {
+        if !touched.is_empty() || switched || name == "set_format" {
             if let Some(hook) = &self.on_change {
                 hook(ChangeEvent {
                     actor: actor.to_string(),
