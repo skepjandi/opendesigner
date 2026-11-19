@@ -5,7 +5,7 @@
 //! Media Foundation on Windows, and so on), so no GPL encoder library is needed. FFmpeg runs as a
 //! separate program: nothing is linked into this process, and the app never sends media anywhere.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
@@ -92,7 +92,7 @@ impl Ffmpeg {
             .filter_map(|l| {
                 let mut parts = l.split_whitespace();
                 let flags = parts.next()?;
-                (flags.starts_with('V') && flags.len() == 6)
+                (matches!(flags.chars().next(), Some('V' | 'A')) && flags.len() == 6)
                     .then(|| parts.next().map(str::to_string))
                     .flatten()
             })
@@ -298,9 +298,306 @@ impl VideoWriter {
     }
 }
 
+/// What `ffmpeg` says about a video file.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FileInfo {
+    pub duration_ms: u64,
+    pub width: u32,
+    pub height: u32,
+    pub fps: f64,
+    pub has_audio: bool,
+}
+
+/// Reads the facts out of the text `ffmpeg -i <file>` prints.
+pub fn parse_info(text: &str) -> Option<FileInfo> {
+    let duration_ms = text.lines().find_map(|l| {
+        let rest = l.trim().strip_prefix("Duration: ")?;
+        let t = rest.split(',').next()?;
+        let mut parts = t.split(':');
+        let (h, m, sec) = (parts.next()?, parts.next()?, parts.next()?);
+        let secs: f64 = h.parse::<f64>().ok()? * 3600.0
+            + m.parse::<f64>().ok()? * 60.0
+            + sec.parse::<f64>().ok()?;
+        Some((secs * 1000.0).round() as u64)
+    })?;
+    let video = text.lines().find(|l| l.contains(" Video: "))?;
+    let size = video
+        .split([',', ' '])
+        .filter_map(|w| {
+            let (a, b) = w.split_once('x')?;
+            Some((a.parse::<u32>().ok()?, b.parse::<u32>().ok()?))
+        })
+        .find(|(w, h)| *w >= 16 && *h >= 16)?;
+    let fps = video
+        .split(',')
+        .find_map(|part| part.trim().strip_suffix(" fps")?.parse::<f64>().ok())
+        .unwrap_or(30.0);
+    Some(FileInfo {
+        duration_ms,
+        width: size.0,
+        height: size.1,
+        fps,
+        has_audio: text.lines().any(|l| l.contains(" Audio: ")),
+    })
+}
+
+impl Ffmpeg {
+    /// Looks at a video file: its length, picture size, frame rate and whether it has sound.
+    pub fn probe_file(&self, file: &Path) -> Result<FileInfo, MediaError> {
+        let out = Command::new(&self.path)
+            .args(["-hide_banner", "-i"])
+            .arg(file)
+            .stdin(Stdio::null())
+            .output()
+            .map_err(|e| MediaError::Io(e.to_string()))?;
+        // ffmpeg exits with an error when given no output; the facts are in its log
+        let text = String::from_utf8_lossy(&out.stderr);
+        parse_info(&text).ok_or_else(|| {
+            MediaError::Failed(format!(
+                "{} is not a video ffmpeg can read: {}",
+                file.display(),
+                text.lines().last().unwrap_or("").trim()
+            ))
+        })
+    }
+}
+
+struct Reader {
+    child: Child,
+    next_ms: f64,
+    last: Vec<u8>,
+    done: bool,
+}
+
+/// Decodes footage a picture at a time. Playing forward (what an export does) keeps one
+/// `ffmpeg` per file running; asking for another moment starts it again there.
+pub struct FootageDecoder {
+    ffmpeg: Ffmpeg,
+    /// The folder the `media/<name>` references are relative to.
+    project: PathBuf,
+    fps: u32,
+    readers: HashMap<(String, u32, u32), Reader>,
+}
+
+const MAX_READERS: usize = 4;
+
+impl FootageDecoder {
+    pub fn new(ffmpeg: Ffmpeg, project: PathBuf, fps: u32) -> FootageDecoder {
+        FootageDecoder {
+            ffmpeg,
+            project,
+            fps: fps.max(1),
+            readers: HashMap::new(),
+        }
+    }
+
+    fn start(&self, path: &Path, at_ms: u64, w: u32, h: u32) -> Result<Reader, MediaError> {
+        let filter = format!(
+            "fps={},scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h}",
+            self.fps
+        );
+        let child = Command::new(&self.ffmpeg.path)
+            .args(["-hide_banner", "-loglevel", "error", "-ss"])
+            .arg(format!("{:.3}", at_ms as f64 / 1000.0))
+            .arg("-i")
+            .arg(path)
+            .args([
+                "-an", "-vf", &filter, "-f", "rawvideo", "-pix_fmt", "rgba", "-",
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|e| MediaError::Io(format!("cannot start ffmpeg: {e}")))?;
+        Ok(Reader {
+            child,
+            next_ms: at_ms as f64,
+            last: Vec::new(),
+            done: false,
+        })
+    }
+
+    /// The RGBA picture of `file` (`media/<name>`) at `at_ms`, scaled to cover `w` x `h` and
+    /// cropped in the middle. Past the end it is the last picture.
+    pub fn frame(&mut self, file: &str, at_ms: u64, w: u32, h: u32) -> Result<Vec<u8>, MediaError> {
+        let path = footage_path(&self.project, file)?;
+        let key = (file.to_string(), w, h);
+        let period = 1000.0 / f64::from(self.fps);
+        let fits = self
+            .readers
+            .get(&key)
+            .is_some_and(|r| (at_ms as f64 - r.next_ms).abs() <= period * 0.75 + 1.0);
+        if !fits {
+            if let Some(mut old) = self.readers.remove(&key) {
+                let _ = old.child.kill();
+                let _ = old.child.wait();
+            }
+            if self.readers.len() >= MAX_READERS {
+                if let Some(k) = self.readers.keys().next().cloned() {
+                    if let Some(mut old) = self.readers.remove(&k) {
+                        let _ = old.child.kill();
+                        let _ = old.child.wait();
+                    }
+                }
+            }
+            let reader = self.start(&path, at_ms, w, h)?;
+            self.readers.insert(key.clone(), reader);
+        }
+        let size = w as usize * h as usize * 4;
+        let reader = self
+            .readers
+            .get_mut(&key)
+            .ok_or_else(|| MediaError::Io("no reader".into()))?;
+        reader.next_ms += period;
+        if reader.done {
+            return Ok(reader.last.clone());
+        }
+        let mut buf = vec![0u8; size];
+        let got = match reader.child.stdout.as_mut() {
+            Some(out) => read_full(out, &mut buf).map_err(|e| MediaError::Io(e.to_string()))?,
+            None => 0,
+        };
+        if got == size {
+            reader.last = buf.clone();
+            Ok(buf)
+        } else {
+            reader.done = true;
+            if reader.last.is_empty() {
+                return Err(MediaError::Failed(format!(
+                    "{file} has no picture at {at_ms} ms (is that past its end?)"
+                )));
+            }
+            Ok(reader.last.clone())
+        }
+    }
+}
+
+impl Drop for FootageDecoder {
+    fn drop(&mut self) {
+        for (_, mut r) in self.readers.drain() {
+            let _ = r.child.kill();
+            let _ = r.child.wait();
+        }
+    }
+}
+
+fn read_full(r: &mut impl Read, buf: &mut [u8]) -> std::io::Result<usize> {
+    let mut got = 0;
+    while got < buf.len() {
+        match r.read(&mut buf[got..])? {
+            0 => break,
+            n => got += n,
+        }
+    }
+    Ok(got)
+}
+
+/// Where `media/<name>` is inside `project`: a plain file name only, never through a symlink.
+pub fn footage_path(project: &Path, reference: &str) -> Result<PathBuf, MediaError> {
+    let name = reference
+        .strip_prefix("media/")
+        .filter(|n| !n.is_empty() && !n.contains(['/', '\\']) && !n.starts_with('.'))
+        .ok_or_else(|| MediaError::Io(format!("{reference:?} is not a media/<file> reference")))?;
+    let path = project.join("media").join(name);
+    match std::fs::symlink_metadata(&path) {
+        Ok(m) if m.is_file() => Ok(path),
+        Ok(_) => Err(MediaError::Io(format!("{reference} is not a plain file"))),
+        Err(e) => Err(MediaError::Io(format!("{reference}: {e}"))),
+    }
+}
+
+/// One piece of footage sound on the finished timeline.
+#[derive(Debug, Clone)]
+pub struct AudioPiece {
+    pub file: PathBuf,
+    pub in_ms: u64,
+    pub start_ms: u64,
+    pub duration_ms: u64,
+}
+
+/// Puts the sound of `pieces` under the picture of `video` (copied, not re-encoded) and writes
+/// `output`. Each piece is cut from its file, delayed to its place and mixed with the others.
+pub fn add_audio(
+    ffmpeg: &Ffmpeg,
+    video: &Path,
+    pieces: &[AudioPiece],
+    output: &Path,
+) -> Result<(), MediaError> {
+    let mut cmd = Command::new(&ffmpeg.path);
+    cmd.args(["-hide_banner", "-loglevel", "error", "-y", "-i"])
+        .arg(video);
+    let mut filter = String::new();
+    for (n, p) in pieces.iter().enumerate() {
+        cmd.arg("-i").arg(&p.file);
+        filter.push_str(&format!(
+            "[{i}:a]atrim=start={s:.3}:duration={d:.3},asetpts=PTS-STARTPTS,adelay={delay}:all=1[a{n}];",
+            i = n + 1,
+            s = p.in_ms as f64 / 1000.0,
+            d = p.duration_ms as f64 / 1000.0,
+            delay = p.start_ms
+        ));
+    }
+    let labels: String = (0..pieces.len()).map(|n| format!("[a{n}]")).collect();
+    filter.push_str(&format!(
+        "{labels}amix=inputs={}:normalize=0:duration=longest[a]",
+        pieces.len()
+    ));
+    let out = cmd
+        .args(["-filter_complex", &filter, "-map", "0:v", "-map", "[a]"])
+        .args(["-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-shortest"])
+        .args(["-movflags", "+faststart", "-f", "mp4"])
+        .arg(output)
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|e| MediaError::Io(e.to_string()))?;
+    if out.status.success() {
+        Ok(())
+    } else {
+        let _ = std::fs::remove_file(output);
+        Err(MediaError::Failed(
+            String::from_utf8_lossy(&out.stderr).trim().to_string(),
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ffmpegs_log_is_read_for_length_size_rate_and_sound() {
+        let log = "Input #0, mov,mp4, from 'a.mp4':\n  Duration: 00:01:02.50, start: 0.000000, bitrate: 1200 kb/s\n  Stream #0:0[0x1](und): Video: h264 (High) (avc1 / 0x31637661), yuv420p(tv, bt709, progressive), 1920x1080 [SAR 1:1 DAR 16:9], 1100 kb/s, 29.97 fps, 29.97 tbr, 30k tbn (default)\n  Stream #0:1[0x2](und): Audio: aac (LC), 48000 Hz, stereo, fltp, 128 kb/s\n";
+        let info = parse_info(log).unwrap();
+        assert_eq!(
+            (info.duration_ms, info.width, info.height),
+            (62_500, 1920, 1080)
+        );
+        assert!((info.fps - 29.97).abs() < 1e-9 && info.has_audio);
+        assert!(parse_info("a.txt: Invalid data found when processing input").is_none());
+        assert!(
+            !parse_info(&log.replace(" Audio: ", " Data: "))
+                .unwrap()
+                .has_audio
+        );
+    }
+
+    #[test]
+    fn footage_paths_are_plain_media_files_only() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(d.path().join("media")).unwrap();
+        std::fs::write(d.path().join("media/a.mp4"), b"x").unwrap();
+        assert!(footage_path(d.path(), "media/a.mp4").is_ok());
+        for bad in [
+            "a.mp4",
+            "media/../a.mp4",
+            "media/",
+            "media/.a.mp4",
+            "media/x/a.mp4",
+            "media/missing.mp4",
+        ] {
+            assert!(footage_path(d.path(), bad).is_err(), "{bad}");
+        }
+    }
 
     #[test]
     fn bitrate_scales_with_the_picture_and_has_a_floor() {

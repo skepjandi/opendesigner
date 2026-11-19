@@ -69,12 +69,55 @@ impl Default for Motion {
     }
 }
 
+/// A stretch of a video file the user imported: it plays from `in_ms` into the file for as long
+/// as the clip lasts, with the file's own sound.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Footage {
+    /// `media/<name>.mp4|mov|m4v`
+    pub file: String,
+    #[serde(default)]
+    pub in_ms: u64,
+}
+
+/// What a clip shows: a design frame, or footage (exactly one).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct ClipSource {
+    #[serde(default)]
+    pub frame: Option<NodeId>,
+    #[serde(default)]
+    pub footage: Option<Footage>,
+}
+
+pub const MAX_OVERLAYS: usize = 200;
+pub const MAX_IN_MS: u64 = 24 * 60 * 60 * 1000;
+
+/// A design frame drawn over the whole video for a while, fading in and out: a title, a lower
+/// third, a call-out. A frame with no fill is transparent, so only what is drawn on it shows.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Overlay {
+    pub id: NodeId,
+    pub frame: NodeId,
+    /// From the start of the video.
+    pub start_ms: u64,
+    pub duration_ms: u32,
+    /// Fade in and fade out, each at most half the duration; 0 is a cut.
+    #[serde(default)]
+    pub fade_ms: u32,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Clip {
     pub id: NodeId,
-    /// The design frame this clip shows.
-    pub frame: NodeId,
+    /// The design frame this clip shows (none for footage).
+    #[serde(default)]
+    pub frame: Option<NodeId>,
+    /// The footage this clip plays (none for a design frame).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub footage: Option<Footage>,
     pub duration_ms: u32,
     #[serde(default)]
     pub transition: Transition,
@@ -92,6 +135,8 @@ pub struct Video {
     pub width: u32,
     pub height: u32,
     pub clips: Vec<Clip>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub overlays: Vec<Overlay>,
 }
 
 /// Where a clip sits on the timeline.
@@ -156,7 +201,17 @@ impl Video {
                 "at most {MAX_CLIPS} clips per video"
             )));
         }
+        if self.overlays.len() > MAX_OVERLAYS {
+            return Err(OpError::Limit(format!("at most {MAX_OVERLAYS} overlays")));
+        }
+        for o in &self.overlays {
+            check_overlay(o)?;
+        }
         for clip in &self.clips {
+            check_source(&ClipSource {
+                frame: clip.frame.clone(),
+                footage: clip.footage.clone(),
+            })?;
             check_duration(clip.duration_ms)?;
             check_transition(&clip.transition, clip.duration_ms)?;
             check_motion(&clip.motion)?;
@@ -169,6 +224,41 @@ impl Video {
         }
         Ok(())
     }
+}
+
+/// A clip shows a frame or footage, not both and not neither; footage is a plain media reference.
+pub fn check_source(s: &ClipSource) -> Result<(), OpError> {
+    match (&s.frame, &s.footage) {
+        (Some(_), None) => Ok(()),
+        (None, Some(f)) => {
+            crate::media::footage_name(&f.file)?;
+            finite_in("in_ms", f.in_ms as f64, 0.0, MAX_IN_MS as f64).map(|_| ())
+        }
+        _ => Err(OpError::OutOfBounds {
+            what: "clip source",
+            detail: "give either a frame or footage, not both and not neither".to_string(),
+        }),
+    }
+}
+
+pub fn check_overlay(o: &Overlay) -> Result<(), OpError> {
+    check_duration(o.duration_ms)?;
+    if o.start_ms + u64::from(o.duration_ms) > MAX_VIDEO_MS {
+        return Err(OpError::OutOfBounds {
+            what: "overlay",
+            detail: format!("must end within {} minutes", MAX_VIDEO_MS / 60_000),
+        });
+    }
+    if u64::from(o.fade_ms) * 2 > u64::from(o.duration_ms) {
+        return Err(OpError::OutOfBounds {
+            what: "overlay fade_ms",
+            detail: format!(
+                "{} ms in and out do not fit a {} ms overlay (at most half each)",
+                o.fade_ms, o.duration_ms
+            ),
+        });
+    }
+    Ok(())
 }
 
 pub fn check_fps(fps: u32) -> Result<(), OpError> {
@@ -246,9 +336,19 @@ pub enum VideoProperty {
 #[serde(tag = "name", content = "value", rename_all = "snake_case")]
 pub enum ClipProperty {
     DurationMs(u32),
-    Frame(NodeId),
+    Source(ClipSource),
     Transition(Transition),
     Motion(Motion),
+}
+
+/// One settable property of an overlay.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "name", content = "value", rename_all = "snake_case")]
+pub enum OverlayProperty {
+    Frame(NodeId),
+    StartMs(u64),
+    DurationMs(u32),
+    FadeMs(u32),
 }
 
 impl Document {
@@ -264,12 +364,18 @@ impl Document {
     }
 
     /// The video and clip that show `frame` or one of the frames inside `ids`, if any.
-    pub fn video_using(&self, ids: &[NodeId]) -> Option<(&Video, &Clip)> {
+    pub fn video_using(&self, ids: &[NodeId]) -> Option<(&Video, NodeId, Option<NodeId>)> {
         self.videos.iter().find_map(|v| {
             v.clips
                 .iter()
-                .find(|c| ids.contains(&c.frame))
-                .map(|c| (v, c))
+                .find(|c| c.frame.as_ref().is_some_and(|f| ids.contains(f)))
+                .map(|c| (v, c.id.clone(), c.frame.clone()))
+                .or_else(|| {
+                    v.overlays
+                        .iter()
+                        .find(|o| ids.contains(&o.frame))
+                        .map(|o| (v, o.id.clone(), Some(o.frame.clone())))
+                })
         })
     }
 
@@ -301,7 +407,16 @@ impl Document {
                     return Err(OpError::DuplicateId(clip.id.to_string()));
                 }
                 self.check_counter_of(&clip.id)?;
-                self.check_frame(&clip.frame)?;
+                if let Some(f) = &clip.frame {
+                    self.check_frame(f)?;
+                }
+            }
+            for o in &video.overlays {
+                if !seen.insert(o.id.clone()) {
+                    return Err(OpError::DuplicateId(o.id.to_string()));
+                }
+                self.check_counter_of(&o.id)?;
+                self.check_frame(&o.frame)?;
             }
         }
         Ok(())
@@ -350,6 +465,7 @@ pub(crate) fn apply(
                 width: *width,
                 height: *height,
                 clips: Vec::new(),
+                overlays: Vec::new(),
             };
             video.check_fields()?;
             let id = video.id.clone();
@@ -372,7 +488,12 @@ pub(crate) fn apply(
                 return Err(OpError::DuplicateId(video.id.to_string()));
             }
             for clip in &video.clips {
-                doc.check_frame(&clip.frame)?;
+                if let Some(f) = &clip.frame {
+                    doc.check_frame(f)?;
+                }
+            }
+            for o in &video.overlays {
+                doc.check_frame(&o.frame)?;
             }
             doc.videos.push(video.clone());
             Ok(done(
@@ -436,16 +557,24 @@ pub(crate) fn apply(
         O::AddClip {
             video,
             frame,
+            footage,
             duration_ms,
             index,
             transition,
             motion,
         } => {
-            doc.check_frame(frame)?;
+            check_source(&ClipSource {
+                frame: frame.clone(),
+                footage: footage.clone(),
+            })?;
+            if let Some(f) = frame {
+                doc.check_frame(f)?;
+            }
             let at = doc.video_index(video)?;
             let clip = Clip {
                 id: doc.alloc_id('c'),
                 frame: frame.clone(),
+                footage: footage.clone(),
                 duration_ms: *duration_ms,
                 transition: transition.unwrap_or_default(),
                 motion: motion.unwrap_or_default(),
@@ -482,7 +611,9 @@ pub(crate) fn apply(
             if !allow_internal {
                 return Err(OpError::InternalOnly("restore_clip"));
             }
-            doc.check_frame(&clip.frame)?;
+            if let Some(f) = &clip.frame {
+                doc.check_frame(f)?;
+            }
             let at = doc.video_index(video)?;
             let target = &mut doc.videos[at];
             if *index > target.clips.len() {
@@ -553,8 +684,11 @@ pub(crate) fn apply(
         }
         O::SetClip { video, clip, prop } => {
             let vat = doc.video_index(video)?;
-            if let ClipProperty::Frame(frame) = prop {
-                doc.check_frame(frame)?;
+            if let ClipProperty::Source(source) = prop {
+                check_source(source)?;
+                if let Some(f) = &source.frame {
+                    doc.check_frame(f)?;
+                }
             }
             let target = &mut doc.videos[vat];
             let cat = target
@@ -566,8 +700,14 @@ pub(crate) fn apply(
                 ClipProperty::DurationMs(ms) => {
                     ClipProperty::DurationMs(std::mem::replace(&mut c.duration_ms, *ms))
                 }
-                ClipProperty::Frame(f) => {
-                    ClipProperty::Frame(std::mem::replace(&mut c.frame, f.clone()))
+                ClipProperty::Source(s) => {
+                    let old = ClipSource {
+                        frame: c.frame.take(),
+                        footage: c.footage.take(),
+                    };
+                    c.frame = s.frame.clone();
+                    c.footage = s.footage.clone();
+                    ClipProperty::Source(old)
                 }
                 ClipProperty::Transition(t) => {
                     ClipProperty::Transition(std::mem::replace(&mut c.transition, *t))
@@ -588,6 +728,141 @@ pub(crate) fn apply(
                     prop: old,
                 },
                 video_touched(video, Some(clip)),
+            ))
+        }
+        O::AddOverlay {
+            video,
+            frame,
+            start_ms,
+            duration_ms,
+            fade_ms,
+        } => {
+            doc.check_frame(frame)?;
+            let at = doc.video_index(video)?;
+            let overlay = Overlay {
+                id: doc.alloc_id('o'),
+                frame: frame.clone(),
+                start_ms: *start_ms,
+                duration_ms: *duration_ms,
+                fade_ms: fade_ms.unwrap_or(0),
+            };
+            let target = &mut doc.videos[at];
+            target.overlays.push(overlay.clone());
+            if let Err(e) = target.check_fields() {
+                target.overlays.pop();
+                return Err(e);
+            }
+            let touched = video_touched(video, Some(&overlay.id));
+            Ok(done(
+                O::RestoreOverlay {
+                    video: video.clone(),
+                    index: doc.videos[at].overlays.len() - 1,
+                    overlay: overlay.clone(),
+                },
+                O::RemoveOverlay {
+                    video: video.clone(),
+                    overlay: overlay.id,
+                },
+                touched,
+            ))
+        }
+        O::RestoreOverlay {
+            video,
+            index,
+            overlay,
+        } => {
+            if !allow_internal {
+                return Err(OpError::InternalOnly("restore_overlay"));
+            }
+            doc.check_frame(&overlay.frame)?;
+            let at = doc.video_index(video)?;
+            let target = &mut doc.videos[at];
+            if *index > target.overlays.len() {
+                return Err(OpError::BadIndex {
+                    parent: video.to_string(),
+                    index: *index,
+                    len: target.overlays.len(),
+                });
+            }
+            if target.overlays.iter().any(|o| o.id == overlay.id) {
+                return Err(OpError::DuplicateId(overlay.id.to_string()));
+            }
+            target.overlays.insert(*index, overlay.clone());
+            if let Err(e) = target.check_fields() {
+                target.overlays.remove(*index);
+                return Err(e);
+            }
+            Ok(done(
+                op.clone(),
+                O::RemoveOverlay {
+                    video: video.clone(),
+                    overlay: overlay.id.clone(),
+                },
+                video_touched(video, Some(&overlay.id)),
+            ))
+        }
+        O::RemoveOverlay { video, overlay } => {
+            let at = doc.video_index(video)?;
+            let target = &mut doc.videos[at];
+            let index = target
+                .overlays
+                .iter()
+                .position(|o| &o.id == overlay)
+                .ok_or_else(|| OpError::NoSuchClip(overlay.to_string()))?;
+            let removed = target.overlays.remove(index);
+            Ok(done(
+                op.clone(),
+                O::RestoreOverlay {
+                    video: video.clone(),
+                    index,
+                    overlay: removed,
+                },
+                video_touched(video, Some(overlay)),
+            ))
+        }
+        O::SetOverlay {
+            video,
+            overlay,
+            prop,
+        } => {
+            let vat = doc.video_index(video)?;
+            if let OverlayProperty::Frame(f) = prop {
+                doc.check_frame(f)?;
+            }
+            let target = &mut doc.videos[vat];
+            let oat = target
+                .overlays
+                .iter()
+                .position(|o| &o.id == overlay)
+                .ok_or_else(|| OpError::NoSuchClip(overlay.to_string()))?;
+            let before = target.overlays[oat].clone();
+            let o = &mut target.overlays[oat];
+            let old = match prop {
+                OverlayProperty::Frame(f) => {
+                    OverlayProperty::Frame(std::mem::replace(&mut o.frame, f.clone()))
+                }
+                OverlayProperty::StartMs(ms) => {
+                    OverlayProperty::StartMs(std::mem::replace(&mut o.start_ms, *ms))
+                }
+                OverlayProperty::DurationMs(ms) => {
+                    OverlayProperty::DurationMs(std::mem::replace(&mut o.duration_ms, *ms))
+                }
+                OverlayProperty::FadeMs(ms) => {
+                    OverlayProperty::FadeMs(std::mem::replace(&mut o.fade_ms, *ms))
+                }
+            };
+            if let Err(e) = target.check_fields() {
+                target.overlays[oat] = before;
+                return Err(e);
+            }
+            Ok(done(
+                op.clone(),
+                O::SetOverlay {
+                    video: video.clone(),
+                    overlay: overlay.clone(),
+                    prop: old,
+                },
+                video_touched(video, Some(overlay)),
             ))
         }
         _ => Err(OpError::Internal("not a video operation".to_string())),

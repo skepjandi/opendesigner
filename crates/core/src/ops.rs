@@ -12,7 +12,9 @@ use crate::model::{
     Document, ImageFit, Node, NodeId, NodeKind, Stroke, TextAlign, validate_node_fields,
 };
 use crate::paint::Paint;
-use crate::video::{Clip, ClipProperty, Motion, Transition, Video, VideoProperty};
+use crate::video::{
+    Clip, ClipProperty, Motion, Overlay, OverlayProperty, Transition, Video, VideoProperty,
+};
 
 /// One settable property with its new value. Serialized as `{"name": "x", "value": 10}`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -398,7 +400,12 @@ pub enum Operation {
     /// `transition` and `motion` default to a cut and no zoom.
     AddClip {
         video: NodeId,
-        frame: NodeId,
+        /// A design frame to show (give this or `footage`).
+        #[serde(default)]
+        frame: Option<NodeId>,
+        /// A stretch of imported footage to play (give this or `frame`).
+        #[serde(default)]
+        footage: Option<crate::video::Footage>,
         duration_ms: u32,
         #[serde(default)]
         index: Option<usize>,
@@ -420,6 +427,30 @@ pub enum Operation {
         video: NodeId,
         clip: NodeId,
         prop: ClipProperty,
+    },
+    /// Draw a design frame over the whole video from `start_ms` for `duration_ms`, fading in and
+    /// out over `fade_ms` (a title, a lower third). A frame with no fill is transparent.
+    AddOverlay {
+        video: NodeId,
+        frame: NodeId,
+        start_ms: u64,
+        duration_ms: u32,
+        #[serde(default)]
+        fade_ms: Option<u32>,
+    },
+    /// Remove an overlay.
+    RemoveOverlay { video: NodeId, overlay: NodeId },
+    /// Set one property of an overlay.
+    SetOverlay {
+        video: NodeId,
+        overlay: NodeId,
+        prop: OverlayProperty,
+    },
+    /// Put back an overlay. Written by the history; front ends cannot issue it.
+    RestoreOverlay {
+        video: NodeId,
+        index: usize,
+        overlay: Overlay,
     },
     /// Put back a video. Written by the history; front ends cannot issue it.
     RestoreVideo { video: Video },
@@ -455,6 +486,10 @@ impl Operation {
             Operation::RemoveClip { .. } => "remove_clip",
             Operation::MoveClip { .. } => "move_clip",
             Operation::SetClip { .. } => "set_clip",
+            Operation::AddOverlay { .. } => "add_overlay",
+            Operation::RemoveOverlay { .. } => "remove_overlay",
+            Operation::SetOverlay { .. } => "set_overlay",
+            Operation::RestoreOverlay { .. } => "restore_overlay",
             Operation::RestoreVideo { .. } => "restore_video",
             Operation::RestoreClip { .. } => "restore_clip",
             Operation::Restore { .. } => "restore",
@@ -651,7 +686,11 @@ pub fn apply(
         | Operation::MoveClip { .. }
         | Operation::SetClip { .. }
         | Operation::RestoreVideo { .. }
-        | Operation::RestoreClip { .. } => crate::video::apply(doc, op, allow_internal),
+        | Operation::RestoreClip { .. }
+        | Operation::AddOverlay { .. }
+        | Operation::RemoveOverlay { .. }
+        | Operation::SetOverlay { .. }
+        | Operation::RestoreOverlay { .. } => crate::video::apply(doc, op, allow_internal),
         Operation::SetToken { name, value } => set_token(doc, name, value.as_deref()),
         Operation::SetLocalizedText { locale, id, text } => {
             let old = doc.set_locale_text(locale, id, text.as_deref())?;
@@ -672,10 +711,10 @@ pub fn apply(
             if let Some(subtree) = doc.node(id) {
                 let mut ids = Vec::new();
                 subtree.ids(&mut ids);
-                if let Some((video, clip)) = doc.video_using(&ids) {
+                if let Some((video, clip, frame)) = doc.video_using(&ids) {
                     return Err(OpError::FrameInUse {
-                        frame: clip.frame.to_string(),
-                        clip: clip.id.to_string(),
+                        frame: frame.map(|f| f.to_string()).unwrap_or_default(),
+                        clip: clip.to_string(),
                         video: video.id.to_string(),
                     });
                 }

@@ -361,6 +361,7 @@ impl Session {
                     Operation::Restore { node, .. } => created.push(node.id.clone()),
                     Operation::RestoreVideo { video } => created.push(video.id.clone()),
                     Operation::RestoreClip { clip, .. } => created.push(clip.id.clone()),
+                    Operation::RestoreOverlay { overlay, .. } => created.push(overlay.id.clone()),
                     _ => {}
                 }
             }

@@ -72,6 +72,7 @@ pub struct Snapshot {
     pub unrendered: String,
     pub overflows: String,
     pub memory: String,
+    pub videos: String,
     pub tokens: String,
     pub languages: String,
     pub language: String,
@@ -577,7 +578,30 @@ impl EditorState {
             .unwrap_or_else(|_| Value::Array(Vec::new()))
     }
 
+    /// One picture of a video at `time_ms` as a PNG data URL, at most `max_side` pixels long.
+    pub fn video_preview(&self, video: &str, time_ms: u64, max_side: u32) -> Res<String> {
+        let id = parse_id(video)?;
+        self.with_ws(|ws| {
+            let (png, ..) =
+                od_agent::video_export::video_frame_png(ws, &id, time_ms, None, max_side)
+                    .map_err(|e| e.0)?;
+            Ok(format!("data:image/png;base64,{}", STANDARD.encode(png)))
+        })
+    }
+
     pub fn import_to_memory(&mut self, src: &std::path::Path) -> Res<String> {
+        let is_video = std::fs::File::open(src)
+            .ok()
+            .and_then(|mut f| {
+                use std::io::Read;
+                let mut head = [0u8; 12];
+                let n = f.read(&mut head).ok()?;
+                Some(od_core::media::sniff_footage(&head[..n]))
+            })
+            .unwrap_or(false);
+        if is_video {
+            return self.with_ws(|ws| ws.import_footage(src).map_err(|e| e.to_string()));
+        }
         self.with_ws(|ws| {
             let reference = ws.import_media(src).map_err(|e| e.to_string())?;
             let path = ws.media_path(&reference).map_err(|e| e.to_string())?;
@@ -1323,6 +1347,7 @@ impl EditorState {
                     .unwrap_or_default(),
             ),
             memory: memory_of(&ws).to_string(),
+            videos: to_string(&view::videos(doc)),
             overflows: to_string(&frame.map(|f| collect_overflows(doc, f)).unwrap_or_default()),
             tokens: to_string(&view::tokens(doc)),
             languages: to_string(&view::locales(doc)),
@@ -1365,11 +1390,25 @@ fn image_problem(n: &Node, dir: Option<&std::path::Path>) -> Option<String> {
 /// The files in a workspace's `media/` folder, for the memory tab.
 fn memory_of(ws: &Workspace) -> Value {
     let files = ws.media().unwrap_or_default();
+    let videos = ws.footage().unwrap_or_default();
+    let footage_rows = videos.iter().map(|f| {
+        json!({
+            "id": f.path,
+            "name": f.path.trim_start_matches("media/"),
+            "bytes": f.bytes,
+            "kind": "video",
+            "file": Value::Null,
+            "used": ws.session.document().videos.iter().any(|v| {
+                v.clips.iter().any(|c| c.footage.as_ref().is_some_and(|x| x.file == f.path))
+            }),
+        })
+    });
     Value::Array(
         files
             .iter()
             .map(|f| {
                 json!({
+                    "kind": "image",
                     "id": f.path,
                     "name": f.path.trim_start_matches("media/"),
                     "bytes": f.bytes,
@@ -1377,6 +1416,7 @@ fn memory_of(ws: &Workspace) -> Value {
                     "used": ws.session.document().pages.iter().any(|p| uses_image(&p.root, &f.path)),
                 })
             })
+            .chain(footage_rows)
             .collect(),
     )
 }
@@ -1950,6 +1990,43 @@ mod tests {
             s.import_to_memory(&t.path().join("notes.txt")).is_err(),
             "only pictures"
         );
+    }
+
+    #[test]
+    fn videos_dropped_in_go_to_memory_as_footage_and_a_video_previews_as_a_picture() {
+        let (mut s, t) = state();
+        let clip = t.path().join("take.mov");
+        std::fs::write(&clip, b"\0\0\0\x14ftypqt  0000").unwrap();
+        assert_eq!(s.import_to_memory(&clip).unwrap(), "media/take.mov");
+        let memory = s.memory_list();
+        assert_eq!(memory[0]["kind"], "video");
+        assert_eq!(memory[0]["used"], false);
+
+        let frame = s.create_node("frame", 0.0, 0.0, 200.0, 400.0).unwrap();
+        let ids = s
+            .apply_user(&[Operation::CreateVideo {
+                name: "V".into(),
+                fps: 10,
+                width: 100,
+                height: 200,
+            }])
+            .unwrap();
+        let video = ids[0].to_string();
+        s.apply_user(&[Operation::AddClip {
+            video: ids[0].clone(),
+            frame: Some(parse_id(&frame).unwrap()),
+            footage: None,
+            duration_ms: 1000,
+            index: None,
+            transition: None,
+            motion: None,
+        }])
+        .unwrap();
+        let videos: Vec<Value> = serde_json::from_str(&s.snapshot().videos).unwrap();
+        assert_eq!(videos[0]["duration_ms"], 1000);
+        let url = s.video_preview(&video, 0, 64).unwrap();
+        assert!(url.starts_with("data:image/png;base64,"));
+        assert!(s.video_preview("v_999", 0, 64).is_err());
     }
 
     #[test]

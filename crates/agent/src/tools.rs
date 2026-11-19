@@ -176,10 +176,12 @@ pub fn definitions() -> Vec<Value> {
              {op:'set_localized_text', locale, id, text} (a translation of a text node; text null removes it), \
              and for videos (see list_videos): {op:'create_video', name, fps, width, height} (even sizes), {op:'delete_video', id}, \
              {op:'set_video', id, prop:{name, value}} with name one of name, fps, size (value {width, height}), \
-             {op:'add_clip', video, frame, duration_ms, index?, transition?, motion?} (a clip shows a frame), \
+             {op:'add_clip', video, frame | footage:{file:'media/x.mp4', in_ms}, duration_ms, index?, transition?, motion?} (a clip shows a design frame or plays footage from list_footage), \
              {op:'remove_clip', video, clip}, {op:'move_clip', video, clip, index}, \
              {op:'set_clip', video, clip, prop:{name, value}} with name one of duration_ms, frame, \
-             transition (value {kind: cut|fade|slide_left|slide_right, duration_ms}), motion (value {scale_from, scale_to}, 1 to 3). Colors are '#rrggbb', '#rrggbbaa' or \
+             source (value {frame} or {footage:{file,in_ms}}), transition (value {kind: cut|fade|slide_left|slide_right, duration_ms}), motion (value {scale_from, scale_to}, 1 to 3), \
+             {op:'add_overlay', video, frame, start_ms, duration_ms, fade_ms?} (a design frame drawn over the whole video for a while, fading in and out: titles, lower thirds; a frame with no fill is transparent), {op:'remove_overlay', video, overlay}, \
+             {op:'set_overlay', video, overlay, prop:{name, value}} with name one of frame, start_ms, duration_ms, fade_ms. Colors are '#rrggbb', '#rrggbbaa' or \
              '{token.name}'. Ids are minted for you; the result lists the created ids. A checkpoint is taken \
              before your first change in a turn so the user can restore it.",
             json!({
@@ -320,6 +322,15 @@ pub fn definitions() -> Vec<Value> {
             true,
         ),
         tool(
+            "list_footage",
+            "Videos the user imported into the project (media/): reference, size on disk and, when \
+             ffmpeg is installed, length, picture size, frame rate and whether it has sound. Play \
+             one in a video with add_clip footage:{file, in_ms}. You cannot import files yourself.",
+            json!({}),
+            &[],
+            true,
+        ),
+        tool(
             "list_video_presets",
             "Store rules for videos (app previews): sizes, length, frame rate and file size, with the \
              page each was read from and what is not checked.",
@@ -395,6 +406,7 @@ pub fn call(ctx: &mut CallCtx, name: &str, args: Value) -> Result<Output, ToolEr
             ctx.ws.session.document(),
         ))?)),
         "list_video_presets" => Ok(Output::json(&video_presets_json())),
+        "list_footage" => list_footage(ctx),
         "render_video_frame" => render_video_frame(ctx, parse(args)?),
         "export_video" => export_video_tool(ctx, parse(args)?),
         "list_locales" => {
@@ -1074,6 +1086,7 @@ pub fn video_outcome_json(out: &crate::video_export::VideoOutcome) -> Value {
         "encoder": out.encoder,
         "ffmpeg": out.ffmpeg,
         "ffmpeg_is_gpl_build": out.ffmpeg_gpl,
+        "footage_sounds_mixed": out.audio_pieces,
         "warnings": out.warnings,
     })
 }
@@ -1098,4 +1111,29 @@ fn video_presets_json() -> Value {
             })
             .collect(),
     )
+}
+
+fn list_footage(ctx: &mut CallCtx) -> Result<Output, ToolError> {
+    let Some(dir) = ctx.ws.dir().map(std::path::Path::to_path_buf) else {
+        return Ok(Output::json(&json!([])));
+    };
+    let ffmpeg = od_media::Ffmpeg::locate().ok();
+    let files = od_core::media::list_footage(&dir)?;
+    let rows: Vec<Value> = files
+        .iter()
+        .map(|f| {
+            let info = ffmpeg.as_ref().and_then(|ff| {
+                let path = od_media::footage_path(&dir, &f.path).ok()?;
+                ff.probe_file(&path).ok()
+            });
+            match info {
+                Some(i) => json!({
+                    "file": f.path, "bytes": f.bytes, "duration_ms": i.duration_ms,
+                    "width": i.width, "height": i.height, "fps": i.fps, "has_audio": i.has_audio,
+                }),
+                None => json!({"file": f.path, "bytes": f.bytes, "note": "ffmpeg is not available, so its length and size are unknown"}),
+            }
+        })
+        .collect();
+    Ok(Output::json(&Value::Array(rows)))
 }

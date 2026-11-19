@@ -411,8 +411,16 @@ fn run(cli: Cli) -> Result<(), CliError> {
                     println!(
                         "  {}\t{} ({})\tstarts {} ms\t{} ms\t{:?} {} ms\tzoom {} to {}",
                         c.id,
-                        c.frame_name,
-                        c.frame,
+                        if c.footage.is_empty() {
+                            c.frame_name.clone()
+                        } else {
+                            format!("footage {} from {} ms", c.footage, c.footage_in_ms)
+                        },
+                        if c.footage.is_empty() {
+                            &c.frame
+                        } else {
+                            "footage"
+                        },
                         c.start_ms,
                         c.duration_ms,
                         c.transition.kind,

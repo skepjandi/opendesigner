@@ -804,3 +804,119 @@ fn a_video_that_breaks_a_store_rule_is_refused_before_anything_is_encoded() {
     );
     assert!(err && text.contains("unknown video preset"), "{text}");
 }
+
+/// A 3 s test video with a tone, made by the real ffmpeg.
+fn make_footage(ff: &od_media::Ffmpeg, path: &std::path::Path) {
+    let out = std::process::Command::new(&ff.path)
+        .args(["-hide_banner", "-loglevel", "error", "-y"])
+        .args([
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=size=320x240:rate=10:duration=3",
+        ])
+        .args(["-f", "lavfi", "-i", "sine=frequency=440:duration=3"])
+        .args(["-c:v", "mpeg4", "-c:a", "aac", "-shortest"])
+        .arg(path)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
+fn footage_is_listed_cut_into_a_video_with_an_overlay_and_exported_with_its_sound() {
+    let Ok(ff) = od_media::Ffmpeg::locate() else {
+        eprintln!("skipped: no ffmpeg on this machine");
+        return;
+    };
+    if ff.h264_encoder().is_err() || !ff.has_encoder("aac") || !ff.has_encoder("mpeg4") {
+        eprintln!("skipped: {} lacks an encoder this test needs", ff.version);
+        return;
+    }
+    let f = fixture();
+    let src = f._tmp.path().join("clip.mp4");
+    make_footage(&ff, &src);
+    let reference = f.ws.lock().unwrap().import_footage(&src).unwrap();
+    assert_eq!(reference, "media/clip.mp4");
+
+    let listed = f.ok("list_footage", json!({}));
+    assert_eq!(listed[0]["file"], "media/clip.mp4");
+    assert_eq!(listed[0]["has_audio"], true);
+    assert_eq!(
+        (listed[0]["width"].as_u64(), listed[0]["height"].as_u64()),
+        (Some(320), Some(240))
+    );
+    assert!((listed[0]["duration_ms"].as_u64().unwrap() as i64 - 3000).abs() < 200);
+
+    let r = f.ok(
+        "apply_ops",
+        json!({"ops": [
+            {"op":"create","parent":f.root,"node":{"kind":"frame","name":"Title","width":200,"height":400,
+              "children":[{"kind":"rect","name":"Bar","x":0,"y":300,"width":200,"height":60,"fill":"#ff0000"}]}},
+            {"op":"create_video","name":"Cut","fps":10,"width":200,"height":400}
+        ]}),
+    );
+    let ids: Vec<String> = r["created"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap().to_string())
+        .collect();
+    let title = ids.iter().find(|i| i.starts_with("n_")).unwrap().clone();
+    let video = ids.iter().find(|i| i.starts_with("v_")).unwrap().clone();
+    f.ok(
+        "apply_ops",
+        json!({"ops": [
+            {"op":"add_clip","video":video,"footage":{"file":"media/clip.mp4","in_ms":0},"duration_ms":1000},
+            {"op":"add_clip","video":video,"footage":{"file":"media/clip.mp4","in_ms":1500},"duration_ms":1000},
+            {"op":"add_overlay","video":video,"frame":title,"start_ms":500,"duration_ms":1000,"fade_ms":200}
+        ]}),
+    );
+    let listed = f.ok("list_videos", json!({}));
+    assert_eq!(listed[0]["duration_ms"], 2000);
+    assert_eq!(listed[0]["clips"][1]["footage"], "media/clip.mp4");
+    assert_eq!(listed[0]["overlays"][0]["frame"], title);
+
+    // a clip past the end of its file is refused with the numbers
+    f.ok("apply_ops", json!({"ops":[{"op":"add_clip","video":video,"footage":{"file":"media/clip.mp4","in_ms":2800},"duration_ms":2000}]}));
+    let (err, text) = f.tool("export_video", json!({"video": video, "file": "bad.mp4"}));
+    assert!(
+        err && text.contains("only") && text.contains("ms long"),
+        "{text}"
+    );
+    let last = listed[0]["clips"][1]["id"].as_str().unwrap().to_string();
+    let _ = last;
+    let tail = f.ok("list_videos", json!({}))[0]["clips"][2]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    f.ok(
+        "apply_ops",
+        json!({"ops":[{"op":"remove_clip","video":video,"clip":tail}]}),
+    );
+
+    let (err, text) = f.tool("export_video", json!({"video": video, "file": "cut.mp4"}));
+    assert!(!err, "{text}");
+    let out: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(out["frames"], 20);
+    assert_eq!(out["footage_sounds_mixed"], 2);
+    let file = f._tmp.path().join("p.od/exports/cut.mp4");
+    let info = ff.probe_file(&file).unwrap();
+    assert!(info.has_audio, "the footage's sound is in the file");
+    assert_eq!((info.width, info.height), (200, 400));
+    assert!(
+        (info.duration_ms as i64 - 2000).abs() < 250,
+        "{}",
+        info.duration_ms
+    );
+    assert!(
+        !f._tmp
+            .path()
+            .join("p.od/exports/.cut.mp4.picture.mp4")
+            .exists()
+    );
+}

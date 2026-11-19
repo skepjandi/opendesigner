@@ -114,6 +114,16 @@ impl Workspace {
         media::import(self.project_dir()?, src)
     }
 
+    /// Copies a video the user chose into the project's `media/` folder; returns its reference.
+    pub fn import_footage(&self, src: &Path) -> Result<String, ProjectError> {
+        media::import_footage(self.project_dir()?, src)
+    }
+
+    /// The videos in `media/`.
+    pub fn footage(&self) -> Result<Vec<media::MediaFile>, ProjectError> {
+        media::list_footage(self.project_dir()?)
+    }
+
     /// The images an image node can reference.
     pub fn media(&self) -> Result<Vec<media::MediaFile>, ProjectError> {
         media::list(self.project_dir()?)

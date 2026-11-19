@@ -72,7 +72,7 @@ Frames, primitives, paths with the pen tool, text, images, selection/transform/s
 
 ## Phase 5: video
 
-**Progress (2026-11-19):** video v1 is built (design-frame clips, transitions, zoom, ffmpeg encoding, Apple app-preview rules, MCP and CLI; see [Video Editing](./video-editing.md#built-video-v1)). Not built: footage clips and trimming, audio, overlays/titles over footage, editor preview, bundled LGPL ffmpeg. **Exit** (a 30 s app preview from a screen capture with a title card) needs footage clips.
+**Progress (2026-11-19):** video v1 is built (design-frame clips, transitions, zoom, ffmpeg encoding, Apple app-preview rules, MCP and CLI; see [Video Editing](./video-editing.md#built-video-v1)). Footage clips with sound, overlays (titles over footage) and an editor preview tab are built too (same day). Not built: animated overlays, music and volume, speed, speech captions, timeline notes and clip selection in the window, bundled LGPL ffmpeg. **Exit** (a 30 s app preview from a screen capture with a title card, exported to the App Store spec) is built but not tried with a real screen recording.
 
 `media` crate with the pinned FFmpeg toolchain, composition and timeline model, preview, trim/split/ripple, text and overlay clips including design frames, export presets and validation, timeline annotations and agent timeline operations. **Exit:** produce a 30 s app preview from a screen capture with a title card, exported to a validated App Store preview spec.
 
