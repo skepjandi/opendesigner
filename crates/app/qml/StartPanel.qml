@@ -57,16 +57,40 @@ ColumnLayout {
         }
         Btn { text: "Choose folder…"; primary: !root.info; onClicked: folderDialog.open() }
     }
+    // One workspace per deliverable: an app store set, a reel, a landing page. Pick one that
+    // exists or name a new one.
+    readonly property var existing: info && info.found === "workspaces" ? info.workspaces : []
+    readonly property bool direct: info !== null && info.found === "project"
+    property bool makeNew: existing.length === 0
+    RowLayout {
+        Layout.fillWidth: true
+        visible: root.info !== null && !root.direct
+        Label { text: "Workspace"; color: Theme.muted; font.pixelSize: 12 }
+        ComboBox {
+            id: workspaceBox
+            Layout.preferredWidth: 180
+            visible: root.existing.length > 0
+            model: root.existing.concat(["New workspace…"])
+            onActivated: i => root.makeNew = i === root.existing.length
+            onModelChanged: { currentIndex = 0; root.makeNew = root.existing.length === 0 }
+        }
+        Field {
+            id: newName
+            Layout.fillWidth: true
+            visible: root.makeNew
+            placeholderText: "name it after what it is, for example app store or instagram reel"
+        }
+    }
     Label {
         Layout.fillWidth: true
         visible: root.info !== null
         wrapMode: Text.WordWrap
         font.pixelSize: 11
-        color: root.info && root.info.found === "none" ? Theme.accent : Theme.success
+        color: root.makeNew && !root.direct ? Theme.accent : Theme.success
         text: !root.info ? "" :
-              root.info.found === "project" ? "This folder is an OpenDesigner project; it will be opened."
-            : root.info.found === "nested" ? "An OpenDesigner project is already in opendesigner/ here; it will be opened."
-            : "A new, empty OpenDesigner project will be set up in opendesigner/ here. The agent decides what to make."
+              root.direct ? "This folder is an OpenDesigner project; it will be opened."
+            : root.makeNew ? "A new, empty workspace is set up in opendesigner/workspaces/ here. The agent decides what to make, and can start more workspaces for other deliverables."
+            : "The workspace is opened as you left it."
     }
 
     Label {
@@ -146,9 +170,10 @@ ColumnLayout {
         Btn {
             text: root.agentChosen && root.info ? "Open and start the agent" : "Open"
             primary: true
-            enabled: root.info !== null && root.info.exists
+            enabled: root.info !== null && root.info.exists && (root.direct || !root.makeNew || newName.text.trim() !== "")
             onClicked: {
-                if (!root.editor.openWorkspace(root.folderUrl, true)) return
+                const name = root.direct ? "" : (root.makeNew ? newName.text.trim() : root.existing[workspaceBox.currentIndex])
+                if (!root.editor.openWorkspace(root.folderUrl, name, true)) return
                 if (root.agentChosen) root.editor.chatStartWith(root.command, prompt.text)
                 root.started()
             }

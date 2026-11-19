@@ -322,6 +322,32 @@ pub fn definitions() -> Vec<Value> {
             true,
         ),
         tool(
+            "list_workspaces",
+            "The workspaces of this repository: separate designs side by side (an app store set, a \
+             reel, a landing page), each with its own pages, videos, notes and media. Says which \
+             one is open; every other tool works on the open one.",
+            json!({}),
+            &[],
+            true,
+        ),
+        tool(
+            "create_workspace",
+            "Make a new, empty workspace and open it. Use one workspace per deliverable (for \
+             example \"app store\" and \"instagram reel\") instead of putting different things on \
+             the same page. Names are up to 40 letters, digits, spaces, - or _.",
+            json!({"name": id("The workspace name.")}),
+            &["name"],
+            false,
+        ),
+        tool(
+            "open_workspace",
+            "Switch to another workspace of this repository (from list_workspaces). The open one is \
+             saved first; the user sees the switch.",
+            json!({"name": id("A name from list_workspaces.")}),
+            &["name"],
+            false,
+        ),
+        tool(
             "find_files",
             "Look for pictures and videos anywhere under the user's home folder (the user allows \
              this; hidden folders and caches are skipped). Returns paths, sizes and dates, newest \
@@ -429,6 +455,9 @@ pub fn call(ctx: &mut CallCtx, name: &str, args: Value) -> Result<Output, ToolEr
         ))?)),
         "list_video_presets" => Ok(Output::json(&video_presets_json())),
         "list_footage" => list_footage(ctx),
+        "list_workspaces" => list_workspaces(ctx),
+        "create_workspace" => switch_workspace(ctx, parse(args)?, true),
+        "open_workspace" => switch_workspace(ctx, parse(args)?, false),
         "find_files" => find_files(ctx, parse(args)?),
         "import_file" => import_file(ctx, parse(args)?),
         "render_video_frame" => render_video_frame(ctx, parse(args)?),
@@ -1257,4 +1286,63 @@ fn import_file(ctx: &mut CallCtx, a: ImportFileArgs) -> Result<Output, ToolError
     Ok(Output::json(
         &json!({"reference": reference, "copied_from": real.display().to_string()}),
     ))
+}
+
+fn list_workspaces(ctx: &mut CallCtx) -> Result<Output, ToolError> {
+    let Some(dir) = ctx.ws.dir().map(std::path::Path::to_path_buf) else {
+        return Ok(Output::json(&json!({"open": null, "workspaces": []})));
+    };
+    let rows: Vec<Value> = crate::workspaces::list(&dir)
+        .iter()
+        .map(|e| {
+            let doc = od_core::project::load(&e.path).ok();
+            json!({
+                "name": e.name,
+                "open": e.path == dir,
+                "pages": doc.as_ref().map(|s| s.document().pages.len()),
+                "frames": doc.as_ref().map(|s| od_core::view::frames(s.document()).len()),
+                "videos": doc.as_ref().map(|s| s.document().videos.len()),
+            })
+        })
+        .collect();
+    Ok(Output::json(
+        &json!({"open": crate::workspaces::name_of(&dir), "workspaces": rows}),
+    ))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WorkspaceArgs {
+    name: String,
+}
+
+fn switch_workspace(
+    ctx: &mut CallCtx,
+    a: WorkspaceArgs,
+    create: bool,
+) -> Result<Output, ToolError> {
+    let dir = ctx
+        .ws
+        .dir()
+        .map(std::path::Path::to_path_buf)
+        .ok_or_else(|| ToolError("the project has no folder, so no workspaces".into()))?;
+    let next = if create {
+        crate::workspaces::create(&dir, &a.name).map_err(ToolError)?
+    } else {
+        let path = crate::workspaces::find(&dir, &a.name).ok_or_else(|| {
+            let names: Vec<String> = crate::workspaces::list(&dir)
+                .into_iter()
+                .map(|e| e.name)
+                .collect();
+            ToolError(format!(
+                "no workspace {:?}; there are: {}",
+                a.name,
+                names.join(", ")
+            ))
+        })?;
+        Workspace::open(&path)?
+    };
+    ctx.ws.save()?;
+    *ctx.ws = next;
+    Ok(Output::json(&json!({"open": a.name, "created": create})))
 }

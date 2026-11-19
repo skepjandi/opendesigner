@@ -12,6 +12,7 @@ pub mod skill;
 pub mod token;
 pub mod tools;
 pub mod video_export;
+pub mod workspaces;
 
 pub use error::AgentError;
 pub use mcp::{ChangeEvent, Handler, Outcome};

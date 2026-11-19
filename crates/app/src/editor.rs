@@ -31,6 +31,7 @@ pub mod qobject {
         #[qproperty(QString, memory)]
         #[qproperty(QString, videos)]
         #[qproperty(QString, jobs)]
+        #[qproperty(QString, workspaces)]
         #[qproperty(QString, tokens)]
         #[qproperty(QString, languages)]
         #[qproperty(QString, language)]
@@ -63,7 +64,15 @@ pub mod qobject {
         fn inspect_folder(self: &Self, url: &QString) -> QString;
         #[qinvokable]
         #[cxx_name = "openWorkspace"]
-        fn open_workspace(self: Pin<&mut Self>, url: &QString, create: bool) -> bool;
+        fn open_workspace(
+            self: Pin<&mut Self>,
+            url: &QString,
+            workspace: &QString,
+            create: bool,
+        ) -> bool;
+        #[qinvokable]
+        #[cxx_name = "switchWorkspace"]
+        fn switch_workspace(self: Pin<&mut Self>, name: &QString, create: bool) -> bool;
         #[qinvokable]
         #[cxx_name = "recentProjects"]
         fn recent_projects(self: &Self) -> QString;
@@ -291,6 +300,7 @@ pub struct EditorRust {
     memory: QString,
     videos: QString,
     jobs: QString,
+    workspaces: QString,
     tokens: QString,
     languages: QString,
     language: QString,
@@ -402,6 +412,7 @@ impl qobject::Editor {
         self.as_mut().set_memory(q(&snap.memory));
         self.as_mut().set_videos(q(&snap.videos));
         self.as_mut().set_jobs(q(&snap.jobs));
+        self.as_mut().set_workspaces(q(&snap.workspaces));
         self.as_mut().set_tokens(q(&snap.tokens));
         self.as_mut().set_languages(q(&snap.languages));
         self.as_mut().set_language(q(&snap.language));
@@ -422,6 +433,7 @@ impl qobject::Editor {
 
     /// Called on the Qt thread when an agent changed the document through MCP.
     fn on_agent_change(mut self: Pin<&mut Self>, who: &str, ids: Vec<NodeId>) {
+        self.as_mut().rust_mut().state.sync_workspace();
         self.as_mut().rust_mut().state.note_agent_change(&ids);
         self.as_mut()
             .show(&format!("{who} changed {} layer(s)", ids.len()), false);
@@ -450,11 +462,30 @@ impl qobject::Editor {
         q(&EditorState::inspect_folder(Path::new(&path)).to_string())
     }
 
-    pub fn open_workspace(mut self: Pin<&mut Self>, url: &QString, create: bool) -> bool {
+    pub fn switch_workspace(mut self: Pin<&mut Self>, name: &QString, create: bool) -> bool {
+        let name = name.to_string();
+        let switched = self
+            .as_mut()
+            .act(|s| s.switch_workspace(&name, create))
+            .is_some();
+        if switched {
+            self.as_mut().show(&format!("Workspace: {name}"), false);
+        }
+        switched
+    }
+
+    pub fn open_workspace(
+        mut self: Pin<&mut Self>,
+        url: &QString,
+        workspace: &QString,
+        create: bool,
+    ) -> bool {
         let path = path_from_url(&url.to_string());
+        let workspace = workspace.to_string();
+        let workspace = (!workspace.is_empty()).then_some(workspace);
         let opened = self
             .as_mut()
-            .act(|s| s.open_workspace(Path::new(&path), create))
+            .act(|s| s.open_workspace(Path::new(&path), workspace.as_deref(), create))
             .is_some();
         if opened {
             self.as_mut().show("Project ready", false);

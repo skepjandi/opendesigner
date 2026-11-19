@@ -8,6 +8,16 @@ All notable changes to OpenDesigner are documented here.
 
 ## 2026-11-19
 
+### feat(app): workspaces: several deliverables side by side in one repository
+
+**Area:** `feat(mcp)`, `feat(app)`
+
+**Why:** An agent asked for an app store asset and a reel put both on one page. **Change:** A repository can hold several workspaces, each its own project folder under `opendesigner/workspaces/<name>/` (pages, videos, history, notes, media); a project from before sits in `opendesigner/` and is listed as `main`. The agent gets `list_workspaces`, `create_workspace` and `open_workspace` (the skill says: one per deliverable); the start screen and the toolbar have a workspace picker and "New workspace…"; an agent's switch is announced and the window follows it (view, language and outlines reset). Switching swaps the workspace behind the running connection, so the agent and the chat stay connected.
+
+**Verified:** agent tests (separate frames per workspace, empty new one, listing, switch announced, bad and duplicate names refused), app tests (open/create/recent, switching keeps each one's work), window session. **Not verified:** the pickers by hand; a real agent choosing to split work into workspaces. Media is per workspace, so the same picture added in two workspaces is two copies.
+
+**PR:** n/a
+
 ### fix(video): the window no longer freezes during a video export; progress bars and spinners; agents can use pictures from anywhere
 
 **Area:** `fix(mcp)`, `feat(app)`, `feat(mcp)`
