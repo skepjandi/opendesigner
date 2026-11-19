@@ -76,7 +76,7 @@ Frames, primitives, paths with the pen tool, text, images, selection/transform/s
 
 ## Phase 6: in-app chat
 
-**Progress (2026-11-19):** an ACP v1 client, the Chat tab (start an agent from a preset or a custom command, send, permission buttons, cancel, disconnect) and the MCP hand-off are built and tested against a scripted agent, including the window session. Not met: any real agent (none was installed or signed in), plans, session list, an agent picker that detects installed agents. ACP's v2 draft is not supported. **Exit** (the Phase 3 scenario without leaving the app) is unverified.
+**Progress (2026-11-19):** an ACP v1 client, the Chat tab (start an agent from a preset or a custom command, send, permission buttons, cancel, disconnect) and the MCP hand-off are built and tested against a scripted agent, including the window session. The session setup was also run against real Gemini CLI, the Claude adapter and the Codex adapter (see [Agent Integration](./agent-integration.md#in-app-chat)); no prompt turn with a real agent was possible because none is signed in. Not met: plans, session list, an agent picker that detects installed agents. ACP's v2 draft is not supported. **Exit** (the Phase 3 scenario without leaving the app) is unverified.
 
 ACP client, agent picker for installed agents, chat panel with tool calls, plans and approvals inline, guidance context attached to each prompt, scripted demo agent for tests, session list.
 
