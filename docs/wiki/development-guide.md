@@ -25,6 +25,7 @@ cargo fmt --all --check
 cargo clippy --all-targets -- -D warnings
 cargo test                          # 80+ tests, including the MCP server and CLI end to end
 cargo deny check                    # advisories, bans, licenses, sources (deny.toml)
+cargo run --release -p opendesigner-render --example bench   # render / export / transaction timings vs the roadmap budgets
 
 # the editor (needs QMAKE; the first build compiles cxx-qt and takes a few minutes)
 cargo run -p opendesigner-app
