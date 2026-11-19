@@ -44,7 +44,7 @@ Kino's MCP endpoint is a useful precedent for the UX (fixed loopback port, keep 
 
 ## Skill installer
 
-**Implemented** in `crates/agent/src/skill.rs` (tests in `crates/agent/tests/skill.rs` and `crates/cli/tests/skill.rs`): every bullet below except the first-run consent UI, which waits for the Qt app. The tests snapshot a temporary home folder and assert that an install adds files only under `.claude/skills/opendesigner/` and `.agents/skills/opendesigner/`, leaves every other file byte-identical (agent settings included), and that uninstall restores the snapshot.
+**Implemented** in `crates/agent/src/skill.rs` (tests in `crates/agent/tests/skill.rs` and `crates/cli/tests/skill.rs`): every bullet below; the first-run consent dialog is in the Qt app (`qml/main.qml`, state in `crates/app/src/state.rs`), which lists the paths and writes nothing without a click. The tests snapshot a temporary home folder and assert that an install adds files only under `.claude/skills/opendesigner/` and `.agents/skills/opendesigner/`, leaves every other file byte-identical (agent settings included), and that uninstall restores the snapshot.
 
 - Writes only `<skills dir>/opendesigner/` under user-approved agent locations, after showing every path.
 - Never writes outside those directories, never edits agent config, credentials, history or other skills.

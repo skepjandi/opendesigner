@@ -611,5 +611,54 @@ ApplicationWindow {
         Timer { id: toastTimer; interval: 4200; onTriggered: toastBox.opacity = 0 }
     }
 
-    SelfTest { editor: backend; canvas: canvas; grabTarget: shell }
+    // The first time the app runs on a computer that has an agent but not our skill, say so and
+    // show exactly what would be written. Nothing is written without a click.
+    Dialog {
+        id: offer
+        property var rows: []
+        modal: true
+        anchors.centerIn: Overlay.overlay
+        width: Math.min(560, Overlay.overlay ? Overlay.overlay.width - 40 : 560)
+        title: "Teach your coding agents about OpenDesigner?"
+        background: Rectangle { radius: Theme.radius; color: Theme.panelRaised; border.width: 1; border.color: Theme.border }
+        header: Label { text: offer.title; color: Theme.text; font.pixelSize: 15; font.bold: true; padding: 14; wrapMode: Text.WordWrap }
+        contentItem: ColumnLayout {
+            spacing: 8
+            Label {
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+                color: Theme.muted
+                font.pixelSize: Theme.fontSize
+                text: "OpenDesigner found coding agents on this computer. A short skill (a guide and the store rules) lets them work in your projects. These files would be written, and nothing else is touched; you can remove them again from the Connect tab."
+            }
+            Repeater {
+                model: offer.rows
+                delegate: ColumnLayout {
+                    required property var modelData
+                    Layout.fillWidth: true
+                    Label { text: modelData.label + " — " + modelData.readers.join(", "); color: Theme.text; font.pixelSize: 12; font.bold: true; Layout.fillWidth: true; wrapMode: Text.WordWrap }
+                    Repeater {
+                        model: modelData.files
+                        Label { required property string modelData; text: modelData; color: Theme.muted; font.pixelSize: 11; elide: Text.ElideMiddle; Layout.fillWidth: true }
+                    }
+                }
+            }
+        }
+        footer: RowLayout {
+            spacing: 8
+            Item { Layout.fillWidth: true }
+            Btn { text: "Don't ask again"; onClicked: { backend.answerSkillOffer(false); offer.close() } }
+            Btn { text: "Not now"; onClicked: offer.close() }
+            Btn { text: "Install"; primary: true; onClicked: { backend.answerSkillOffer(true); offer.close() } }
+            Item { implicitWidth: 6 }
+        }
+    }
+
+    Component.onCompleted: {
+        if (selfTest.folder !== "" || !backend.skillOfferPending()) return
+        offer.rows = JSON.parse(backend.skillStatus()).filter(r => r.detected && r.state === "not installed")
+        offer.open()
+    }
+
+    SelfTest { id: selfTest; editor: backend; canvas: canvas; grabTarget: shell }
 }

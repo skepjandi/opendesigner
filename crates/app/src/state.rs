@@ -930,12 +930,12 @@ impl EditorState {
 
     // ---- in-app chat ----
 
-    /// The agent command last used, kept next to the connection token.
     /// The agents the chat offers, as JSON, with which are installed.
     pub fn chat_presets() -> String {
         crate::chat::presets_json()
     }
 
+    /// The agent command last used, kept next to the connection token.
     pub fn chat_last_command() -> String {
         token::config_dir()
             .ok()
@@ -1021,6 +1021,23 @@ impl EditorState {
             .unwrap_or_default(),
             None => "[]".to_string(),
         }
+    }
+
+    /// Whether to offer installing the skill on this start: an agent that reads skills is on this
+    /// computer without ours, and the user has not said "don't ask again".
+    pub fn skill_offer_pending() -> bool {
+        match (skill::home_dir(), token::config_dir()) {
+            (Ok(home), Ok(config)) => skill_offer_pending_in(&home, &config),
+            _ => false,
+        }
+    }
+
+    /// The user's answer to the offer: `install` writes the skill for the agents found, and
+    /// either way the offer is not repeated. `install == false` is "don't ask again".
+    pub fn answer_skill_offer(install: bool) -> Res<Value> {
+        let config = token::config_dir().map_err(|e| e.to_string())?;
+        let home = skill::home_dir().map_err(|e| e.to_string())?;
+        answer_skill_offer_in(&home, &config, install)
     }
 
     pub fn skill_status(&self) -> Res<Value> {
@@ -1336,6 +1353,27 @@ pub fn skill_status_in(home: &Path) -> Res<Value> {
         })
         .collect();
     Ok(Value::Array(rows))
+}
+
+const SKILL_OFFER_MARKER: &str = "skill-offer-answered";
+
+pub fn skill_offer_pending_in(home: &Path, config: &Path) -> bool {
+    !config.join(SKILL_OFFER_MARKER).exists()
+        && skill::plan(home).is_ok_and(|plan| {
+            plan.iter()
+                .any(|p| p.detected && p.state == skill::State::NotInstalled)
+        })
+}
+
+pub fn answer_skill_offer_in(home: &Path, config: &Path, install: bool) -> Res<Value> {
+    let result = if install {
+        install_skill_in(home)?
+    } else {
+        Value::Array(Vec::new())
+    };
+    std::fs::create_dir_all(config).map_err(|e| e.to_string())?;
+    std::fs::write(config.join(SKILL_OFFER_MARKER), "answered\n").map_err(|e| e.to_string())?;
+    Ok(result)
 }
 
 pub fn install_skill_in(home: &Path) -> Res<Value> {
@@ -1701,6 +1739,43 @@ mod tests {
         assert!(s.render_canvas(1.0).is_err());
         assert_eq!(s.hit_test(0.0, 0.0), None);
         assert_eq!(s.connect_recipes(), "[]");
+    }
+
+    #[test]
+    fn the_skill_is_offered_once_to_a_computer_with_an_agent_and_no_skill() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (home, config) = (tmp.path().join("home"), tmp.path().join("cfg"));
+        std::fs::create_dir_all(&home).unwrap();
+        assert!(
+            !skill_offer_pending_in(&home, &config),
+            "no agent, nothing to offer"
+        );
+
+        std::fs::create_dir_all(home.join(".claude")).unwrap();
+        assert!(skill_offer_pending_in(&home, &config));
+
+        let done = answer_skill_offer_in(&home, &config, true).unwrap();
+        assert_eq!(done.as_array().map(Vec::len), Some(1), "{done}");
+        assert!(home.join(".claude/skills/opendesigner/SKILL.md").exists());
+        assert!(!skill_offer_pending_in(&home, &config), "answered once");
+    }
+
+    #[test]
+    fn not_asking_again_installs_nothing_and_an_installed_skill_is_not_offered() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (home, config) = (tmp.path().join("home"), tmp.path().join("cfg"));
+        std::fs::create_dir_all(home.join(".claude")).unwrap();
+        answer_skill_offer_in(&home, &config, false).unwrap();
+        assert!(!home.join(".claude/skills").exists());
+        assert!(!skill_offer_pending_in(&home, &config));
+
+        let (home2, config2) = (tmp.path().join("h2"), tmp.path().join("c2"));
+        std::fs::create_dir_all(home2.join(".claude")).unwrap();
+        install_skill_in(&home2).unwrap();
+        assert!(
+            !skill_offer_pending_in(&home2, &config2),
+            "already installed"
+        );
     }
 
     #[test]

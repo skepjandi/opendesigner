@@ -78,6 +78,11 @@ Item {
                    check(JSON.parse(editor.annotations)[0].bounds.width === 400, "pin should carry the node's bounds")
         },
         function () {
+            return check(editor.skillOfferPending(), "an agent is installed and the skill is not, so it is offered") &&
+                   check(JSON.parse(editor.answerSkillOffer(false)).length === 0, "not asking again installs nothing") &&
+                   check(!editor.skillOfferPending(), "the offer is made once")
+        },
+        function () {
             editor.startMcp()
             const ok = editor.mcpRunning && JSON.parse(editor.connectRecipes()).length >= 7
             editor.stopMcp()
@@ -171,7 +176,9 @@ Item {
             const c = JSON.parse(editor.chat)
             if (c.status !== "ready") return "wait"
             const said = c.messages.filter(m => m.role === "agent").map(m => m.text).join("")
-            const ok = check(said === "Hello world [fs refused] [chose yes]", "the agent's reply: " + said)
+            const plan = c.plan.map(p => p.content + "=" + p.status).join(",")
+            const ok = check(said === "Hello world [fs refused] [chose yes]", "the agent's reply: " + said) &&
+                       check(plan === "Read the guidance=completed,Make it bigger=in_progress", "the agent's plan: " + plan)
             editor.chatStop()
             return ok && check(JSON.parse(editor.chat).status === "off", "the chat should stop")
         },

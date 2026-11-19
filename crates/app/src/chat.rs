@@ -52,6 +52,8 @@ pub struct Chat {
     messages: Vec<Value>,
     status: Status,
     permission: Option<Value>,
+    /// The agent's current plan: `[{content, status, priority}]`, replaced whole by each update.
+    plan: Vec<Value>,
     first_prompt: bool,
 }
 
@@ -182,6 +184,7 @@ impl Chat {
             messages: Vec::new(),
             status: Status::Off,
             permission: None,
+            plan: Vec::new(),
             first_prompt: true,
         })
     }
@@ -202,6 +205,7 @@ impl Chat {
         self.stop();
         self.messages.clear();
         self.permission = None;
+        self.plan.clear();
         self.first_prompt = true;
         self.status = Status::Starting;
         let (tx, mut rx) = mpsc::unbounded_channel::<ChatEvent>();
@@ -233,6 +237,7 @@ impl Chat {
             _ => return Err("the chat is not connected".into()),
         };
         self.push(json!({"role": "user", "text": text}));
+        self.plan.clear();
         let prompt = if std::mem::take(&mut self.first_prompt) {
             format!("{PREAMBLE}{text}")
         } else {
@@ -288,6 +293,12 @@ impl Chat {
         match event {
             ChatEvent::Text(t) => self.append("agent", &t),
             ChatEvent::Thought(t) => self.append("thought", &t),
+            ChatEvent::Plan(entries) => {
+                self.plan = entries
+                    .into_iter()
+                    .map(|e| json!({"content": e.content, "status": e.status, "priority": e.priority}))
+                    .collect();
+            }
             ChatEvent::ToolCall { id, title, status } => {
                 self.push(json!({"role": "tool", "id": id, "title": title, "status": status}));
             }
@@ -359,7 +370,7 @@ impl Chat {
 
     /// What the panel shows before any chat was started.
     pub fn idle_view() -> Value {
-        json!({"status": "off", "messages": [], "permission": null})
+        json!({"status": "off", "messages": [], "permission": null, "plan": []})
     }
 
     pub fn view(&self) -> Value {
@@ -367,6 +378,7 @@ impl Chat {
             "status": self.status.name(),
             "messages": self.messages,
             "permission": self.permission,
+            "plan": self.plan,
         })
     }
 }
@@ -408,6 +420,37 @@ mod tests {
 
     fn chat() -> Chat {
         Chat::new().unwrap()
+    }
+
+    #[test]
+    fn the_plan_is_replaced_whole_by_each_update_and_cleared_by_the_next_message() {
+        let mut c = chat();
+        c.status = Status::Busy;
+        let entry = |content: &str, status: &str| od_agent::acp::PlanEntry {
+            content: content.into(),
+            status: status.into(),
+            priority: "medium".into(),
+        };
+        c.apply(ChatInput::Event(ChatEvent::Plan(vec![
+            entry("Look", "in_progress"),
+            entry("Change", "pending"),
+        ])));
+        assert_eq!(c.view()["plan"].as_array().map(Vec::len), Some(2));
+        c.apply(ChatInput::Event(ChatEvent::Plan(vec![entry(
+            "Look",
+            "completed",
+        )])));
+        let v = c.view();
+        assert_eq!(v["plan"][0]["status"], "completed");
+        assert_eq!(
+            v["plan"].as_array().map(Vec::len),
+            Some(1),
+            "replaced, not merged"
+        );
+        assert!(
+            v["messages"].as_array().unwrap().is_empty(),
+            "a plan is not a chat line"
+        );
     }
 
     #[test]

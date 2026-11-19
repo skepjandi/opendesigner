@@ -220,6 +220,12 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "installSkill"]
         fn install_skill(self: Pin<&mut Self>) -> QString;
+        #[qinvokable]
+        #[cxx_name = "skillOfferPending"]
+        fn skill_offer_pending(self: &Self) -> bool;
+        #[qinvokable]
+        #[cxx_name = "answerSkillOffer"]
+        fn answer_skill_offer(self: Pin<&mut Self>, install: bool) -> QString;
     }
 }
 
@@ -748,6 +754,25 @@ impl qobject::Editor {
         match self.state.skill_status() {
             Ok(v) => q(&v.to_string()),
             Err(e) => q(&serde_json::json!({"error": e}).to_string()),
+        }
+    }
+
+    pub fn skill_offer_pending(&self) -> bool {
+        EditorState::skill_offer_pending()
+    }
+
+    pub fn answer_skill_offer(mut self: Pin<&mut Self>, install: bool) -> QString {
+        match EditorState::answer_skill_offer(install) {
+            Ok(v) => {
+                if install {
+                    self.as_mut().show("Skill installed", false);
+                }
+                q(&v.to_string())
+            }
+            Err(e) => {
+                self.as_mut().show(&e, true);
+                q(&serde_json::json!({"error": e}).to_string())
+            }
         }
     }
 

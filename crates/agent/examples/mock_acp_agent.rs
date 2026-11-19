@@ -64,6 +64,12 @@ fn main() {
             Some("session/prompt") => {
                 let prompt = msg["params"]["prompt"][0]["text"].as_str().unwrap_or("");
                 text(session, "agent_thought_chunk", "thinking");
+                update(
+                    session,
+                    json!({"sessionUpdate": "plan", "entries": [
+                        {"content": "Read the guidance", "priority": "high", "status": "in_progress"},
+                        {"content": "Make it bigger", "priority": "medium", "status": "pending"}]}),
+                );
                 text(session, "agent_message_chunk", "Hello");
                 text(session, "agent_message_chunk", " world");
                 update(
@@ -75,6 +81,12 @@ fn main() {
                     session,
                     json!({"sessionUpdate": "tool_call_update", "toolCallId": "t1",
                            "status": "completed"}),
+                );
+                update(
+                    session,
+                    json!({"sessionUpdate": "plan", "entries": [
+                        {"content": "Read the guidance", "priority": "high", "status": "completed"},
+                        {"content": "Make it bigger", "priority": "medium", "status": "in_progress"}]}),
                 );
                 if prompt.contains("crash") {
                     std::process::exit(3);

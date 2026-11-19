@@ -109,6 +109,16 @@ async fn a_turn_streams_asks_permission_refuses_files_and_ends() {
             ChatEvent::ToolUpdate { id, status, .. } => {
                 saw.push(format!("update:{id}:{}", status.unwrap()))
             }
+            ChatEvent::Plan(entries) => {
+                saw.push(format!(
+                    "plan:{}",
+                    entries
+                        .iter()
+                        .map(|e| format!("{}={}", e.content, e.status))
+                        .collect::<Vec<_>>()
+                        .join(",")
+                ));
+            }
             ChatEvent::Permission {
                 request,
                 title,
@@ -135,8 +145,10 @@ async fn a_turn_streams_asks_permission_refuses_files_and_ends() {
         saw,
         [
             "thought:thinking",
+            "plan:Read the guidance=in_progress,Make it bigger=pending",
             "call:t1:get_guidance:pending",
-            "update:t1:completed"
+            "update:t1:completed",
+            "plan:Read the guidance=completed,Make it bigger=in_progress"
         ]
     );
     session.shutdown().await;
