@@ -1,4 +1,4 @@
-//! Finding images and videos anywhere on the user's computer and copying one into the project
+//! Finding images, videos and sounds anywhere on the user's computer and copying one into the project
 //! (`docs/wiki/security.md#device-access`).
 //!
 //! The user chose to let the agent reach their files (a switch in the Connect tab; on by
@@ -15,6 +15,9 @@ use crate::token;
 const OFF_MARKER: &str = "device-access-off";
 const IMAGE_EXT: [&str; 4] = ["png", "jpg", "jpeg", "webp"];
 const VIDEO_EXT: [&str; 3] = ["mp4", "mov", "m4v"];
+const AUDIO_EXT: [&str; 5] = ["mp3", "wav", "m4a", "aac", "ogg"];
+/// The largest sound file that is copied into a project.
+pub const MAX_AUDIO_BYTES: u64 = 512 * 1024 * 1024;
 /// Folders that hold programs, caches or other people's data, not the user's pictures.
 const SKIP_DIRS: [&str; 9] = [
     "node_modules",
@@ -57,6 +60,7 @@ pub fn set_enabled_in(config: &Path, on: bool) -> std::io::Result<()> {
 pub enum Kind {
     Image,
     Video,
+    Audio,
     Any,
 }
 
@@ -65,6 +69,7 @@ impl Kind {
         match s {
             "image" => Some(Kind::Image),
             "video" => Some(Kind::Video),
+            "audio" => Some(Kind::Audio),
             "any" | "" => Some(Kind::Any),
             _ => None,
         }
@@ -73,11 +78,14 @@ impl Kind {
     fn matches(self, ext: &str) -> Option<&'static str> {
         let image = IMAGE_EXT.contains(&ext);
         let video = VIDEO_EXT.contains(&ext);
+        let audio = AUDIO_EXT.contains(&ext);
         match self {
             Kind::Image if image => Some("image"),
             Kind::Video if video => Some("video"),
+            Kind::Audio if audio => Some("audio"),
             Kind::Any if image => Some("image"),
             Kind::Any if video => Some("video"),
+            Kind::Any if audio => Some("audio"),
             _ => None,
         }
     }
@@ -161,6 +169,145 @@ fn sorted(mut out: Vec<Found>) -> Vec<Found> {
     out
 }
 
+/// What a sound file is, from its first bytes: the extension it must have.
+pub fn sniff_audio(head: &[u8]) -> Option<&'static str> {
+    if head.len() >= 12 && &head[..4] == b"RIFF" && &head[8..12] == b"WAVE" {
+        Some("wav")
+    } else if head.starts_with(b"OggS") {
+        Some("ogg")
+    } else if head.len() >= 12 && &head[4..8] == b"ftyp" {
+        // a QuickTime or MP4 video is a "ftyp" file as well: only the audio brands count
+        matches!(&head[8..12], b"M4A " | b"M4B " | b"M4P ").then_some("m4a")
+    } else if head.starts_with(b"ID3") {
+        Some("mp3")
+    } else if head.len() >= 2 && head[0] == 0xFF && head[1] & 0xF0 == 0xF0 && head[1] & 0x06 == 0 {
+        // ADTS: sync word 0xFFF, layer bits 00
+        Some("aac")
+    } else if head.len() >= 2 && head[0] == 0xFF && head[1] & 0xE0 == 0xE0 && head[1] & 0x06 != 0 {
+        // an MPEG audio frame: sync word, layer bits not 00
+        Some("mp3")
+    } else {
+        None
+    }
+}
+
+/// Copies a sound the user has into `<project>/media/` and returns its reference. The file must
+/// be what its name says (checked by its first bytes); it is never overwritten or changed.
+pub fn import_audio(project: &Path, src: &Path) -> Result<String, String> {
+    use std::io::Read;
+    let meta = std::fs::metadata(src).map_err(|e| format!("{}: {e}", src.display()))?;
+    if !meta.is_file() {
+        return Err(format!("{} is not a file", src.display()));
+    }
+    if meta.len() > MAX_AUDIO_BYTES {
+        return Err(format!(
+            "{} is {} bytes; the most a sound may take is {MAX_AUDIO_BYTES}",
+            src.display(),
+            meta.len()
+        ));
+    }
+    let ext = src
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase)
+        .filter(|e| AUDIO_EXT.contains(&e.as_str()))
+        .ok_or_else(|| {
+            format!(
+                "{} is not an .mp3, .wav, .m4a, .aac or .ogg file",
+                src.display()
+            )
+        })?;
+    let mut head = [0u8; 12];
+    let read = std::fs::File::open(src)
+        .and_then(|mut f| f.read(&mut head))
+        .map_err(|e| format!("{}: {e}", src.display()))?;
+    match sniff_audio(&head[..read]) {
+        Some(kind) if kind == ext => {}
+        Some(kind) => {
+            return Err(format!(
+                "{} is named .{ext} but its content is {kind} audio; rename it",
+                src.display()
+            ));
+        }
+        None => {
+            return Err(format!(
+                "{} is not a sound file this app can use",
+                src.display()
+            ));
+        }
+    }
+    let stem: String = src
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("sound")
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | ' ') {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    let stem = stem.trim_matches(['-', ' ']);
+    let stem: String = if stem.is_empty() {
+        "sound".into()
+    } else {
+        stem.chars().take(60).collect()
+    };
+    let media = project.join(od_core::media::MEDIA_DIR);
+    std::fs::create_dir_all(&media).map_err(|e| format!("{}: {e}", media.display()))?;
+    for n in 1..10_000 {
+        let name = if n == 1 {
+            format!("{stem}.{ext}")
+        } else {
+            format!("{stem}-{n}.{ext}")
+        };
+        let dest = media.join(&name);
+        let mut out = match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&dest)
+        {
+            Ok(f) => f,
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(format!("{}: {e}", dest.display())),
+        };
+        let copied =
+            std::fs::File::open(src).and_then(|mut from| std::io::copy(&mut from, &mut out));
+        return match copied {
+            Ok(_) => Ok(format!("media/{name}")),
+            Err(e) => {
+                drop(out);
+                let _ = std::fs::remove_file(&dest);
+                Err(format!("{}: {e}", src.display()))
+            }
+        };
+    }
+    Err("no free file name in media/".into())
+}
+
+/// The sound files in `<project>/media/` (plain files only, never through a symlink), by name:
+/// `(reference, bytes)`.
+pub fn list_audio(project: &Path) -> Vec<(String, u64)> {
+    let Ok(entries) = std::fs::read_dir(project.join(od_core::media::MEDIA_DIR)) else {
+        return Vec::new();
+    };
+    let mut out: Vec<(String, u64)> = entries
+        .flatten()
+        .filter_map(|e| {
+            let meta = std::fs::symlink_metadata(e.path())
+                .ok()
+                .filter(|m| m.is_file())?;
+            let reference = format!("media/{}", e.file_name().to_string_lossy());
+            od_core::media::audio_name(&reference).ok()?;
+            Some((reference, meta.len()))
+        })
+        .collect();
+    out.sort();
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -212,6 +359,93 @@ mod tests {
     fn kinds_parse() {
         assert_eq!(Kind::parse("image"), Some(Kind::Image));
         assert_eq!(Kind::parse(""), Some(Kind::Any));
-        assert_eq!(Kind::parse("audio"), None);
+        assert_eq!(Kind::parse("audio"), Some(Kind::Audio));
+        assert_eq!(Kind::parse("sound"), None);
+    }
+
+    #[test]
+    fn it_finds_sounds_and_sniffs_them_by_their_first_bytes() {
+        let d = tempfile::tempdir().unwrap();
+        for f in [
+            "Music/song.MP3",
+            "Music/a.wav",
+            "Music/notes.txt",
+            "Music/clip.mov",
+        ] {
+            let path = d.path().join(f);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, b"x").unwrap();
+        }
+        let mut found: Vec<String> = find(&[d.path().to_path_buf()], Kind::Audio, "")
+            .iter()
+            .map(|f| {
+                format!(
+                    "{} {}",
+                    f.kind,
+                    f.path.file_name().unwrap().to_string_lossy()
+                )
+            })
+            .collect();
+        found.sort();
+        assert_eq!(found, ["audio a.wav", "audio song.MP3"]);
+        assert_eq!(find(&[d.path().to_path_buf()], Kind::Any, "").len(), 3);
+
+        assert_eq!(sniff_audio(b"RIFF\x24\0\0\0WAVEfmt "), Some("wav"));
+        assert_eq!(sniff_audio(b"RIFF\x24\0\0\0WEBPVP8 "), None);
+        assert_eq!(sniff_audio(b"OggS\0\x02\0\0\0\0\0\0"), Some("ogg"));
+        assert_eq!(sniff_audio(b"ID3\x04\0\0\0\0\0\0\0\0"), Some("mp3"));
+        assert_eq!(
+            sniff_audio(&[0xFF, 0xFB, 0x90, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+            Some("mp3")
+        );
+        assert_eq!(
+            sniff_audio(&[0xFF, 0xF1, 0x50, 0x80, 0, 0, 0, 0, 0, 0, 0, 0]),
+            Some("aac")
+        );
+        assert_eq!(sniff_audio(b"\0\0\0\x20ftypM4A \0\0\0\0"), Some("m4a"));
+        assert_eq!(
+            sniff_audio(b"\0\0\0\x20ftypisom\0\0\0\0"),
+            None,
+            "a video is not a sound"
+        );
+        assert_eq!(sniff_audio(b"\x89PNG\r\n\x1a\n\0\0\0\0"), None);
+    }
+
+    #[test]
+    fn importing_a_sound_checks_the_content_and_never_overwrites() {
+        let home = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let wav = home.path().join("My Song!.wav");
+        std::fs::write(&wav, b"RIFF\x24\0\0\0WAVEfmt \x10\0\0\0").unwrap();
+        let first = import_audio(project.path(), &wav).unwrap();
+        assert_eq!(first, "media/My Song.wav");
+        assert_eq!(
+            import_audio(project.path(), &wav).unwrap(),
+            "media/My Song-2.wav"
+        );
+        assert_eq!(
+            std::fs::read(project.path().join(&first)).unwrap(),
+            std::fs::read(&wav).unwrap()
+        );
+        // a fake, a wrong name, a wrong kind of file
+        let fake = home.path().join("fake.mp3");
+        std::fs::write(&fake, b"this is text, not sound").unwrap();
+        assert!(import_audio(project.path(), &fake).is_err());
+        let wrong = home.path().join("wrong.mp3");
+        std::fs::write(&wrong, b"RIFF\x24\0\0\0WAVEfmt \x10\0\0\0").unwrap();
+        assert!(
+            import_audio(project.path(), &wrong)
+                .unwrap_err()
+                .contains("wav")
+        );
+        let txt = home.path().join("a.txt");
+        std::fs::write(&txt, b"x").unwrap();
+        assert!(import_audio(project.path(), &txt).is_err());
+        assert!(import_audio(project.path(), home.path()).is_err());
+        let listed: Vec<String> = list_audio(project.path())
+            .into_iter()
+            .map(|(f, _)| f)
+            .collect();
+        assert_eq!(listed, ["media/My Song-2.wav", "media/My Song.wav"]);
     }
 }

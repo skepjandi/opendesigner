@@ -974,7 +974,7 @@ fn the_agent_can_copy_a_picture_from_anywhere_into_the_project_but_only_real_med
         json!({"folder": outside.path().display().to_string()}),
     );
     assert!(err && why.contains("home folder"), "{why}");
-    let (err, _) = f.tool("find_files", json!({"kind": "audio"}));
+    let (err, _) = f.tool("find_files", json!({"kind": "sound"}));
     assert!(err);
 }
 
@@ -1519,4 +1519,91 @@ fn memory_tools_say_so_when_there_is_no_project_folder() {
     let g = call("get_guidance", json!({}));
     let g: Value = serde_json::from_str(g["content"][0]["text"].as_str().unwrap()).unwrap();
     assert!(g["memory"]["unavailable"].is_string());
+}
+
+#[test]
+fn an_imported_or_made_sound_becomes_the_video_track_and_the_export_has_sound() {
+    let f = fixture();
+    let (video, ..) = make_video(&f);
+    // a wav on the "user's computer", made by the sound maker so no binary fixture is needed
+    let home = tempfile::tempdir().unwrap();
+    let wav = home.path().join("Theme Song.wav");
+    let rendered = od_agent::synth::render(&od_agent::synth::Spec::new(
+        od_agent::synth::Kind::Drone,
+        3000,
+    ))
+    .unwrap();
+    std::fs::write(&wav, od_agent::synth::wav_bytes(&rendered.channels)).unwrap();
+    // an mp3 that is not one is refused, a real wav is found and copied
+    let fake = home.path().join("fake.mp3");
+    std::fs::write(&fake, b"just words").unwrap();
+    let (err, _) = f.tool("import_file", json!({"path": fake.display().to_string()}));
+    assert!(err);
+    let imported = f.ok("import_file", json!({"path": wav.display().to_string()}));
+    assert_eq!(imported["reference"], "media/Theme Song.wav");
+
+    let made = f.ok(
+        "make_sound",
+        json!({"kind": "hit", "duration_ms": 900, "name": "boom"}),
+    );
+    assert_eq!(made["file"], "media/boom.wav");
+    assert_eq!(made["source"], "synthesized");
+    let (err, why) = f.tool("make_sound", json!({"kind": "laser"}));
+    assert!(err && why.contains("kind is one of"), "{why}");
+
+    let sounds = f.ok("list_sounds", json!({}));
+    let rows = sounds.as_array().unwrap();
+    let by = |file: &str| rows.iter().find(|r| r["file"] == file).unwrap();
+    assert_eq!(by("media/boom.wav")["source"], "synthesized");
+    assert_eq!(by("media/Theme Song.wav")["source"], "imported");
+    assert!(by("media/boom.wav").get("attribution").is_none());
+    if od_media::Ffmpeg::locate().is_ok() {
+        let ms = by("media/boom.wav")["duration_ms"].as_u64().unwrap();
+        assert!((890..=910).contains(&ms), "{ms}");
+    }
+
+    // the imported file is the video's sound track, end to end
+    f.ok(
+        "apply_ops",
+        json!({"ops": [{"op":"set_video","id":video,"prop":{"name":"audio","value":{
+            "file":"media/Theme Song.wav","start_ms":0,"gain":0.3,"fade_in_ms":200,"fade_out_ms":300}}}]}),
+    );
+    let Ok(ffmpeg) = od_media::Ffmpeg::locate() else {
+        eprintln!("skipped the export: no ffmpeg on this machine");
+        return;
+    };
+    if ffmpeg.h264_encoder().is_err() {
+        eprintln!("skipped the export: no H.264 encoder");
+        return;
+    }
+    let out = f.ok(
+        "export_video",
+        json!({"video": video, "file": "with-sound.mp4"}),
+    );
+    assert_eq!(out["path"], "exports/with-sound.mp4");
+    let info = ffmpeg
+        .probe_file(&f._tmp.path().join("p.od/exports/with-sound.mp4"))
+        .unwrap();
+    assert!(info.has_audio, "the export has no sound");
+}
+
+#[test]
+fn get_guidance_lists_the_servers_the_user_added_by_name_and_what_they_are_for() {
+    let f = fixture();
+    let none = f.ok("get_guidance", json!({}));
+    assert_eq!(none["extra_mcp_servers"], json!([]));
+    assert!(none["sound"].as_str().unwrap().contains("make_sound"));
+    f.handler
+        .set_extra_servers(vec!["minimax-mcp".into(), "notes".into()]);
+    let g = f.ok("get_guidance", json!({}));
+    let servers = g["extra_mcp_servers"].as_array().unwrap();
+    assert_eq!(servers.len(), 2);
+    assert_eq!(servers[0]["name"], "minimax-mcp");
+    assert!(
+        servers[0]["about"]
+            .as_str()
+            .unwrap()
+            .contains("voice-overs")
+    );
+    assert!(servers[1].get("about").is_none());
 }

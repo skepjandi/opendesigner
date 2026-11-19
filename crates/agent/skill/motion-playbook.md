@@ -13,8 +13,9 @@ whole video process; this page is about movement.
   (fade, slide_up/down/left/right, pop, zoom, none), a duration for each (`fade_ms`) and an **ease**.
   A frame without a fill is transparent, so an overlay can be one headline, one badge, one arrow.
 - **Eases**: `linear`, `ease_in`, `ease_out`, `ease_in_out`, `back` (overshoots, like a pop).
-- No per-frame keyframes, no sound generation: footage keeps its sound, nothing else is mixed in.
-  Say so when a user expects music; ask them for a track rather than promising one.
+- No per-frame keyframes. Sound: footage keeps its own, and a video can carry one extra sound track
+  (see Sound below). `make_sound` synthesizes effects and simple loops, not music: for a music bed
+  use `search_sounds` or ask the user for a track rather than promising one.
 
 ## Timing that reads as intentional
 
@@ -69,3 +70,27 @@ whole video process; this page is about movement.
 - Read the sequence in `list_videos` (`story`): does each line follow from the one before it?
 - Total length against the preset; exports are checked, but a good length is the shortest that tells
   the story.
+
+## Sound
+
+A video with no sound feels unfinished; give every video a sound track unless the user asked for
+silence (an App Store preview autoplays muted, but still gets a track for when sound is on).
+
+- **Levels.** A music bed under a voice sits 18 to 24 dB below it: `gain` 0.15 to 0.3 on the
+  track. With no voice, a bed at 0.4 to 0.7. Never leave it at 1.0 and hope.
+- **Fades.** `fade_in_ms` and `fade_out_ms` of 300 to 800 on the track, so it neither starts nor
+  stops with a bang. The track is cut at the video's end: fade out before it.
+- **Hits on cuts.** Put accents where the picture changes: a `hit` or `pop` on a hard cut or an
+  impact, a `whoosh` or `swoosh_up/down` across a slide or zoom transition, a `riser` into a
+  reveal, a `chime` on a success state, a `click` or `tick` on a tap. One accent per event, not per
+  word. Only one track plays at a time: pick the one that carries the video, or make one longer
+  sound (`beat`, `drone`) and let the picture carry the accents.
+- **Silence is a tool.** A short gap before the reveal makes the hit land. Do not fill every moment.
+- **Where sound comes from.** `make_sound` (kind, duration_ms, seed, pitch_hz): synthesized in the
+  project, no licence. `search_sounds` then `import_sound` for music and real recordings (needs
+  the user's Freesound token; show the attribution). `import_file` with kind audio for the user's
+  own files (`find_files` kind audio). A voice-over from a speech MCP server the user added, such
+  as minimax-mcp, if `get_guidance` lists one: write the script short, ask before spending credits
+  on long text, then import the file it makes. `list_sounds` shows what is in `media/`.
+- **Setting it.** `{"op": "set_video", "video": ..., "prop": {"name": "audio", "value": {"file":
+  "media/x.wav", "start_ms": 0, "gain": 0.25, "fade_in_ms": 500, "fade_out_ms": 600}}}`.

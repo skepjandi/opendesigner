@@ -139,6 +139,8 @@ pub struct Handler {
     on_change: Option<ChangeHook>,
     on_job: Option<JobHook>,
     jobs: Arc<Jobs>,
+    /// The names of the MCP servers the user added, for `get_guidance`.
+    extra_servers: Mutex<Vec<String>>,
 }
 
 fn sanitize_client_name(name: &str) -> String {
@@ -166,6 +168,15 @@ impl Handler {
             on_change: None,
             on_job: None,
             jobs: Arc::new(Jobs::default()),
+            extra_servers: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// Tells the handler which MCP servers the user added (names only), so `get_guidance` can
+    /// tell the agent what else it has.
+    pub fn set_extra_servers(&self, names: Vec<String>) {
+        if let Ok(mut current) = self.extra_servers.lock() {
+            *current = names;
         }
     }
 
@@ -385,6 +396,11 @@ impl Handler {
         if name == "export_video" {
             return self.export_video_call(id, args);
         }
+        let extra_servers = self
+            .extra_servers
+            .lock()
+            .map(|names| names.clone())
+            .unwrap_or_default();
         let (Ok(mut ws), Ok(mut state)) = (self.ws.lock(), self.state.lock()) else {
             return rpc_error(id, -32603, "the editor state is unavailable");
         };
@@ -394,6 +410,7 @@ impl Handler {
             ws: &mut ws,
             actor: actor.clone(),
             turns: &mut state.turns,
+            extra_servers: &extra_servers,
         };
         let result = tools::call(&mut ctx, name, args);
         let switched = ws.dir().map(std::path::Path::to_path_buf) != dir_before;

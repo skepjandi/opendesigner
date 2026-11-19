@@ -3,6 +3,7 @@
 //! (`docs/wiki/agent-integration.md#the-mcp-server`).
 
 use crate::export::{ExportOutcome, Plan, export_assets, export_name, exports_dir, preset};
+use crate::synth;
 use std::collections::{HashMap, HashSet};
 
 use base64::Engine;
@@ -76,6 +77,8 @@ pub struct CallCtx<'a> {
     pub ws: &'a mut Workspace,
     pub actor: Actor,
     pub turns: &'a mut Turns,
+    /// The names of the MCP servers the user added (`Handler::set_extra_servers`).
+    pub extra_servers: &'a [String],
 }
 
 fn tool(name: &str, description: &str, props: Value, required: &[&str], read_only: bool) -> Value {
@@ -467,11 +470,12 @@ pub fn definitions() -> Vec<Value> {
         ),
         tool(
             "find_files",
-            "Look for pictures and videos anywhere under the user's home folder (the user allows \
-             this; hidden folders and caches are skipped). Returns paths, sizes and dates, newest \
-             first, at most 200. Use `import_file` to bring one into the project.",
+            "Look for pictures, videos and sounds (.mp3 .wav .m4a .aac .ogg) anywhere under the user's \
+             home folder (the user allows this; hidden folders and caches are skipped). Returns \
+             paths, sizes and dates, newest first, at most 200. Use `import_file` to bring one \
+             into the project.",
             json!({
-                "kind": {"type": "string", "enum": ["image", "video", "any"], "description": "Default any."},
+                "kind": {"type": "string", "enum": ["image", "video", "audio", "any"], "description": "Default any."},
                 "name_contains": {"type": "string", "description": "Part of the file name."},
                 "folder": id("A folder to search instead of the whole home folder, for example ~/Pictures or an absolute path under your home folder.")
             }),
@@ -480,9 +484,11 @@ pub fn definitions() -> Vec<Value> {
         ),
         tool(
             "import_file",
-            "Copy one picture or video from the user's computer into this project's media/ folder \
-             (it is checked to be a real PNG, JPEG, WebP or MP4/MOV first) and return its media/ \
-             reference. The original is never changed.",
+            "Copy one picture, video or sound from the user's computer into this project's media/ folder \
+             (it is checked to be a real PNG, JPEG, WebP, MP4/MOV, or MP3, WAV, M4A, AAC or OGG \
+             first) and return its media/ reference. The original is never changed. An imported sound \
+             can be the video's sound track: set_video prop {name: \"audio\", value: {file, start_ms, \
+             gain, fade_in_ms, fade_out_ms}}.",
             json!({"path": id("Absolute path (or ~/...) of the file, from find_files.")}),
             &["path"],
             false,
@@ -529,11 +535,40 @@ pub fn definitions() -> Vec<Value> {
         ),
         tool(
             "list_sounds",
-            "The Freesound sounds already imported into this project: the media/ file, and the \
-             attribution line the user must show for each.",
+            "All the sounds in this project's media/ folder (.mp3 .wav .m4a .aac .ogg), whether \
+             made with make_sound, downloaded with import_sound or imported with import_file: the \
+             file, size, length when ffmpeg is installed, where it came from (synthesized, \
+             freesound or imported) and, for a Freesound sound, the attribution line the user must \
+             show. Any of them can be the video's sound track (set_video audio).",
             json!({}),
             &[],
             true,
+        ),
+        tool(
+            "make_sound",
+            "Make a sound effect or a simple loop yourself, with no download and no licence to \
+             honour (it is synthesized and written to media/<name>.wav, normalized, with short \
+             fades so it never clicks). Use it for the basics: click, pop, tick, whoosh, \
+             swoosh_up, swoosh_down, riser (builds into a cut), hit (impact: put it on a cut or a \
+             reveal), chime (a notification or a finish), stinger (a 2 to 3 note sting), drone \
+             (a soft pad that loops) and beat (4-on-the-floor kick and hat at `bpm`, `bars` bars). \
+             It cannot make real music or speech: for a music bed use search_sounds (Freesound, \
+             needs the user's token) or ask the user; for a voice-over use a speech MCP server if \
+             the user added one (get_guidance lists them). The same kind, duration and seed give \
+             the same sound. Then set it as the track: set_video prop {name: \"audio\", value: \
+             {file, start_ms, gain, fade_in_ms, fade_out_ms}}.",
+            json!({
+                "kind": {"type": "string", "enum": synth::Kind::NAMES, "description": "Which sound."},
+                "duration_ms": {"type": "integer", "minimum": synth::MIN_DURATION_MS, "maximum": synth::MAX_DURATION_MS, "description": "How long. Optional: each kind has a fitting default. A beat takes its length from bpm and bars."},
+                "seed": {"type": "integer", "minimum": 0, "description": "Another seed gives another variation (noise, and the notes of a stinger). Default 1."},
+                "pitch_hz": {"type": "number", "minimum": 20, "maximum": 8000, "description": "The base pitch of chime, drone, tick, pop, riser, hit and stinger."},
+                "bpm": {"type": "number", "minimum": 40, "maximum": 240, "description": "Beat only: tempo, default 120."},
+                "bars": {"type": "integer", "minimum": 1, "maximum": 16, "description": "Beat only: bars of four beats."},
+                "stereo": {"type": "boolean", "description": "Two channels (default one)."},
+                "name": id("A plain file name without the .wav ending; default is the kind. An existing file is never overwritten.")
+            }),
+            &["kind"],
+            false,
         ),
         tool(
             "list_video_presets",
@@ -628,6 +663,7 @@ pub fn call(ctx: &mut CallCtx, name: &str, args: Value) -> Result<Output, ToolEr
         "search_sounds" => search_sounds(parse(args)?),
         "import_sound" => import_sound(ctx, parse(args)?),
         "list_sounds" => list_sounds(ctx),
+        "make_sound" => make_sound(ctx, parse(args)?),
         "render_video_frame" => render_video_frame(ctx, parse(args)?),
         "export_video" => export_video_tool(ctx, parse(args)?),
         "list_locales" => {
@@ -890,6 +926,8 @@ fn get_guidance(ctx: &mut CallCtx) -> Result<Output, ToolError> {
          formats (sizes). Review your work with review_frame and render_preview before you say it is done."
     );
     v["memory"] = memory_index(ctx);
+    v["extra_mcp_servers"] = crate::mcp_servers::describe(ctx.extra_servers);
+    v["sound"] = json!(crate::mcp_servers::SOUND_NOTE);
     Ok(Output::json(&v))
 }
 
@@ -1702,7 +1740,7 @@ struct FindFilesArgs {
 fn find_files(_ctx: &mut CallCtx, a: FindFilesArgs) -> Result<Output, ToolError> {
     device_enabled()?;
     let kind = crate::device::Kind::parse(a.kind.as_deref().unwrap_or("any"))
-        .ok_or_else(|| ToolError("kind is image, video or any".into()))?;
+        .ok_or_else(|| ToolError("kind is image, video, audio or any".into()))?;
     let home =
         crate::device::home().ok_or_else(|| ToolError("cannot find the home folder".into()))?;
     let root = match &a.folder {
@@ -1738,9 +1776,23 @@ fn import_file(ctx: &mut CallCtx, a: ImportFileArgs) -> Result<Output, ToolError
     if !real.is_file() {
         return fail(format!("{} is not a file", a.path));
     }
-    let reference = match ctx.ws.import_media(&real) {
-        Ok(r) => r,
-        Err(_) => ctx.ws.import_footage(&real)?,
+    let is_audio = real.extension().and_then(|e| e.to_str()).is_some_and(|e| {
+        od_core::media::AUDIO_EXTENSIONS.contains(&e.to_ascii_lowercase().as_str())
+    });
+    let reference = if is_audio {
+        let dir = ctx
+            .ws
+            .dir()
+            .map(std::path::Path::to_path_buf)
+            .ok_or_else(|| {
+                ToolError("the project has no folder, so nowhere to put the sound".into())
+            })?;
+        crate::device::import_audio(&dir, &real).map_err(ToolError)?
+    } else {
+        match ctx.ws.import_media(&real) {
+            Ok(r) => r,
+            Err(_) => ctx.ws.import_footage(&real)?,
+        }
     };
     Ok(Output::json(
         &json!({"reference": reference, "copied_from": real.display().to_string()}),
@@ -1805,19 +1857,93 @@ fn import_sound(ctx: &mut CallCtx, a: ImportSoundArgs) -> Result<Output, ToolErr
     })))
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MakeSoundArgs {
+    kind: String,
+    #[serde(default)]
+    duration_ms: Option<u32>,
+    #[serde(default)]
+    seed: Option<u64>,
+    #[serde(default)]
+    pitch_hz: Option<f32>,
+    #[serde(default)]
+    bpm: Option<f32>,
+    #[serde(default)]
+    bars: Option<u32>,
+    #[serde(default)]
+    stereo: bool,
+    #[serde(default)]
+    name: Option<String>,
+}
+
+fn make_sound(ctx: &mut CallCtx, a: MakeSoundArgs) -> Result<Output, ToolError> {
+    let kind = synth::Kind::parse(&a.kind)
+        .ok_or_else(|| ToolError(format!("kind is one of {}", synth::Kind::NAMES.join(", "))))?;
+    let dir = ctx
+        .ws
+        .dir()
+        .map(std::path::Path::to_path_buf)
+        .ok_or_else(|| {
+            ToolError("the project has no folder, so nowhere to put the sound".into())
+        })?;
+    let spec = synth::Spec {
+        kind,
+        duration_ms: a.duration_ms.unwrap_or_else(|| kind.default_ms()),
+        seed: a.seed.unwrap_or(1),
+        pitch_hz: a.pitch_hz,
+        bpm: a.bpm,
+        bars: a.bars,
+        stereo: a.stereo,
+    };
+    let made = synth::make(&dir, &spec, a.name.as_deref()).map_err(ToolError)?;
+    Ok(Output::json(&json!({
+        "file": made.file,
+        "sidecar": made.sidecar,
+        "duration_ms": made.duration_ms,
+        "channels": made.channels,
+        "bytes": made.bytes,
+        "source": "synthesized",
+        "note": "synthesized here: no licence, nothing to attribute. Set it with set_video prop {name: \"audio\", value: {file, start_ms, gain, fade_in_ms, fade_out_ms}}.",
+    })))
+}
+
 fn list_sounds(ctx: &mut CallCtx) -> Result<Output, ToolError> {
     let Some(dir) = ctx.ws.dir().map(std::path::Path::to_path_buf) else {
         return Ok(Output::json(&json!([])));
     };
-    let sounds = crate::freesound::list_imported(&dir).map_err(|e| ToolError(e.to_string()))?;
-    let rows: Vec<Value> = sounds
-        .iter()
-        .map(|s| {
-            json!({
-                "file": s.file,
-                "sidecar": s.sidecar,
-                "attribution": s.attribution,
-            })
+    let ffmpeg = od_media::Ffmpeg::locate().ok();
+    let media = dir.join("media");
+    let rows: Vec<Value> = crate::device::list_audio(&dir)
+        .into_iter()
+        .map(|(file, bytes)| {
+            let name = file.trim_start_matches("media/");
+            let stem = name.rsplit_once('.').map_or(name, |(s, _)| s);
+            let freesound: Option<crate::freesound::Sidecar> =
+                std::fs::read_to_string(media.join(format!("{stem}.freesound.json")))
+                    .ok()
+                    .and_then(|t| serde_json::from_str(&t).ok());
+            let synthesized = media
+                .join(format!("{stem}{}", synth::SIDECAR_SUFFIX))
+                .is_file();
+            let mut row = json!({"file": file, "bytes": bytes});
+            if let Some(ms) = ffmpeg.as_ref().and_then(|ff| {
+                let path = od_media::audio_path(&dir, &file).ok()?;
+                ff.probe_duration(&path).ok()
+            }) {
+                row["duration_ms"] = json!(ms);
+            }
+            if let Some(side) = freesound {
+                row["source"] = json!("freesound");
+                row["sidecar"] = json!(format!("media/{stem}.freesound.json"));
+                row["attribution"] = json!(side.attribution());
+            } else if synthesized {
+                row["source"] = json!("synthesized");
+                row["sidecar"] = json!(format!("media/{stem}{}", synth::SIDECAR_SUFFIX));
+            } else {
+                row["source"] = json!("imported");
+            }
+            row
         })
         .collect();
     Ok(Output::json(&Value::Array(rows)))

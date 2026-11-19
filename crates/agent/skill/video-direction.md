@@ -52,11 +52,23 @@ tighten pauses over 0.7 s; use a cut for energy and a short fade only to mark a 
 titles only where they help. Do not add effects for their own sake. Say in your reply which parts
 you cut and why, so the user can overrule.
 
+## Sound
+
+Plan the sound with the script, not after it. Unless the user asked for silence, the video has a
+sound track: a music bed under a voice at `gain` 0.15 to 0.3 (about -18 to -24 dB), fades of 300 to
+800 ms, accents on cuts and impacts, and silence before a reveal. Sources: `make_sound` (clicks,
+whooshes, risers, hits, chimes, a drone, a beat, a stinger: synthesized, no licence), `search_sounds`
+and `import_sound` (Freesound; needs the user's token, show the attribution), `import_file` with
+kind audio (the user's own music or recording), a voice-over from a speech MCP server such as
+minimax-mcp when `get_guidance` lists it (ask before spending credits on long text). Set it with
+`set_video` prop audio {file, start_ms, gain, fade_in_ms, fade_out_ms}; `list_sounds` shows what
+`media/` holds. The `motion` playbook has the details.
+
 ## Quality gate
 
 First frame: strongest picture? Every shot 1 to 6 s? Anything still for more than 4 s without
 life? Text readable at phone size (the thumbnail test at 360 px wide)? Nothing important in the
-platform UI zones? Ending held, with one clear thing? The same transition vocabulary throughout?
+platform UI zones? Ending held, with one clear thing? Sound set, quiet under any voice, faded out? The same transition vocabulary throughout?
 If any answer is no, fix it before exporting.
 
 ## Memory across tasks

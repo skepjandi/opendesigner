@@ -18,6 +18,7 @@ pub mod program;
 pub mod review;
 pub mod server;
 pub mod skill;
+pub mod synth;
 pub mod token;
 pub mod tools;
 pub mod video_export;
