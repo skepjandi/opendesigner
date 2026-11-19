@@ -551,3 +551,81 @@ fn image_nodes_only_reference_plain_media_files_and_fit_is_undoable() {
         Err(OpError::NotApplicable { .. })
     ));
 }
+
+#[test]
+fn tokens_change_through_history_recolor_their_users_and_refuse_to_vanish_while_used() {
+    let (mut s, root) = session();
+    let mut card = rect(0.0, 0.0, 10.0, 10.0);
+    card.fill = Some(Paint::parse("{brand.gold}").unwrap());
+    let card = created_id(&mut s, &root, card);
+    let cp = s.checkpoint(Actor::User, "before").unwrap();
+
+    let set = |s: &mut Session, name: &str, value: Option<&str>| {
+        s.apply(
+            agent(),
+            None,
+            &[Operation::SetToken {
+                name: name.into(),
+                value: value.map(String::from),
+            }],
+        )
+    };
+
+    // changing a token reports the nodes that use it as touched, and stores the canonical hex
+    let receipt = set(&mut s, "brand.gold", Some("#FF0000")).unwrap();
+    assert_eq!(s.document().tokens["brand.gold"], "#ff0000");
+    assert_eq!(receipt.touched, vec![card.clone()]);
+    set(&mut s, "brand.ink", Some("#101010")).unwrap();
+    assert_eq!(s.document().tokens.len(), 2);
+
+    // the old value comes back with undo, and redo reapplies the exact stored value
+    s.undo(Actor::User).unwrap();
+    assert!(!s.document().tokens.contains_key("brand.ink"));
+    s.undo(Actor::User).unwrap();
+    assert_eq!(s.document().tokens["brand.gold"], "#f2ca83");
+    s.redo(Actor::User).unwrap();
+    assert_eq!(s.document().tokens["brand.gold"], "#ff0000");
+
+    // an unused token can be removed; a used one cannot
+    set(&mut s, "brand.ink", Some("#101010")).unwrap();
+    set(&mut s, "brand.ink", None).unwrap();
+    let before = s.document().clone();
+    assert!(matches!(
+        set(&mut s, "brand.gold", None),
+        Err(OpError::TokenInUse { count: 1, .. })
+    ));
+    assert!(matches!(
+        set(&mut s, "brand.nope", None),
+        Err(OpError::UnknownToken(_))
+    ));
+    for bad in ["", "has space", "x#"] {
+        assert!(set(&mut s, bad, Some("#000000")).is_err(), "{bad:?}");
+    }
+    assert!(set(&mut s, "brand.gold", Some("red")).is_err());
+    assert!(
+        same_content(&before, s.document()),
+        "refused operations change nothing"
+    );
+
+    // a transaction can define a token and use it, and a failure rolls both back
+    let fails = s.apply(
+        agent(),
+        None,
+        &[
+            Operation::SetToken {
+                name: "brand.new".into(),
+                value: Some("#00ff00".into()),
+            },
+            Operation::Set {
+                id: card.clone(),
+                prop: Property::Fill(Some(Paint::parse("{brand.missing}").unwrap())),
+            },
+        ],
+    );
+    assert!(fails.is_err());
+    assert!(!s.document().tokens.contains_key("brand.new"));
+
+    // restoring the checkpoint puts the original color back
+    s.restore(Actor::User, cp).unwrap();
+    assert_eq!(s.document().tokens["brand.gold"], "#f2ca83");
+}

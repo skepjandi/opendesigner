@@ -96,6 +96,15 @@ fn the_editor_window_runs_a_scripted_session() {
         "the imported image is copied into the project"
     );
     assert!(page.contains("media/fixture.png"));
+    assert!(
+        page.contains("{brand.gold}"),
+        "the ellipse is filled with the token"
+    );
+    let manifest = std::fs::read_to_string(project.join("od.toml")).unwrap();
+    assert!(
+        manifest.contains("brand.gold") && manifest.contains("#f2ca83"),
+        "{manifest}"
+    );
     // the exported frame contains the imported picture, centered
     let shot = png::Decoder::new(std::io::Cursor::new(
         std::fs::read(project.join("exports/shot.png")).unwrap(),

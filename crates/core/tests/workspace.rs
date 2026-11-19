@@ -145,3 +145,35 @@ fn annotations_persist_with_the_project() {
     .unwrap();
     assert!(Workspace::open(&tmp.path().join("p.od")).is_err());
 }
+
+#[test]
+fn token_changes_are_saved_with_the_project_and_restore_after_reopening() {
+    let (mut ws, tmp, _root) = workspace();
+    let set = |ws: &mut Workspace, value: &str| {
+        ws.session
+            .apply(
+                Actor::User,
+                None,
+                &[Operation::SetToken {
+                    name: "brand.gold".into(),
+                    value: Some(value.into()),
+                }],
+            )
+            .unwrap();
+    };
+    set(&mut ws, "#f2ca83");
+    let cp = ws.session.checkpoint(Actor::User, "gold").unwrap();
+    set(&mut ws, "#ff0000");
+    ws.save().unwrap();
+
+    let mut reopened = Workspace::open(&tmp.path().join("p.od")).unwrap();
+    assert_eq!(reopened.session.document().tokens["brand.gold"], "#ff0000");
+    assert!(
+        std::fs::read_to_string(tmp.path().join("p.od/.od/history/log.jsonl"))
+            .unwrap()
+            .contains("set_token")
+    );
+    // the log carries each change's inverse, so a checkpoint still restores after a reopen
+    reopened.session.restore(Actor::User, cp).unwrap();
+    assert_eq!(reopened.session.document().tokens["brand.gold"], "#f2ca83");
+}

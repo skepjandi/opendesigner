@@ -32,6 +32,10 @@ pub enum OpError {
     InvalidPaint(String),
     #[error("unknown design token {0}")]
     UnknownToken(String),
+    #[error(
+        "design token {name} is used by {count} node(s); change those first or set the token to another color instead"
+    )]
+    TokenInUse { name: String, count: usize },
     #[error("limit exceeded: {0}")]
     Limit(String),
     #[error("operation {0} can only be issued by the history, not by a front end")]

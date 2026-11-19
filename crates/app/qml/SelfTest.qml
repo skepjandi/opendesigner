@@ -84,6 +84,18 @@ Item {
             return check(JSON.parse(editor.selectionBounds).x === 120, "restore did not bring the position back")
         },
         function () {
+            editor.setToken("brand.gold", "#F2CA83")
+            editor.setNodeProperty(ids.ellipse, "fill", '"{brand.gold}"')
+            const row = JSON.parse(editor.tokens).find(t => t.name === "brand.gold")
+            return check(row && row.value === "#f2ca83" && row.used_by === 1, "the token should exist with one user: " + editor.tokens) &&
+                   check(!editor.messageIsError, "token calls should not error: " + editor.message)
+        },
+        function () {
+            editor.removeToken("brand.gold")
+            return check(editor.messageIsError && editor.message.indexOf("used by") >= 0, "a token in use must not be removable") &&
+                   check(JSON.parse(editor.tokens).length === 1, "the token should still be there")
+        },
+        function () {
             const id = editor.importImage("file://" + folder + "/fixture.png")
             return check(id !== "", "the image was not imported: " + editor.message) &&
                    check(insp().image === "media/fixture.png", "the image node should point at the media copy") &&

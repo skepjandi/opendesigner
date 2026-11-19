@@ -241,6 +241,12 @@ Properties for `set`: `name`, `x`, `y`, `width`, `height`, `visible`, `opacity` 
 `font_size`, `font_family` (a name or null), `font_weight` (100 to 900 or null), `text_align`
 (`left`, `center`, `right` or null), `line_height` (a multiple of the font size, 0.5 to 4, or
 null), `image`. Not every property applies to every kind of node; a rejection says which.
+
+Design tokens are named colors. Define or recolor one with `{"op": "set_token", "name":
+"brand.gold", "value": "#f2ca83"}`; every node that fills or strokes with `{brand.gold}` changes
+with it, and those nodes are outlined for the user. `{"op": "set_token", "name": "brand.old",
+"value": null}` removes a token, and is refused while a node still uses it. Prefer changing a token
+to recoloring many nodes one by one.
 "##;
 
 fn store_specs_md() -> String {

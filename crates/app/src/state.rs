@@ -56,6 +56,7 @@ pub struct Snapshot {
     pub log: String,
     pub changed: String,
     pub unrendered: String,
+    pub tokens: String,
     pub can_undo: bool,
     pub can_redo: bool,
     pub mcp_running: bool,
@@ -258,6 +259,24 @@ impl EditorState {
         self.apply_user(&[Operation::Set {
             id: parse_id(id)?,
             prop,
+        }])
+        .map(|_| ())
+    }
+
+    /// Defines or recolors a design token (`value` is `#rrggbb` or `#rrggbbaa`).
+    pub fn set_token(&mut self, name: &str, value: &str) -> Res<()> {
+        self.apply_user(&[Operation::SetToken {
+            name: name.trim().to_string(),
+            value: Some(value.trim().to_string()),
+        }])
+        .map(|_| ())
+    }
+
+    /// Removes a token nothing uses.
+    pub fn remove_token(&mut self, name: &str) -> Res<()> {
+        self.apply_user(&[Operation::SetToken {
+            name: name.trim().to_string(),
+            value: None,
         }])
         .map(|_| ())
     }
@@ -934,6 +953,7 @@ impl EditorState {
                     .map(|f| collect_unrendered(doc, f, ws.dir()))
                     .unwrap_or_default(),
             ),
+            tokens: to_string(&view::tokens(doc)),
             can_undo: ws.session.can_undo(),
             can_redo: ws.session.can_redo(),
             mcp_running: self.server.is_some(),
