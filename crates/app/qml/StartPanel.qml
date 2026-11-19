@@ -32,6 +32,16 @@ ScrollView {
         if (recent.length > 0) choose("file://" + recent[0].folder)
     }
 
+    DirectionPicker {
+        id: direction
+        editor: root.editor
+        onPicked: text => {
+            if (text === "") return
+            const current = prompt.text.trim()
+            prompt.text = current === "" ? text : current + "\n\n" + text
+        }
+    }
+
     FolderDialog {
         id: folderDialog
         title: "Choose the folder you are working in"
@@ -190,7 +200,17 @@ ScrollView {
             text: "If you pick nothing the agent chooses what fits (a reel, a store set, a landing page). If you do pick, it keeps to it and asks you before changing it."
         }
 
-        Label { text: "What should it make first?"; color: Theme.text; font.pixelSize: 15; font.bold: true }
+        RowLayout {
+            Layout.fillWidth: true
+            Label { Layout.fillWidth: true; text: "What should it make first?"; color: Theme.text; font.pixelSize: 15; font.bold: true }
+            Btn {
+                text: "Direction…"
+                onClicked: direction.open()
+                ToolTip.visible: hovered
+                ToolTip.delay: 500
+                ToolTip.text: "Pick a look, colors, type and mood; they go into the prompt"
+            }
+        }
         ScrollView {
             Layout.fillWidth: true
             Layout.preferredHeight: 96

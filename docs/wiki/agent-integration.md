@@ -124,6 +124,35 @@ Agents without direction produce the same centred title on a gradient, and fades
 
 **Format and permission.** A workspace may have a format (`opendesigner/.../brief.json`: size, aspect ratio, frame rate, who chose it). The user may choose one when starting (sections: Video, Store images, Social images, Web and icons, or their own size) or from the toolbar; choosing nothing leaves it to the agent, which picks from `list_formats` and records it with `set_format` (applies at once, shown in the toolbar as agent-chosen). A format the user chose is kept: `create_video` and `set_video` at another size or frame rate are refused, and `set_format` does not change it but leaves a request (with the agent's reason) that the window shows with **Allow** / **Keep mine**; the agent reads the answer with `get_brief`. Images are guidance only (`review_frame` notes a different size), because a panorama is several slides wide.
 
+## Direction picker
+
+Before the agent starts, the user can say what the work should look like, and the picks become part
+of the prompt (`od_agent::direction`, the **Direction** button in the chat and on the start screen):
+
+| what | choices |
+|---|---|
+| Look | 12 named looks (Swiss kinetic type, flat explainer, dark keynote, living screencast, data story, warm editorial, soft product, neo-brutalist, luxury minimal, playful, risograph, soft gradient); each carries its rules, which are the ones in `references/style-directions.md` |
+| Colors | 16 palettes (background, surface, text, accent, muted) or colors the user types |
+| Type | 9 pairings, all fonts macOS ships (the renderer falls back to the bundled Lato for a family the machine lacks, so the preview has the last word) |
+| Mood | calm, energetic, premium, friendly, technical, bold, playful, trustworthy, urgent, nostalgic |
+| Motion | none, subtle, standard, kinetic |
+| Layout | airy, balanced, dense |
+| Imagery | real app screens in device frames, typography only, abstract shapes, photography the user has, icons and badges |
+| Free text | who it is for and what it should do, anything else |
+
+Three switches change how the agent works: **look for good skills and references first** (it is told to list its skills and use the best matches, and to search when it can), **show me three small directions first** (it builds three hero frames in that direction and waits), and **remember these choices** (it writes them into the agent memory).
+
+## The chat's settings and commands
+
+The agent's own Agent Client Protocol session offers settings (the model, the mode, how hard it
+thinks) and slash commands. The chat shows them as they arrive (`session/new` returns
+`configOptions`; agents that only speak the older `modes` and `models` are read the same way) and
+the user can change them without leaving the panel: `session/set_config_option` (or the older
+`session/set_mode` and `session/set_model`). The commands the agent reports (`available_commands`)
+are listed behind the `/` button and typed into the message field like any other text.
+
+The agent's words are shown in text edits, so they can be selected and copied.
+
 ## Guidance context
 
 This is the feature the whole app exists for. The editor maintains, and exposes to agents, what the user is pointing at:

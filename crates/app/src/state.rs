@@ -1364,6 +1364,14 @@ impl EditorState {
         chat.answer(request, (!option.is_empty()).then_some(option))
     }
 
+    /// Changes a setting of the agent's session (model, mode, effort).
+    pub fn chat_set_config(&mut self, id: &str, value: &str) -> Res<()> {
+        self.chat
+            .as_mut()
+            .ok_or_else(|| "start the chat first".to_string())?
+            .set_config(id, value)
+    }
+
     pub fn chat_cancel(&mut self) {
         if let Some(c) = self.chat.as_mut() {
             c.cancel();

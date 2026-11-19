@@ -57,9 +57,59 @@ fn main() {
                     send(json!({"jsonrpc": "2.0", "id": id,
                                 "error": {"code": -32000, "message": "Authentication required"}}));
                     eprintln!("please run `mock-agent login`");
+                } else if mode == "settings" {
+                    send(json!({"jsonrpc": "2.0", "id": id, "result": {
+                        "sessionId": session,
+                        "configOptions": [
+                            {"id": "model", "name": "Model", "category": "model", "type": "select",
+                             "currentValue": "fast", "options": [
+                                {"value": "fast", "name": "Fast"},
+                                {"group": "g", "name": "Big", "options": [{"value": "big", "name": "Big one"}]}]},
+                            {"id": "thinking", "name": "Thinking", "category": "thought_level",
+                             "type": "select", "currentValue": "low", "options": [
+                                {"value": "low", "name": "Low"}, {"value": "high", "name": "High"}]},
+                            {"id": "volume", "name": "Volume", "type": "number", "currentValue": "3"}]}}));
+                    update(
+                        session,
+                        json!({"sessionUpdate": "available_commands_update",
+                        "availableCommands": [
+                            {"name": "compact", "description": "Shrink the context"},
+                            {"name": "switch", "description": "Switch model", "input": {"hint": "[model]"}}]}),
+                    );
+                } else if mode == "legacy" {
+                    send(json!({"jsonrpc": "2.0", "id": id, "result": {
+                        "sessionId": session,
+                        "modes": {"currentModeId": "ask", "availableModes": [
+                            {"id": "ask", "name": "Ask"}, {"id": "code", "name": "Code"}]},
+                        "models": {"currentModelId": "m1", "availableModels": [
+                            {"modelId": "m1", "name": "One"}, {"modelId": "m2", "name": "Two"}]}}}));
                 } else {
                     send(json!({"jsonrpc": "2.0", "id": id, "result": {"sessionId": session}}));
                 }
+            }
+            Some("session/set_config_option") => {
+                let (cfg, value) = (
+                    msg["params"]["configId"].clone(),
+                    msg["params"]["value"].clone(),
+                );
+                if value == "forbidden" {
+                    send(json!({"jsonrpc": "2.0", "id": id,
+                                "error": {"code": -32602, "message": "no such value"}}));
+                } else {
+                    send(
+                        json!({"jsonrpc": "2.0", "id": id, "result": {"configOptions": [
+                        {"id": "model", "name": "Model", "category": "model", "type": "select",
+                         "currentValue": if cfg == "model" { value.clone() } else { json!("fast") },
+                         "options": [{"value": "fast", "name": "Fast"}, {"value": "big", "name": "Big one"}]},
+                        {"id": "thinking", "name": "Thinking", "category": "thought_level",
+                         "type": "select",
+                         "currentValue": if cfg == "thinking" { value } else { json!("low") },
+                         "options": [{"value": "low", "name": "Low"}, {"value": "high", "name": "High"}]}]}}),
+                    );
+                }
+            }
+            Some("session/set_mode") | Some("session/set_model") => {
+                send(json!({"jsonrpc": "2.0", "id": id, "result": {}}));
             }
             Some("session/prompt") => {
                 let prompt = msg["params"]["prompt"][0]["text"].as_str().unwrap_or("");

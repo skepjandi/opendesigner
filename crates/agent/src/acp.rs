@@ -67,6 +67,46 @@ pub struct PlanEntry {
     pub priority: String,
 }
 
+/// One choice of a setting the agent offers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfigChoice {
+    pub value: String,
+    pub name: String,
+    pub description: String,
+}
+
+/// How a setting is changed: the current protocol's `session/set_config_option`, or the older
+/// `session/set_mode` and `session/set_model` that some agents still use.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfigVia {
+    Option,
+    Mode,
+    Model,
+}
+
+/// A setting of the session the agent lets the user change: its model, its mode, how hard it
+/// thinks.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfigOption {
+    pub id: String,
+    pub name: String,
+    /// `model`, `mode`, `thought_level` or something the agent made up.
+    pub category: String,
+    pub current: String,
+    pub choices: Vec<ConfigChoice>,
+    pub via: ConfigVia,
+}
+
+/// A slash command the agent understands (`/compact`, `/model`, ...). The user types it in a
+/// message like any other text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SlashCommand {
+    pub name: String,
+    pub description: String,
+    /// What follows the command, when it takes input.
+    pub hint: String,
+}
+
 /// What the agent reports while a turn runs, in the order it happens.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ChatEvent {
@@ -94,6 +134,17 @@ pub enum ChatEvent {
     TurnEnded(String),
     /// The agent refused or failed a request.
     Failed(String),
+    /// The settings the agent offers, whole (each replaces the last).
+    Config(Vec<ConfigOption>),
+    /// One setting changed (the agent switched its own mode, or a legacy set call succeeded).
+    ConfigSet {
+        id: String,
+        value: String,
+    },
+    /// The slash commands the agent understands, whole.
+    Commands(Vec<SlashCommand>),
+    /// Something to tell the user that does not end the turn (a setting was refused).
+    Notice(String),
     /// The agent process ended.
     Exited(String),
 }
@@ -119,6 +170,94 @@ fn rpc_error(v: &Value) -> String {
         Some(code) => format!("{message} (code {code})"),
         None => message.to_string(),
     }
+}
+
+fn choices_of(options: &Value) -> Vec<ConfigChoice> {
+    let mut out = Vec::new();
+    for o in options.as_array().into_iter().flatten() {
+        // a group holds its own list of options
+        if o["options"].is_array() {
+            out.extend(choices_of(&o["options"]));
+        } else if let Some(value) = o["value"].as_str() {
+            out.push(ConfigChoice {
+                value: value.to_string(),
+                name: o["name"].as_str().unwrap_or(value).to_string(),
+                description: o["description"].as_str().unwrap_or("").to_string(),
+            });
+        }
+    }
+    out
+}
+
+/// The settings in a `session/new` or `session/set_config_option` result or a
+/// `config_option_update`: `configOptions` when the agent has them, else the older `modes` and
+/// `models` fields turned into the same shape.
+pub fn config_from(v: &Value) -> Vec<ConfigOption> {
+    let mut out: Vec<ConfigOption> = Vec::new();
+    for o in v["configOptions"].as_array().into_iter().flatten() {
+        // only choices (selects) are offered; other kinds are not understood here
+        if o["type"].as_str().is_some_and(|t| t != "select") {
+            continue;
+        }
+        let (Some(id), Some(current)) = (o["id"].as_str(), o["currentValue"].as_str()) else {
+            continue;
+        };
+        let choices = choices_of(&o["options"]);
+        if choices.is_empty() {
+            continue;
+        }
+        out.push(ConfigOption {
+            id: id.to_string(),
+            name: o["name"].as_str().unwrap_or(id).to_string(),
+            category: o["category"].as_str().unwrap_or("").to_string(),
+            current: current.to_string(),
+            choices,
+            via: ConfigVia::Option,
+        });
+    }
+    if !out.is_empty() || v["configOptions"].is_array() {
+        return out;
+    }
+    let legacy = |node: &Value, current: &str, id_key: &str, id: &str, name: &str, via| {
+        let list: Vec<ConfigChoice> = node
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|m| {
+                let value = m[id_key].as_str()?;
+                Some(ConfigChoice {
+                    value: value.to_string(),
+                    name: m["name"].as_str().unwrap_or(value).to_string(),
+                    description: m["description"].as_str().unwrap_or("").to_string(),
+                })
+            })
+            .collect();
+        (!list.is_empty()).then(|| ConfigOption {
+            id: id.to_string(),
+            name: name.to_string(),
+            category: id.to_string(),
+            current: current.to_string(),
+            choices: list,
+            via,
+        })
+    };
+    out.extend(legacy(
+        &v["models"]["availableModels"],
+        v["models"]["currentModelId"].as_str().unwrap_or(""),
+        "modelId",
+        "model",
+        "Model",
+        ConfigVia::Model,
+    ));
+    out.extend(legacy(
+        &v["modes"]["availableModes"],
+        v["modes"]["currentModeId"].as_str().unwrap_or(""),
+        "id",
+        "mode",
+        "Mode",
+        ConfigVia::Mode,
+    ));
+    out
 }
 
 fn text_of(content: &Value) -> Option<String> {
@@ -154,6 +293,24 @@ fn event_for(update: &Value) -> Option<ChatEvent> {
                 })
                 .collect(),
         )),
+        "available_commands_update" => Some(ChatEvent::Commands(
+            update["availableCommands"]
+                .as_array()?
+                .iter()
+                .filter_map(|c| {
+                    Some(SlashCommand {
+                        name: c["name"].as_str()?.to_string(),
+                        description: c["description"].as_str().unwrap_or("").to_string(),
+                        hint: c["input"]["hint"].as_str().unwrap_or("").to_string(),
+                    })
+                })
+                .collect(),
+        )),
+        "config_option_update" => Some(ChatEvent::Config(config_from(update))),
+        "current_mode_update" => Some(ChatEvent::ConfigSet {
+            id: "mode".to_string(),
+            value: update["currentModeId"].as_str()?.to_string(),
+        }),
         _ => None,
     }
 }
@@ -244,6 +401,7 @@ impl AcpSession {
 
         let pending: Pending = Arc::default();
         let child = Arc::new(tokio::sync::Mutex::new(child));
+        let first_events = events.clone();
         spawn_reader(
             stdout,
             Arc::clone(&pending),
@@ -298,6 +456,10 @@ impl AcpSession {
                     }),
                 )
                 .await?;
+            let settings = config_from(&created);
+            if !settings.is_empty() {
+                let _ = first_events.send(ChatEvent::Config(settings));
+            }
             created["sessionId"]
                 .as_str()
                 .map(str::to_string)
@@ -371,6 +533,58 @@ impl AcpSession {
                     ChatEvent::TurnEnded(v["stopReason"].as_str().unwrap_or("end_turn").to_string())
                 }
                 Err(e) => ChatEvent::Failed(e),
+            };
+            let _ = events.send(event);
+        });
+    }
+
+    /// Changes one of the session's settings (the model, the mode, the thinking effort). The
+    /// result arrives as `Config` or `ConfigSet`; a refusal as `Notice`.
+    pub fn set_config(
+        self: &Arc<Self>,
+        id: &str,
+        value: &str,
+        via: ConfigVia,
+        events: mpsc::UnboundedSender<ChatEvent>,
+    ) {
+        let me = Arc::clone(self);
+        let (id, value) = (id.to_string(), value.to_string());
+        tokio::spawn(async move {
+            let sid = &me.session_id;
+            let result = match via {
+                ConfigVia::Option => {
+                    me.request(
+                        "session/set_config_option",
+                        json!({"sessionId": sid, "configId": id, "value": value}),
+                    )
+                    .await
+                }
+                ConfigVia::Mode => {
+                    me.request(
+                        "session/set_mode",
+                        json!({"sessionId": sid, "modeId": value}),
+                    )
+                    .await
+                }
+                ConfigVia::Model => {
+                    me.request(
+                        "session/set_model",
+                        json!({"sessionId": sid, "modelId": value}),
+                    )
+                    .await
+                }
+            };
+            let event = match result {
+                Ok(v) if via == ConfigVia::Option => {
+                    let all = config_from(&v);
+                    if all.is_empty() {
+                        ChatEvent::ConfigSet { id, value }
+                    } else {
+                        ChatEvent::Config(all)
+                    }
+                }
+                Ok(_) => ChatEvent::ConfigSet { id, value },
+                Err(e) => ChatEvent::Notice(format!("The agent did not accept that setting: {e}")),
             };
             let _ = events.send(event);
         });
