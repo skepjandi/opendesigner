@@ -62,6 +62,7 @@ pub struct Snapshot {
     pub log: String,
     pub changed: String,
     pub unrendered: String,
+    pub overflows: String,
     pub tokens: String,
     pub languages: String,
     pub language: String,
@@ -729,7 +730,7 @@ impl EditorState {
                 .map(|f| json!({"path": f.path, "width": f.width, "height": f.height, "bytes": f.bytes}))
                 .collect();
             Ok(json!({
-                "files": files, "not_drawn": out.not_drawn, "preset_verified": out.preset_verified,
+                "files": files, "warnings": out.warnings, "preset_verified": out.preset_verified,
             }))
         })
     }
@@ -1160,6 +1161,7 @@ impl EditorState {
                     .map(|f| collect_unrendered(doc, f, ws.dir()))
                     .unwrap_or_default(),
             ),
+            overflows: to_string(&frame.map(|f| collect_overflows(doc, f)).unwrap_or_default()),
             tokens: to_string(&view::tokens(doc)),
             languages: to_string(&view::locales(doc)),
             language: self
@@ -1197,6 +1199,31 @@ fn image_problem(n: &Node, dir: Option<&std::path::Path>) -> Option<String> {
 
 /// Image nodes in a frame that the renderer cannot draw (no file, unreadable file): the canvas
 /// marks where they are and says why.
+/// Text in `frame` that wraps to more rows than its box is tall, with the box's place in the frame.
+fn collect_overflows(doc: &od_core::Document, frame: &NodeId) -> Vec<Value> {
+    let Some(node) = doc.node(frame) else {
+        return Vec::new();
+    };
+    od_render::check_text(node)
+        .into_iter()
+        .filter_map(|w| {
+            let od_render::Warning::TextOverflow {
+                id,
+                needed,
+                available,
+            } = w
+            else {
+                return None;
+            };
+            let b = geometry::bounds_in_frame(doc, frame, &id)?;
+            Some(json!({
+                "id": id, "needed": needed, "available": available,
+                "x": b.x, "y": b.y, "width": b.width, "height": b.height,
+            }))
+        })
+        .collect()
+}
+
 fn collect_unrendered(
     doc: &od_core::Document,
     frame: &NodeId,
@@ -1674,6 +1701,27 @@ mod tests {
         assert!(s.render_canvas(1.0).is_err());
         assert_eq!(s.hit_test(0.0, 0.0), None);
         assert_eq!(s.connect_recipes(), "[]");
+    }
+
+    #[test]
+    fn text_that_runs_past_its_box_is_listed_with_where_the_box_is() {
+        let (mut s, _t) = state();
+        s.create_node("frame", 0.0, 0.0, 400.0, 300.0).unwrap();
+        let id = s.create_node("text", 20.0, 30.0, 120.0, 20.0).unwrap();
+        s.set_property(&id, "font_size", "40").unwrap();
+        s.set_property(&id, "text", "\"a long line of words that wraps over rows\"")
+            .unwrap();
+        let listed: Vec<Value> = serde_json::from_str(&s.snapshot().overflows).unwrap();
+        assert_eq!(listed.len(), 1, "{listed:?}");
+        assert_eq!(listed[0]["id"], json!(id));
+        assert_eq!(
+            (listed[0]["x"].as_f64(), listed[0]["y"].as_f64()),
+            (Some(20.0), Some(30.0))
+        );
+        assert!(listed[0]["needed"].as_u64() > listed[0]["available"].as_u64());
+
+        s.resize_node(&id, 20.0, 30.0, 380.0, 300.0).unwrap();
+        assert_eq!(s.snapshot().overflows, "[]");
     }
 
     #[test]

@@ -48,7 +48,17 @@ pub enum RenderError {
 /// Content the renderer could not draw.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Warning {
-    ImageNotRendered { id: NodeId, reason: String },
+    ImageNotRendered {
+        id: NodeId,
+        reason: String,
+    },
+    /// The text wraps to more rows than its box is tall: it is drawn, but runs past the box.
+    TextOverflow {
+        id: NodeId,
+        /// What the text needs and what the box offers, in document units.
+        needed: u32,
+        available: u32,
+    },
 }
 
 impl std::fmt::Display for Warning {
@@ -57,6 +67,14 @@ impl std::fmt::Display for Warning {
             Warning::ImageNotRendered { id, reason } => {
                 write!(f, "image {id} was not drawn: {reason}")
             }
+            Warning::TextOverflow {
+                id,
+                needed,
+                available,
+            } => write!(
+                f,
+                "text {id} overflows its box: its lines need {needed} px of height and the box is {available} px; make the box taller, or the text smaller or shorter"
+            ),
         }
     }
 }
@@ -71,6 +89,35 @@ struct Ctx<'a> {
     project_dir: Option<&'a FsPath>,
     warnings: Vec<Warning>,
     view: View,
+}
+
+/// Text in `node` and below that wraps to more rows than its box is tall. A box with no width
+/// does not wrap and one with no height has nothing to overflow, so neither is checked.
+pub fn check_text(node: &Node) -> Vec<Warning> {
+    let mut found = Vec::new();
+    collect_overflows(node, &mut found);
+    found
+}
+
+fn collect_overflows(node: &Node, found: &mut Vec<Warning>) {
+    if !node.visible {
+        return;
+    }
+    if node.kind == NodeKind::Text
+        && node.width > 0.0
+        && node.height > 0.0
+        && let Some((_, text_h)) = text::measure(node)
+        && f64::from(text_h) > node.height + 0.5
+    {
+        found.push(Warning::TextOverflow {
+            id: node.id.clone(),
+            needed: text_h.ceil() as u32,
+            available: node.height.floor() as u32,
+        });
+    }
+    for child in &node.children {
+        collect_overflows(child, found);
+    }
 }
 
 /// Renders `frame` at `scale` (1.0 = one pixel per document unit). `project_dir` is the project
@@ -217,6 +264,7 @@ fn render_bands(
             }
         }
     }
+    warnings.extend(check_text(node));
     Ok(Rendered { pixmap, warnings })
 }
 
@@ -591,7 +639,10 @@ mod tests {
         let reasons: Vec<(NodeId, String)> = r
             .warnings
             .iter()
-            .map(|Warning::ImageNotRendered { id, reason }| (id.clone(), reason.clone()))
+            .filter_map(|w| match w {
+                Warning::ImageNotRendered { id, reason } => Some((id.clone(), reason.clone())),
+                Warning::TextOverflow { .. } => None,
+            })
             .collect();
         assert_eq!(reasons.len(), 2);
         assert_eq!(reasons[0].0, none);
@@ -781,6 +832,53 @@ mod tests {
         configure(&mut t);
         add(&mut s, &frame, t);
         render_frame(s.document(), &frame, 1.0, None).unwrap()
+    }
+
+    #[test]
+    fn text_that_does_not_fit_its_box_is_reported_and_still_drawn() {
+        let r = text_frame(|t| {
+            t.width = 120.0;
+            t.height = 20.0;
+            t.text = Some("a long line of words that wraps over several rows".into());
+        });
+        let [
+            Warning::TextOverflow {
+                needed, available, ..
+            },
+        ] = r.warnings.as_slice()
+        else {
+            panic!("{:?}", r.warnings);
+        };
+        assert_eq!(*available, 20);
+        assert!(*needed > 100, "several 48 px rows, got {needed}");
+        assert!(ink(&r).0 > 0, "the text is still drawn");
+        assert!(r.warnings[0].to_string().contains("overflows its box"));
+    }
+
+    #[test]
+    fn a_word_too_wide_for_the_box_breaks_into_rows_that_overflow_and_fitting_text_is_quiet() {
+        let wide = text_frame(|t| {
+            t.width = 60.0;
+            t.height = 100.0;
+            t.text = Some("Extraordinarily".into());
+        });
+        assert!(
+            matches!(wide.warnings.as_slice(), [Warning::TextOverflow { .. }]),
+            "{:?}",
+            wide.warnings
+        );
+        let fits = text_frame(|t| {
+            t.width = 300.0;
+            t.height = 100.0;
+            t.text = Some("Hello".into());
+        });
+        assert!(fits.warnings.is_empty(), "{:?}", fits.warnings);
+        let unboxed = text_frame(|t| {
+            t.width = 0.0;
+            t.height = 0.0;
+            t.text = Some("No box at all, so nothing to overflow".into());
+        });
+        assert!(unboxed.warnings.is_empty(), "{:?}", unboxed.warnings);
     }
 
     /// Count of non-white pixels and their bounding box (x0, y0, x1, y1).

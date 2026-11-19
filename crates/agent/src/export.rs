@@ -80,7 +80,9 @@ pub struct ExportedFile {
 
 pub struct ExportOutcome {
     pub files: Vec<ExportedFile>,
-    pub not_drawn: Vec<String>,
+    /// Things that did not come out as designed: an image that could not be drawn, text that
+    /// overflows its box.
+    pub warnings: Vec<String>,
     /// Whether the preset's rules were checked against Apple's or Google's own pages.
     pub preset_verified: Option<bool>,
 }
@@ -239,7 +241,7 @@ pub fn export_assets(
                 bytes: i.png.len(),
             })
             .collect(),
-        not_drawn: warnings.iter().map(ToString::to_string).collect(),
+        warnings: warnings.iter().map(ToString::to_string).collect(),
         preset_verified: target
             .map(|p| matches!(p.verification, od_store::Verification::PrimaryChecked(_))),
     })

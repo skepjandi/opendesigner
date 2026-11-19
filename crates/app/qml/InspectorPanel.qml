@@ -12,6 +12,10 @@ Rectangle {
     color: Theme.panel
 
     readonly property var node: editor.inspector && editor.inspector !== "null" ? JSON.parse(editor.inspector) : null
+    readonly property var overflow: {
+        const all = editor.overflows ? JSON.parse(editor.overflows) : []
+        return node ? all.find(o => o.id === node.id) || null : null
+    }
 
     function num(v) { return (Math.round(v * 100) / 100).toString() }
     function setNum(prop, text) {
@@ -144,6 +148,14 @@ Rectangle {
                     text: root.node ? root.num(root.node.corner_radius || 0) : ""
                     onCommitted: v => root.setNum("corner_radius", v)
                 }
+            }
+            Label {
+                Layout.fillWidth: true
+                visible: root.overflow !== null
+                wrapMode: Text.WordWrap
+                color: Theme.danger
+                font.pixelSize: 11
+                text: root.overflow ? "The text needs " + root.overflow.needed + " px of height but the box is " + root.overflow.available + " px. Make the box taller, or the text smaller or shorter." : ""
             }
             Row2 {
                 visible: root.node && root.node.kind === "text"
