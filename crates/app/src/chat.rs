@@ -155,14 +155,18 @@ pub fn probe_options(command_line: &str) -> Value {
                 args,
                 cwd: std::env::temp_dir(),
             };
-            // there is no editor to connect to yet: a placeholder the agent never needs
+            // there is no editor to connect to yet, so the agent is given none
             let mcp = McpEndpoint {
-                url: "http://127.0.0.1:9/mcp".into(),
-                token: "probe".into(),
+                url: String::new(),
+                token: String::new(),
             };
-            let session = AcpSession::start(&command, &mcp, &[], tx)
-                .await
-                .map_err(|e| e.to_string())?;
+            let session = tokio::time::timeout(
+                std::time::Duration::from_secs(45),
+                AcpSession::start(&command, &mcp, &[], tx),
+            )
+            .await
+            .map_err(|_| "the agent did not answer in 45 seconds".to_string())?
+            .map_err(|e| e.to_string())?;
             tokio::time::sleep(std::time::Duration::from_millis(400)).await;
             let mut found = Vec::new();
             while let Ok(event) = rx.try_recv() {
