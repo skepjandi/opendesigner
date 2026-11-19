@@ -8,6 +8,16 @@ All notable changes to OpenDesigner are documented here.
 
 ## 2026-11-19
 
+### fix(app): modal dialogs no longer turn the window white, and the Direction picker and slash-command list behave
+
+**Area:** `fix(app)`
+
+**Why:** Screenshots: opening the Direction picker (or any dialog) turned the whole window white, the picker sat in the wrong place and was cut off, its Look / Mood / Imagery picks did not light up when clicked, and the slash-command list was drawn at the top of the window instead of above the message field. **Change:** every dialog now dims with an explicit dark layer (the style's default dim was white here); the picker is centered in the window and sized by it, replaces its pick lists instead of editing them in place (so buttons update), and shows each palette's colors; the command list is anchored above the message field, sized to its rows, with hover.
+
+**Verified:** the window session still passes with no QML warning (the earlier `Dialog.qml` type error from the picker's old sizing is gone). **Not verified:** by eye, which is the whole point: I could not grab the overlay offscreen, so the white dim, the picker's position and the command list were fixed from the screenshots and the code, not seen after the change.
+
+**PR:** n/a
+
 ### feat(app): the chat can call the MCP servers the user adds, so the agent reaches MiniMax's speech models
 
 **Area:** `feat(acp)`, `feat(app)`

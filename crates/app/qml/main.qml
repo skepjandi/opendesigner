@@ -482,6 +482,7 @@ ApplicationWindow {
         id: dlg
         modal: true
         anchors.centerIn: Overlay.overlay
+        Overlay.modal: Rectangle { color: Qt.rgba(0, 0, 0, 0.55) }
         background: Rectangle { radius: Theme.radius; color: Theme.panelRaised; border.width: 1; border.color: Theme.border }
         header: Label { text: dlg.title; color: Theme.text; font.pixelSize: 15; font.bold: true; padding: 14 }
     }
@@ -918,6 +919,7 @@ ApplicationWindow {
         id: offer
         property var rows: []
         modal: true
+        Overlay.modal: Rectangle { color: Qt.rgba(0, 0, 0, 0.55) }
         anchors.centerIn: Overlay.overlay
         width: Math.min(560, Overlay.overlay ? Overlay.overlay.width - 40 : 560)
         title: "Teach your coding agents about OpenDesigner?"
