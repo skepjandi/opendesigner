@@ -7,40 +7,35 @@ use od_agent::acp::{AcpSession, AgentCommand, ChatEvent, McpEndpoint};
 use serde_json::Value;
 use tokio::sync::mpsc;
 
+/// The scripted agent's executable. Cargo says where it put it (the layout of `target/` differs
+/// between versions), so ask it to build the example and report the path.
 fn mock() -> String {
-    let exe = std::env::current_exe().unwrap();
-    let name = if cfg!(windows) {
-        "mock_acp_agent.exe"
-    } else {
-        "mock_acp_agent"
-    };
-    let path = exe
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .join("examples")
-        .join(name);
-    if !path.exists() {
-        // `cargo test --test acp` does not build examples; a full `cargo test` does
-        let status = std::process::Command::new(env!("CARGO"))
+    static PATH: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    PATH.get_or_init(|| {
+        let out = std::process::Command::new(env!("CARGO"))
             .args([
                 "build",
                 "--example",
                 "mock_acp_agent",
                 "-p",
                 "opendesigner-agent",
+                "--message-format=json",
             ])
-            .status()
+            .stderr(std::process::Stdio::inherit())
+            .output()
             .unwrap();
-        assert!(status.success());
-    }
-    assert!(
-        path.exists(),
-        "the mock agent is missing: {}",
-        path.display()
-    );
-    path.display().to_string()
+        assert!(out.status.success(), "building the mock agent failed");
+        String::from_utf8(out.stdout)
+            .unwrap()
+            .lines()
+            .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+            .filter(|m| {
+                m["reason"] == "compiler-artifact" && m["target"]["name"] == "mock_acp_agent"
+            })
+            .find_map(|m| m["executable"].as_str().map(str::to_string))
+            .expect("cargo did not report the mock agent's executable")
+    })
+    .clone()
 }
 
 fn command(mode: &str, log: Option<&std::path::Path>) -> AgentCommand {
