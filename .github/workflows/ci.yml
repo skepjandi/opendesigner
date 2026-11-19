@@ -13,6 +13,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Everything that needs no Qt: the default workspace members (core, render, store, agent, cli).
   rust:
     name: Rust (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -28,8 +29,27 @@ jobs:
           components: rustfmt, clippy
       - uses: swatinem/rust-cache@v2
       - run: cargo fmt --all --check
-      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      - run: cargo test --workspace --locked
+      - run: cargo clippy --all-targets --locked -- -D warnings
+      - run: cargo test --locked
+
+  # The Qt Quick editor. Only macOS has been run by hand; Linux and Windows jobs come once their
+  # Qt installs are verified.
+  app-macos:
+    name: Editor (macOS, Qt 6)
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: swatinem/rust-cache@v2
+      - run: brew install qt
+      - name: Lint and test the editor
+        run: |
+          export QMAKE="$(brew --prefix qt)/bin/qmake"
+          cargo clippy -p opendesigner-app --all-targets --locked -- -D warnings
+          cargo test -p opendesigner-app --locked
 
   deny:
     name: cargo deny

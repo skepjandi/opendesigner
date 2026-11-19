@@ -1,0 +1,50 @@
+[package]
+name = "opendesigner-app"
+description = "The OpenDesigner editor: a Qt Quick shell over the Rust core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[lib]
+name = "opendesigner_app"
+path = "src/lib.rs"
+
+[[bin]]
+name = "opendesigner-app"
+path = "src/main.rs"
+
+[dependencies]
+opendesigner-core = { path = "../core" }
+opendesigner-render = { path = "../render" }
+opendesigner-store = { path = "../store" }
+opendesigner-agent = { path = "../agent" }
+cxx = "1"
+cxx-qt = "=0.10.0"
+cxx-qt-lib = { version = "=0.10.0", features = ["qt_full"] }
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+base64.workspace = true
+
+[build-dependencies]
+cxx-qt-build = "=0.10.0"
+
+[dev-dependencies]
+tempfile.workspace = true
+png.workspace = true
+
+# The cxx-qt macros expand to FFI code that uses `unsafe`; this crate is the only place it is allowed.
+[lints.rust]
+unsafe_code = "allow"
+unused_must_use = "deny"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+dbg_macro = "deny"
+todo = "deny"

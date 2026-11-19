@@ -5,12 +5,14 @@
 
 pub mod annotations;
 pub mod error;
+pub mod geometry;
 pub mod history;
 pub mod limits;
 pub mod model;
 pub mod ops;
 pub mod paint;
 pub mod project;
+pub mod view;
 pub mod workspace;
 
 pub use annotations::{Annotation, AnnotationStatus, AnnotationTarget, Annotations};

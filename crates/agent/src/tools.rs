@@ -677,13 +677,32 @@ fn preset(id: &str) -> Result<&'static od_store::Preset, ToolError> {
     })
 }
 
-fn export(ctx: &mut CallCtx, a: ExportArgs) -> Result<Output, ToolError> {
-    let file = export_name(&a.file)?;
-    let dir = exports_dir(ctx.ws)?;
-    let target = a.preset.as_deref().map(preset).transpose()?;
-    let id = node_id(&a.frame)?;
-    let rendered = od_render::render_frame(ctx.ws.session.document(), &id, a.scale.unwrap_or(1.0))?;
-    let keep_alpha = a.alpha && target.is_none_or(|p| p.allow_alpha);
+/// What an export wrote.
+pub struct ExportOutcome {
+    /// Relative to the project folder, for example `exports/shot-01.png`.
+    pub path: String,
+    pub width: u32,
+    pub height: u32,
+    pub bytes: usize,
+    pub not_drawn: Vec<String>,
+    pub preset_verified: Option<bool>,
+}
+
+/// Renders `frame` into `<project>/exports/<file>`, validated against `preset` when given. Nothing
+/// is written when the image does not meet the preset. Shared by the `export` tool and the editor.
+pub fn export_frame(
+    ws: &Workspace,
+    frame: &NodeId,
+    file: &str,
+    preset_id: Option<&str>,
+    scale: Option<f32>,
+    alpha: bool,
+) -> Result<ExportOutcome, ToolError> {
+    let file = export_name(file)?;
+    let dir = exports_dir(ws)?;
+    let target = preset_id.map(preset).transpose()?;
+    let rendered = od_render::render_frame(ws.session.document(), frame, scale.unwrap_or(1.0))?;
+    let keep_alpha = alpha && target.is_none_or(|p| p.allow_alpha);
     let png = od_render::encode_png(&rendered.pixmap, keep_alpha)?;
     if let Some(p) = target {
         let facts = od_store::inspect_png(&png).map_err(|e| ToolError(e.to_string()))?;
@@ -700,15 +719,28 @@ fn export(ctx: &mut CallCtx, a: ExportArgs) -> Result<Output, ToolError> {
     }
     std::fs::create_dir_all(&dir)?;
     std::fs::write(dir.join(file), &png)?;
+    Ok(ExportOutcome {
+        path: format!("exports/{file}"),
+        width: rendered.pixmap.width(),
+        height: rendered.pixmap.height(),
+        bytes: png.len(),
+        not_drawn: rendered.warnings.iter().map(|w| format!("{w:?}")).collect(),
+        preset_verified: target
+            .map(|p| matches!(p.verification, od_store::Verification::PrimaryChecked(_))),
+    })
+}
+
+fn export(ctx: &mut CallCtx, a: ExportArgs) -> Result<Output, ToolError> {
+    let id = node_id(&a.frame)?;
+    let out = export_frame(ctx.ws, &id, &a.file, a.preset.as_deref(), a.scale, a.alpha)?;
     Ok(Output::json(&json!({
-        "path": format!("exports/{file}"),
-        "width": rendered.pixmap.width(),
-        "height": rendered.pixmap.height(),
-        "bytes": png.len(),
+        "path": out.path,
+        "width": out.width,
+        "height": out.height,
+        "bytes": out.bytes,
         "preset": a.preset,
-        "preset_verified_against_primary_source":
-            target.map(|p| matches!(p.verification, od_store::Verification::PrimaryChecked(_))),
-        "not_drawn": rendered.warnings.iter().map(|w| format!("{w:?}")).collect::<Vec<_>>(),
+        "preset_verified_against_primary_source": out.preset_verified,
+        "not_drawn": out.not_drawn,
     })))
 }
 

@@ -2,7 +2,7 @@
 
 > Rules for AI coding agents working in this repository.
 
-OpenDesigner is a native desktop editor (macOS, Windows, Linux): a Rust core under a Qt 6 (C++/QML) shell. It is a vector design canvas plus a video timeline for producing App Store, Google Play and web assets. Its defining feature is that the **GUI is the guidance channel for AI agents**: the user's selection, annotations and hand edits reach the agent, and every agent edit is visible and reversible. Installing the app installs an Agent Skill and a local MCP endpoint for the agents on the user's machine. **No server of ours is needed to use the app.**
+OpenDesigner is a native desktop editor (macOS, Windows, Linux): a Rust core under a Qt 6 Quick (QML) shell. It is a vector design canvas plus a video timeline for producing App Store, Google Play and web assets. Its defining feature is that the **GUI is the guidance channel for AI agents**: the user's selection, annotations and hand edits reach the agent, and every agent edit is visible and reversible. Installing the app installs an Agent Skill and a local MCP endpoint for the agents on the user's machine. **No server of ours is needed to use the app.**
 
 ## Read the Wiki First
 
@@ -36,7 +36,7 @@ git worktree add -b <type>/<scope>-<slug> .worktrees/<scope>-<slug> origin/main
 
 - **Main must stay clean.** No uncommitted changes, no staged files. Remove the worktree as soon as its branch is merged (`git worktree remove <path>`), then confirm `git status` in main is empty.
 - **One worktree per branch.** Always branch from `origin/main`, never from another worktree's branch.
-- **Build output is per-worktree and large.** Rust `target/` and CMake `build/` directories live in the worktree; set `CARGO_TARGET_DIR` to a shared directory outside the repo if disk is tight. Never commit either.
+- **Build output is per-worktree and large.** Rust `target/` directories live in the worktree (the Qt shell's first build compiles `cxx-qt` and takes minutes); set `CARGO_TARGET_DIR` to a shared directory outside the repo if disk is tight. Never commit it.
 - **Coordinate before touching shared files** (`Cargo.toml` workspace manifest, `crates/core` operation and file-format types, `skills/`). Check `git worktree list` and the other worktrees' `git status` first.
 
 ## Testing
@@ -44,19 +44,19 @@ git worktree add -b <type>/<scope>-<slug> .worktrees/<scope>-<slug> origin/main
 All checks must pass before pushing:
 
 ```bash
-# Rust crates (core, render, store, media, agent, cli, bridge)
+# Everything that needs no Qt (core, render, store, agent, cli): the default workspace members
 cargo fmt --all --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
+cargo clippy --all-targets -- -D warnings
+cargo test
+cargo deny check
 
-# C++/QML shell
-cmake --preset dev && cmake --build --preset dev
-ctest --preset dev --output-on-failure
-clang-format --dry-run --Werror $(git ls-files '*.cpp' '*.h')
+# The Qt shell (`app` crate). Needs Qt 6 and QMAKE, e.g. QMAKE=$(brew --prefix qt)/bin/qmake
+cargo clippy -p opendesigner-app --all-targets -- -D warnings
+cargo test -p opendesigner-app   # unit tests, plus the offscreen scripted session of the real window
 ```
 
 - **Never push failing checks.** The commands above are the contract; CI runs the same.
-- New module → tests beside the code (`#[cfg(test)]` in Rust); integration tests in each crate's `tests/`. C++ is tested with Qt Test and QML with Qt Quick Test, both run by `ctest`; they test presentation and bridge behavior only, since document logic is tested in Rust.
+- New module → tests beside the code (`#[cfg(test)]` in Rust); integration tests in each crate's `tests/`. The shell's logic lives in `app/src/state.rs` (no Qt) and is tested there; `qml/SelfTest.qml` drives the real window offscreen (`crates/app/tests/selftest.rs`). QML holds presentation only.
 - **The renderer is tested against golden images** compared programmatically (per-pixel tolerance), and the file format against round-trip fixtures. Store export presets are tested against the size, format and alpha rules they encode.
 - Mock the network. Agent and MCP tests use recorded request/response fixtures; never call a real model provider in tests and never put a real key or token in a fixture.
 - Do not use screenshots or LLM visual inspection as test evidence. Verify behavior programmatically. Manual on-device checks (each OS, each agent) are the user's; state clearly in the PR what remains unverified.
@@ -65,9 +65,8 @@ clang-format --dry-run --Werror $(git ls-files '*.cpp' '*.h')
 
 - Clear names; no comments explaining obvious behavior.
 - Rust: no `unwrap()`/`expect()` outside tests; propagate typed errors (`thiserror`). `clippy -D warnings` is zero-tolerance.
-- No `unsafe` without a `// SAFETY:` comment naming the invariant. FFI to C++ goes only through the `bridge` crate.
-- C++ (C++20): RAII everywhere, no owning raw pointers (use Qt parent–child ownership for `QObject`s, otherwise smart pointers), no `using namespace`, no logic in headers beyond trivial inline. Warnings are errors (`-Wall -Wextra`); `clang-tidy` and `clang-format` are zero-tolerance.
-- QML is declarative presentation: bindings, layout, animation, input forwarding. No document logic, no business rules, no parsing in QML or C++; if you need it, the Rust core is missing an operation.
+- No `unsafe` without a `// SAFETY:` comment naming the invariant. The `app` crate is the only one that may contain `unsafe` (the `cxx-qt` macros expand to FFI code); every other crate forbids it.
+- QML is declarative presentation: bindings, layout, animation, input forwarding. No document logic, no business rules, no parsing beyond reading the JSON the editor object publishes; if you need it, the Rust core is missing an operation. Name properties and invokables so they cannot collide with Qt's own (for example `setProperty`, or the `setX` setter of a property `x`).
 - Keep functions short and focused. Use the existing patterns in `crates/` and `app/` as reference.
 - **Never keep deprecated code.** When Qt, a crate or an API deprecates something, migrate in the same change. `cxx-qt` is pre-1.0 and Qt deprecates across minors: pin versions exactly and bump them deliberately, in their own PR.
 - **Zero tolerance for lint-blocking issues.** Unused imports/vars/functions, empty blocks, needless clones: fix them on every change. Prefix intentionally unused parameters with `_` (Rust) or leave them unnamed (C++).

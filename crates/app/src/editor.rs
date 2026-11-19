@@ -1,0 +1,577 @@
+//! The one QObject QML talks to. It forwards every action to `EditorState` (Qt-free, tested on its
+//! own) and publishes the resulting snapshot as properties. No document logic lives here.
+
+#[cxx_qt::bridge]
+pub mod qobject {
+    unsafe extern "C++" {
+        include!("cxx-qt-lib/qstring.h");
+        type QString = cxx_qt_lib::QString;
+    }
+
+    impl cxx_qt::Threading for Editor {}
+
+    extern "RustQt" {
+        #[qobject]
+        #[qml_element]
+        #[qproperty(bool, has_project, cxx_name = "hasProject")]
+        #[qproperty(QString, project_name, cxx_name = "projectName")]
+        #[qproperty(QString, layers)]
+        #[qproperty(QString, frames)]
+        #[qproperty(QString, active_frame, cxx_name = "activeFrame")]
+        #[qproperty(QString, frame_size, cxx_name = "frameSize")]
+        #[qproperty(QString, selection)]
+        #[qproperty(QString, selection_bounds, cxx_name = "selectionBounds")]
+        #[qproperty(QString, inspector)]
+        #[qproperty(QString, annotations)]
+        #[qproperty(QString, checkpoints)]
+        #[qproperty(QString, log)]
+        #[qproperty(QString, changed)]
+        #[qproperty(QString, unrendered)]
+        #[qproperty(bool, can_undo, cxx_name = "canUndo")]
+        #[qproperty(bool, can_redo, cxx_name = "canRedo")]
+        #[qproperty(bool, mcp_running, cxx_name = "mcpRunning")]
+        #[qproperty(QString, mcp_url, cxx_name = "mcpUrl")]
+        #[qproperty(QString, canvas)]
+        #[qproperty(QString, message)]
+        #[qproperty(bool, message_is_error, cxx_name = "messageIsError")]
+        #[qproperty(i32, message_seq, cxx_name = "messageSeq")]
+        #[qproperty(i32, revision)]
+        type Editor = super::EditorRust;
+
+        #[qinvokable]
+        #[cxx_name = "newProject"]
+        fn new_project(
+            self: Pin<&mut Self>,
+            path: &QString,
+            name: &QString,
+            width: f64,
+            height: f64,
+        );
+        #[qinvokable]
+        #[cxx_name = "openProject"]
+        fn open_project(self: Pin<&mut Self>, path: &QString);
+        #[qinvokable]
+        #[cxx_name = "saveProject"]
+        fn save_project(self: Pin<&mut Self>);
+        #[qinvokable]
+        #[cxx_name = "framePresets"]
+        fn frame_presets(self: &Self) -> QString;
+        #[qinvokable]
+        #[cxx_name = "localPath"]
+        fn local_path(self: &Self, url: &QString) -> QString;
+
+        #[qinvokable]
+        #[cxx_name = "openFrame"]
+        fn set_active_frame_id(self: Pin<&mut Self>, id: &QString);
+        #[qinvokable]
+        fn select(self: Pin<&mut Self>, id: &QString);
+        #[qinvokable]
+        #[cxx_name = "hitTest"]
+        fn hit_test(self: &Self, x: f64, y: f64) -> QString;
+        #[qinvokable]
+        #[cxx_name = "createNode"]
+        fn create_node(
+            self: Pin<&mut Self>,
+            kind: &QString,
+            x: f64,
+            y: f64,
+            w: f64,
+            h: f64,
+        ) -> QString;
+        #[qinvokable]
+        #[cxx_name = "deleteSelected"]
+        fn delete_selected(self: Pin<&mut Self>);
+        #[qinvokable]
+        #[cxx_name = "moveNode"]
+        fn move_node(self: Pin<&mut Self>, id: &QString, x: f64, y: f64);
+        #[qinvokable]
+        #[cxx_name = "resizeNode"]
+        fn resize_node(self: Pin<&mut Self>, id: &QString, x: f64, y: f64, w: f64, h: f64);
+        #[qinvokable]
+        #[cxx_name = "setNodeProperty"]
+        fn set_node_property(
+            self: Pin<&mut Self>,
+            id: &QString,
+            name: &QString,
+            value_json: &QString,
+        );
+        #[qinvokable]
+        #[cxx_name = "toggleVisible"]
+        fn toggle_visible(self: Pin<&mut Self>, id: &QString);
+        #[qinvokable]
+        fn reorder(self: Pin<&mut Self>, id: &QString, delta: i32);
+
+        #[qinvokable]
+        fn undo(self: Pin<&mut Self>);
+        #[qinvokable]
+        fn redo(self: Pin<&mut Self>);
+        #[qinvokable]
+        fn checkpoint(self: Pin<&mut Self>, name: &QString);
+        #[qinvokable]
+        fn restore(self: Pin<&mut Self>, checkpoint: i32);
+
+        #[qinvokable]
+        #[cxx_name = "addPin"]
+        fn add_pin(self: Pin<&mut Self>, note: &QString, node: &QString) -> i32;
+        #[qinvokable]
+        #[cxx_name = "addRegionPin"]
+        fn add_region_pin(
+            self: Pin<&mut Self>,
+            note: &QString,
+            x: f64,
+            y: f64,
+            w: f64,
+            h: f64,
+        ) -> i32;
+        #[qinvokable]
+        #[cxx_name = "resolvePin"]
+        fn resolve_pin(self: Pin<&mut Self>, id: i32);
+        #[qinvokable]
+        #[cxx_name = "reopenPin"]
+        fn reopen_pin(self: Pin<&mut Self>, id: i32);
+        #[qinvokable]
+        #[cxx_name = "removePin"]
+        fn remove_pin(self: Pin<&mut Self>, id: i32);
+        #[qinvokable]
+        #[cxx_name = "clearAgentChanges"]
+        fn clear_agent_changes(self: Pin<&mut Self>);
+
+        #[qinvokable]
+        #[cxx_name = "renderCanvas"]
+        fn render_canvas(self: Pin<&mut Self>, scale: f64);
+        #[qinvokable]
+        #[cxx_name = "exportFrame"]
+        fn export_frame(self: Pin<&mut Self>, preset: &QString, file: &QString) -> QString;
+
+        #[qinvokable]
+        #[cxx_name = "startMcp"]
+        fn start_mcp(self: Pin<&mut Self>);
+        #[qinvokable]
+        #[cxx_name = "stopMcp"]
+        fn stop_mcp(self: Pin<&mut Self>);
+        #[qinvokable]
+        #[cxx_name = "connectCommand"]
+        fn connect_command(self: &Self) -> QString;
+        #[qinvokable]
+        #[cxx_name = "skillStatus"]
+        fn skill_status(self: &Self) -> QString;
+        #[qinvokable]
+        #[cxx_name = "installSkill"]
+        fn install_skill(self: Pin<&mut Self>) -> QString;
+    }
+}
+
+use core::pin::Pin;
+use std::path::Path;
+use std::sync::Arc;
+
+use cxx_qt::{CxxQtType, Threading};
+use cxx_qt_lib::QString;
+use od_agent::mcp::ChangeEvent;
+use od_core::NodeId;
+
+use crate::state::{EditorState, Snapshot};
+
+#[derive(Default)]
+pub struct EditorRust {
+    state: EditorState,
+    has_project: bool,
+    project_name: QString,
+    layers: QString,
+    frames: QString,
+    active_frame: QString,
+    frame_size: QString,
+    selection: QString,
+    selection_bounds: QString,
+    inspector: QString,
+    annotations: QString,
+    checkpoints: QString,
+    log: QString,
+    changed: QString,
+    unrendered: QString,
+    can_undo: bool,
+    can_redo: bool,
+    mcp_running: bool,
+    mcp_url: QString,
+    canvas: QString,
+    message: QString,
+    message_is_error: bool,
+    message_seq: i32,
+    revision: i32,
+}
+
+fn q(s: &str) -> QString {
+    QString::from(s)
+}
+
+fn id_arg(id: i32) -> u64 {
+    u64::try_from(id).unwrap_or(0)
+}
+
+/// `file:///Users/me/p.od` to `/Users/me/p.od` (and `file:///C:/x` to `C:/x`), percent-decoded.
+fn path_from_url(url: &str) -> String {
+    let rest = url.strip_prefix("file://").unwrap_or(url);
+    let rest = if rest.len() > 2 && rest.as_bytes()[0] == b'/' && rest.as_bytes()[2] == b':' {
+        &rest[1..]
+    } else {
+        rest
+    };
+    let bytes = rest.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let hex = (bytes[i] == b'%')
+            .then(|| bytes.get(i + 1..i + 3))
+            .flatten()
+            .and_then(|h| std::str::from_utf8(h).ok())
+            .and_then(|h| u8::from_str_radix(h, 16).ok());
+        if let Some(v) = hex {
+            out.push(v);
+            i += 3;
+            continue;
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+impl qobject::Editor {
+    fn show(mut self: Pin<&mut Self>, text: &str, is_error: bool) {
+        let seq = *self.message_seq() + 1;
+        self.as_mut().set_message(q(text));
+        self.as_mut().set_message_is_error(is_error);
+        self.as_mut().set_message_seq(seq);
+    }
+
+    /// Runs an action on the state, reports an error to the user, and republishes the state.
+    fn act<T>(
+        mut self: Pin<&mut Self>,
+        f: impl FnOnce(&mut EditorState) -> Result<T, String>,
+    ) -> Option<T> {
+        let result = {
+            let mut rust = self.as_mut().rust_mut();
+            f(&mut rust.state)
+        };
+        let out = match result {
+            Ok(v) => Some(v),
+            Err(e) => {
+                self.as_mut().show(&e, true);
+                None
+            }
+        };
+        self.as_mut().refresh();
+        out
+    }
+
+    fn publish(mut self: Pin<&mut Self>, snap: &Snapshot) {
+        self.as_mut().set_has_project(snap.has_project);
+        self.as_mut().set_project_name(q(&snap.project_name));
+        self.as_mut().set_layers(q(&snap.layers));
+        self.as_mut().set_frames(q(&snap.frames));
+        self.as_mut().set_active_frame(q(&snap.active_frame));
+        self.as_mut().set_frame_size(q(&snap.frame_size));
+        self.as_mut().set_selection(q(&snap.selection));
+        self.as_mut()
+            .set_selection_bounds(q(&snap.selection_bounds));
+        self.as_mut().set_inspector(q(&snap.inspector));
+        self.as_mut().set_annotations(q(&snap.annotations));
+        self.as_mut().set_checkpoints(q(&snap.checkpoints));
+        self.as_mut().set_log(q(&snap.log));
+        self.as_mut().set_changed(q(&snap.changed));
+        self.as_mut().set_unrendered(q(&snap.unrendered));
+        self.as_mut().set_can_undo(snap.can_undo);
+        self.as_mut().set_can_redo(snap.can_redo);
+        self.as_mut().set_mcp_running(snap.mcp_running);
+        self.as_mut().set_mcp_url(q(&snap.mcp_url));
+    }
+
+    fn refresh(mut self: Pin<&mut Self>) {
+        let snap = self.state.snapshot();
+        self.as_mut().publish(&snap);
+        let revision = *self.revision() + 1;
+        self.as_mut().set_revision(revision);
+    }
+
+    /// Called on the Qt thread when an agent changed the document through MCP.
+    fn on_agent_change(mut self: Pin<&mut Self>, who: &str, ids: Vec<NodeId>) {
+        self.as_mut().rust_mut().state.note_agent_change(&ids);
+        self.as_mut()
+            .show(&format!("{who} changed {} layer(s)", ids.len()), false);
+        self.as_mut().refresh();
+    }
+
+    pub fn new_project(
+        mut self: Pin<&mut Self>,
+        path: &QString,
+        name: &QString,
+        width: f64,
+        height: f64,
+    ) {
+        let (path, name) = (path_from_url(&path.to_string()), name.to_string());
+        if self
+            .as_mut()
+            .act(|s| s.new_project(Path::new(&path), &name, width, height))
+            .is_some()
+        {
+            self.as_mut().show("Project created", false);
+        }
+    }
+
+    pub fn open_project(mut self: Pin<&mut Self>, path: &QString) {
+        let path = path_from_url(&path.to_string());
+        if self
+            .as_mut()
+            .act(|s| s.open_project(Path::new(&path)))
+            .is_some()
+        {
+            self.as_mut().show("Project opened", false);
+        }
+    }
+
+    pub fn save_project(mut self: Pin<&mut Self>) {
+        if self.as_mut().act(|s| s.save()).is_some() {
+            self.as_mut().show("Saved", false);
+        }
+    }
+
+    pub fn frame_presets(&self) -> QString {
+        q(&EditorState::frame_presets().to_string())
+    }
+
+    pub fn local_path(&self, url: &QString) -> QString {
+        q(&path_from_url(&url.to_string()))
+    }
+
+    pub fn set_active_frame_id(mut self: Pin<&mut Self>, id: &QString) {
+        let id = id.to_string();
+        self.as_mut().act(|s| s.set_active_frame(&id));
+    }
+
+    pub fn select(mut self: Pin<&mut Self>, id: &QString) {
+        let id = id.to_string();
+        self.as_mut().act(|s| s.select(Some(&id)));
+    }
+
+    pub fn hit_test(&self, x: f64, y: f64) -> QString {
+        q(&self.state.hit_test(x, y).unwrap_or_default())
+    }
+
+    pub fn create_node(
+        mut self: Pin<&mut Self>,
+        kind: &QString,
+        x: f64,
+        y: f64,
+        w: f64,
+        h: f64,
+    ) -> QString {
+        let kind = kind.to_string();
+        q(&self
+            .as_mut()
+            .act(|s| s.create_node(&kind, x, y, w, h))
+            .unwrap_or_default())
+    }
+
+    pub fn delete_selected(mut self: Pin<&mut Self>) {
+        self.as_mut().act(|s| s.delete_selected());
+    }
+
+    pub fn move_node(mut self: Pin<&mut Self>, id: &QString, x: f64, y: f64) {
+        let id = id.to_string();
+        self.as_mut().act(|s| s.move_node(&id, x, y));
+    }
+
+    pub fn resize_node(mut self: Pin<&mut Self>, id: &QString, x: f64, y: f64, w: f64, h: f64) {
+        let id = id.to_string();
+        self.as_mut().act(|s| s.resize_node(&id, x, y, w, h));
+    }
+
+    pub fn set_node_property(
+        mut self: Pin<&mut Self>,
+        id: &QString,
+        name: &QString,
+        value_json: &QString,
+    ) {
+        let (id, name, value) = (id.to_string(), name.to_string(), value_json.to_string());
+        self.as_mut().act(|s| s.set_property(&id, &name, &value));
+    }
+
+    pub fn toggle_visible(mut self: Pin<&mut Self>, id: &QString) {
+        let id = id.to_string();
+        self.as_mut().act(|s| s.toggle_visible(&id));
+    }
+
+    pub fn reorder(mut self: Pin<&mut Self>, id: &QString, delta: i32) {
+        let id = id.to_string();
+        self.as_mut().act(|s| s.reorder(&id, delta));
+    }
+
+    pub fn undo(mut self: Pin<&mut Self>) {
+        self.as_mut().act(|s| s.undo());
+    }
+
+    pub fn redo(mut self: Pin<&mut Self>) {
+        self.as_mut().act(|s| s.redo());
+    }
+
+    pub fn checkpoint(mut self: Pin<&mut Self>, name: &QString) {
+        let name = name.to_string();
+        if self.as_mut().act(|s| s.checkpoint(&name)).is_some() {
+            self.as_mut().show("Checkpoint saved", false);
+        }
+    }
+
+    pub fn restore(mut self: Pin<&mut Self>, checkpoint: i32) {
+        if self
+            .as_mut()
+            .act(|s| s.restore(id_arg(checkpoint)))
+            .is_some()
+        {
+            self.as_mut().show("Restored", false);
+        }
+    }
+
+    pub fn add_pin(mut self: Pin<&mut Self>, note: &QString, node: &QString) -> i32 {
+        let (note, node) = (note.to_string(), node.to_string());
+        self.as_mut()
+            .act(|s| s.add_pin(&note, Some(&node)))
+            .map_or(0, |id| i32::try_from(id).unwrap_or(0))
+    }
+
+    pub fn add_region_pin(
+        mut self: Pin<&mut Self>,
+        note: &QString,
+        x: f64,
+        y: f64,
+        w: f64,
+        h: f64,
+    ) -> i32 {
+        let note = note.to_string();
+        self.as_mut()
+            .act(|s| s.add_region_pin(&note, x, y, w, h))
+            .map_or(0, |id| i32::try_from(id).unwrap_or(0))
+    }
+
+    pub fn resolve_pin(mut self: Pin<&mut Self>, id: i32) {
+        self.as_mut().act(|s| s.resolve_pin(id_arg(id)));
+    }
+
+    pub fn reopen_pin(mut self: Pin<&mut Self>, id: i32) {
+        self.as_mut().act(|s| s.reopen_pin(id_arg(id)));
+    }
+
+    pub fn remove_pin(mut self: Pin<&mut Self>, id: i32) {
+        self.as_mut().act(|s| s.remove_pin(id_arg(id)));
+    }
+
+    pub fn clear_agent_changes(mut self: Pin<&mut Self>) {
+        self.as_mut().act(|s| {
+            s.clear_agent_changes();
+            Ok(())
+        });
+    }
+
+    /// Renders the active frame and publishes it as `canvas` (a PNG data URL).
+    pub fn render_canvas(mut self: Pin<&mut Self>, scale: f64) {
+        match self.state.render_canvas(scale) {
+            Ok(url) => self.as_mut().set_canvas(q(&url)),
+            Err(e) => {
+                self.as_mut().set_canvas(QString::default());
+                if self.state.snapshot().has_project
+                    && !self.state.snapshot().active_frame.is_empty()
+                {
+                    self.as_mut().show(&e, true);
+                }
+            }
+        }
+    }
+
+    pub fn export_frame(mut self: Pin<&mut Self>, preset: &QString, file: &QString) -> QString {
+        let (preset, file) = (preset.to_string(), file.to_string());
+        let preset = (!preset.is_empty()).then_some(preset);
+        let out = self.state.export(preset.as_deref(), &file);
+        let json = match out {
+            Ok(v) => v,
+            Err(e) => serde_json::json!({"error": e}),
+        };
+        if let Some(err) = json.get("error").and_then(|e| e.as_str()) {
+            self.as_mut().show(err, true);
+        } else if let Some(path) = json.get("path").and_then(|p| p.as_str()) {
+            self.as_mut().show(&format!("Exported {path}"), false);
+        }
+        q(&json.to_string())
+    }
+
+    pub fn start_mcp(mut self: Pin<&mut Self>) {
+        let qt = self.qt_thread();
+        let hook: Arc<dyn Fn(ChangeEvent) + Send + Sync> = Arc::new(move |e: ChangeEvent| {
+            let (who, ids) = (e.actor, e.touched);
+            let _ = qt.queue(move |editor| editor.on_agent_change(&who, ids));
+        });
+        let token_file = od_agent::token::token_path();
+        let started = match token_file {
+            Ok(path) => self.as_mut().act(|s| s.start_mcp(&path, hook)),
+            Err(e) => {
+                self.as_mut().show(&e.to_string(), true);
+                None
+            }
+        };
+        if let Some(url) = started {
+            self.as_mut()
+                .show(&format!("Agents can connect at {url}"), false);
+        }
+    }
+
+    pub fn stop_mcp(mut self: Pin<&mut Self>) {
+        self.as_mut().act(|s| {
+            s.stop_mcp();
+            Ok(())
+        });
+        self.as_mut().show("Agent connection stopped", false);
+    }
+
+    pub fn connect_command(&self) -> QString {
+        q(&self.state.connect_command())
+    }
+
+    pub fn skill_status(&self) -> QString {
+        match self.state.skill_status() {
+            Ok(v) => q(&v.to_string()),
+            Err(e) => q(&serde_json::json!({"error": e}).to_string()),
+        }
+    }
+
+    pub fn install_skill(mut self: Pin<&mut Self>) -> QString {
+        let result = self.state.install_skill();
+        match result {
+            Ok(v) => {
+                self.as_mut().show("Skill installed", false);
+                q(&v.to_string())
+            }
+            Err(e) => {
+                self.as_mut().show(&e, true);
+                q(&serde_json::json!({"error": e}).to_string())
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::path_from_url;
+
+    #[test]
+    fn file_urls_become_paths() {
+        assert_eq!(
+            path_from_url("file:///Users/me/My%20Project.od"),
+            "/Users/me/My Project.od"
+        );
+        assert_eq!(
+            path_from_url("file:///C:/Users/me/p.od"),
+            "C:/Users/me/p.od"
+        );
+        assert_eq!(path_from_url("/already/a/path"), "/already/a/path");
+        assert_eq!(path_from_url("file:///a/100%"), "/a/100%");
+        assert_eq!(path_from_url("file:///a/%zz"), "/a/%zz");
+    }
+}

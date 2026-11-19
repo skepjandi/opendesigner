@@ -1,6 +1,6 @@
 # Qt Desktop
 
-> **Status: Design.** Facts marked as read come from Qt's 6.12 documentation, the `cxx-qt` repository and crates.io page, and KDAB's KDDockWidgets license file, all read on 2026-11-19. API-availability claims from memory are labelled `[INFERENCE]` and are Phase 0 spike items. Nothing is built.
+> **Status: Partially implemented.** The shell exists as the `app` crate (`crates/app`): a Qt Quick window built with Cargo and `cxx-qt`, with a layers panel, a canvas, an inspector and an agent panel. It was built and run on macOS arm64 with Qt 6.12 from Homebrew; Windows and Linux are unverified. Facts marked as read come from Qt's 6.12 documentation, the `cxx-qt` repository and crates.io page, and KDAB's KDDockWidgets license file, all read on 2026-11-19. API-availability claims from memory are labelled `[INFERENCE]`.
 
 ## Why Qt
 
@@ -10,29 +10,31 @@ Alternatives considered: GPUI (fast, pre-1.0, small component set, widgets for d
 
 Costs, stated plainly:
 
-- **Two languages.** Rust core, C++/QML shell, a bridge between them (below).
-- **`cxx-qt` is pre-1.0** (0.10.0, 2026-08-24; MIT or Apache-2.0; MSRV 1.85; needs CMake 3.24+). The churn risk moved from the UI toolkit to the bridge, but the bridge surface is small.
+- **Two languages, one build.** Rust core and Rust glue, QML for presentation, no C++ sources (yet). `cxx-qt` generates the C++ the `QObject` needs; Cargo drives the whole build.
+- **`cxx-qt` is pre-1.0** (0.10.0, 2026-08-24; MIT or Apache-2.0; MSRV 1.85), pinned exactly. The churn risk moved from the UI toolkit to the bridge, but the bridge surface is one `QObject`.
 - **Heavier distribution and LGPL obligations** ([Licensing](#licensing)).
 - **Qt's own deprecations across minor versions** (it already deprecates media backends, see [Video Editing](./video-editing.md#qt-multimedia-and-ffmpeg)).
 
 ## Layers
 
 ```
- QML (presentation)  ──►  C++ (QObject glue, custom items)  ──►  bridge crate (cxx-qt)  ──►  core / render / store / media / agent (Rust, no Qt)
+ QML (presentation)  ──►  editor.rs (one QObject, cxx-qt)  ──►  state.rs (Qt-free)  ──►  core / render / store / agent
 ```
 
-| Layer | Contents | Rule |
-|-------|----------|------|
-| QML (`app/qml/`) | Window layout, panels, inspector, layers tree, agent panel, timeline chrome, animations, theme | Bindings and input forwarding only; no document logic |
-| C++ (`app/src/`) | Application bootstrap, custom `QQuickItem`s for the canvas and timeline, platform integration (menus, dialogs, file associations), the skill installer's UI | No document logic; thin |
-| `bridge` crate | `cxx-qt` QObjects and list models exposing `core` (document, selection, annotations, history, tokens) to QML | The only Rust crate that depends on Qt |
-| Rust crates | Everything else | Never depend on Qt |
+| Layer | Where | Rule |
+|-------|-------|------|
+| QML | `crates/app/qml/` | Window, panels, canvas interaction, theme. Reads JSON the editor publishes and calls its invokables. No document logic |
+| The editor object | `crates/app/src/editor.rs` | `Editor` is a `QObject` with 23 properties (JSON strings and flags) and about 40 invokables. Every action calls `EditorState`, reports a rejection as a message, and republishes the snapshot. Agent edits arrive on the Qt thread through `qt_thread().queue` |
+| `EditorState` | `crates/app/src/state.rs` | The editor's state and actions without Qt: open/save, selection, hit testing, drawing, move/resize, the inspector's typed `set`, undo/redo, checkpoints, pins, canvas rendering, export, starting the MCP server, the skill installer. Unit-tested without a window |
+| Rust crates | `crates/core`, `render`, `store`, `agent` | Never depend on Qt. Geometry (`core::geometry`: bounds and hit tests) and panel views (`core::view`: layers, frames) live in `core` so the shells only present them |
 
-`cxx-qt` "can be used to integrate Rust into C++ applications using CMake or used to build Rust applications with Cargo", and implements `QObject` subclasses in Rust usable from C++ and QML (read). We start with the CMake-driven C++ application linking the Rust crates; Phase 0 confirms the build story on all three OSes, with a plain C ABI (`cbindgen`) as the fallback if `cxx-qt` blocks us.
+`cxx-qt` is used in its Cargo-only mode (the `qml_module` of `cxx-qt-build`): no CMake and no C++ sources. A C++ `QQuickItem` for the canvas stays an option if the Phase 0 canvas spike needs it. The canvas today is a PNG rendered by the Rust core and shown by a QML `Image`; pan and zoom move that picture, and the core re-renders when the zoom settles.
+
+Two cxx-qt/QML pitfalls worth knowing: a QML property named `onFoo` is parsed as a signal handler (the theme's `onAccent` had to become `textOnAccent`), and an invokable `setX` collides with the generated setter of a property `x` (hence `openFrame`, `setNodeProperty`). Multi-word properties need an explicit `cxx_name` to be camelCase in QML.
 
 ## Qt version and modules
 
-Pin an exact Qt 6 minor in Phase 0 (the docs read were 6.12). Use Qt Quick with Qt Quick Controls for chrome; Qt Multimedia for playback; Qt Test and Qt Quick Test for tests. Everything is on the allowlist below. `[INFERENCE]` Whether Qt Quick Controls and the QML tooling we need fall outside the GPL-only list in practice is checked when the allowlist is written; as of the 6.12 licensing page they are not on it.
+Qt 6.12 from Homebrew was used. The exact Qt minor is still to be pinned for releases. **Linked modules** (from `cxx-qt-lib`'s `qt_full` plus `Network`, which Qt Qml needs on macOS): Core, Gui, Qml, Quick Controls 2, Network. **QML imports at runtime**: `QtQuick`, `QtQuick.Controls` (the Basic style), `QtQuick.Layouts`, `QtQuick.Dialogs`. None of these is on the GPL-only list below. `crates/app/build.rs` keeps the linked list in one constant (`QT_MODULES`); adding a module there needs a licensing check in the PR. Qt Multimedia, Qt Test and Qt Quick Test are not used yet.
 
 ## Licensing
 
@@ -43,7 +45,7 @@ Qt's open-source licensing (read from Qt 6.12's licensing page): most modules ar
 | Link Qt **dynamically**, never statically | LGPLv3 relinking |
 | Ship license texts and a Qt attribution in the app (About dialog, `THIRD_PARTY`) | LGPLv3 |
 | Use only modules offered under LGPLv3 | MPL-2.0 project; GPL-only code would force the app to GPL |
-| CMake `find_package(Qt6 COMPONENTS …)` list is an allowlist reviewed in PRs | [Invariant 12](../../AGENTS.md) |
+| The linked-module list in `crates/app/build.rs` and the QML imports above are an allowlist reviewed in PRs | [Invariant 12](../../AGENTS.md) |
 
 **Banned: Qt modules under GPLv3 only** (Qt 6.12 list): Qt Canvas Painter, Qt CoAP, Qt Graphs, Qt GRPC, Qt HTTP Server, Qt Lottie Animation, Qt MQTT, Qt Network Authorization, Qt Qml Compiler, Qt Quick 3D, Qt Quick 3D Physics, Qt Quick Timeline, Qt Virtual Keyboard, Qt Wayland Compositor. Two are tempting here and are out: **Qt Canvas Painter** (a 2D canvas; our canvas renders through our own pipeline) and **Qt Quick Timeline** (a keyframe animation module, not a video timeline; ours is custom). Qt's tools and utilities are GPLv3 with the Qt GPL exception, which covers the programs we run at build time, not the app. `[INFERENCE]` Whether our QML build flow touches the GPL-only *Qt Qml Compiler* module (versus the LGPL QML cache compiler) is verified when the build is written.
 
@@ -55,7 +57,7 @@ Qt's open-source licensing (read from Qt 6.12's licensing page): most modules ar
 
 | Platform | Needs |
 |----------|-------|
-| All | Qt 6 (pinned), CMake ≥ 3.24 (cxx-qt), Ninja, a C++20 compiler, Rust stable ≥ 1.85, `clang-format`, `clang-tidy` |
+| All | Rust stable ≥ 1.85; Qt 6 and its `qmake` (`QMAKE=$(brew --prefix qt)/bin/qmake` on macOS) |
 | macOS | Xcode and command line tools; Metal through Qt's RHI `[INFERENCE]` |
 | Windows | MSVC; Direct3D through Qt's RHI `[INFERENCE]` |
 | Linux | Qt's X11 and Wayland platform plugin dependencies, Vulkan or OpenGL drivers; deployment is not automated by Qt's tools on Linux/X11 for FFmpeg (read), so packaging needs its own step |
@@ -113,4 +115,6 @@ Accent (selection, the "agent changed this" outline, focus ring) derives from th
 
 ## Testing
 
-Qt Test for C++ items and the bridge, Qt Quick Test for QML behavior, run by `ctest`; the renderer is golden-tested in `render` with no window at all ([Development Guide](./development-guide.md#testing)). Offscreen platform (`QT_QPA_PLATFORM=offscreen`) in CI `[INFERENCE]`.
+The editor's logic is unit-tested in `state.rs` without Qt. `qml/SelfTest.qml` drives the real window when the binary is started with `--selftest=<empty folder>`: it creates a project, draws three shapes, edits a property (and a rejected one), undoes and redoes, moves and resizes, pins a note, starts and stops the agent connection, takes and restores a checkpoint, exports against two presets (one must succeed, one must be refused without writing), and grabs the window to a PNG. `crates/app/tests/selftest.rs` runs that offscreen (`QT_QPA_PLATFORM=offscreen`) with a temporary `HOME` and config directory, then checks the files it wrote and that the grabbed window is not blank. The renderer is golden-tested in `render` with no window at all ([Development Guide](./development-guide.md#testing)). Not covered: pointer drags and wheel/pinch gestures (the self-test calls the same invokables the gestures call, but does not synthesize input), and any visual judgment.
+
+The self-test also fails on any QML warning in the log (a binding that assigns `undefined`, a missing type, a `Connections` handler for a signal that does not exist), which is how mistakes in the QML are caught: there is no `qmllint` step because it cannot resolve the module registered by `cxx-qt-build` and would only add noise.

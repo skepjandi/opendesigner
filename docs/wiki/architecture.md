@@ -1,6 +1,6 @@
 # Architecture
 
-> **Status: Partially implemented.** `core`, `render`, `store` and `cli` exist under `crates/` and are tested; `agent`, `bridge` and the Qt shell (`app/`) are design only. Crate names below are the real ones for the built crates (Cargo packages are `opendesigner-<name>`, library names `od_<name>`).
+> **Status: Partially implemented.** `core`, `render`, `store`, `agent`, `cli` and the Qt shell (`app`) exist under `crates/` and are tested. `media` (video) and the in-app chat are design only. Cargo packages are `opendesigner-<name>`, library names `od_<name>`.
 
 ## The problem this solves
 
@@ -14,14 +14,14 @@ Three trust zones:
 
 | Zone | What runs there | Trust |
 |------|-----------------|-------|
-| **App** | The Qt shell (C++/QML), the `bridge` crate, the document in memory, the render pipeline | Trusted. Owns the document. |
+| **App** | The Qt shell (QML and the `app` crate), the document in memory, the render pipeline | Trusted. Owns the document. |
 | **Core** | `core` crate: node model, operations, history, validation, export | Trusted. The only code that mutates a document. |
 | **Agents and files** | Coding agents (Claude Code, Codex, …), project files, imported media, anything on the network | **Untrusted.** Reaches the document only through validated operations. |
 
 ```mermaid
 flowchart LR
   subgraph Machine
-    UI["App (Qt shell: C++/QML + bridge)"]
+    UI["App (Qt Quick shell: QML + app crate)"]
     Core["Core (operations, history, render, export)"]
     MCP["MCP server (127.0.0.1, token)"]
     CLI["Headless CLI"]
@@ -49,19 +49,19 @@ OpenCut's rewrite states it as a principle: business logic lives in Rust, and ea
 - Batch and CI renders (`opendesigner export --preset app-store-iphone-6.9`) need no window and no browser.
 - The renderer can be golden-tested without a GPU window ([Testing](./development-guide.md#testing)).
 
-## Intended crates
+## Crates
 
-| Crate | Responsibility | Depends on Qt? |
-|-------|----------------|----------------|
-| `core` | Node model, operations, validation, history/checkpoints, project I/O ([Document Format](./document-format.md)) | no |
-| `render` | Rasterize a document to pixels on the CPU/GPU for export and goldens: paths, text shaping, images, effects | no |
-| `store` | Export presets, device frames, panorama slicing, spec validation ([Store Assets](./store-assets.md)) | no |
-| `media` | Decode/encode, FFmpeg bindings and toolchain manifest ([Video Editing](./video-editing.md)) | no |
-| `agent` | MCP server, tool schemas, skill installer and its per-agent target table, ACP client ([Agent Integration](./agent-integration.md)) | no |
-| `bridge` | `cxx-qt` QObjects and list models exposing `core` to QML ([Qt Desktop](./qt-desktop.md#layers)) | **yes** |
-| `cli` | Headless commands over the same operations | no |
+| Crate | Responsibility | Depends on Qt? | Status |
+|-------|----------------|----------------|--------|
+| `core` | Node model, validated operations, history/checkpoints, project I/O, annotations, workspace and guidance, geometry (bounds, hit tests), panel views ([Document Format](./document-format.md)) | no | built |
+| `render` | CPU rasterizer and PNG export: frames, groups, rectangles, ellipses; text and images are reported, not drawn yet | no | partial |
+| `store` | Export presets and validation ([Store Assets](./store-assets.md)); device frames and panoramas are not built | no | partial |
+| `agent` | MCP server and tools, token, skill generator and installer ([Agent Integration](./agent-integration.md)); the ACP client is not built | no | built (MCP, skill) |
+| `cli` | Headless commands over the same operations | no | built |
+| `app` | The Qt Quick editor: the `Editor` QObject, the Qt-free `EditorState`, the QML ([Qt Desktop](./qt-desktop.md#layers)) | **yes** | built |
+| `media` | Decode/encode, FFmpeg ([Video Editing](./video-editing.md)) | no | not started |
 
-Outside Cargo, `app/` holds the C++ and QML shell: bootstrap, custom canvas and timeline items, panels, theme, platform integration ([Qt Desktop](./qt-desktop.md)). `bridge` and `app/` are the only code that touches Qt. If the on-screen canvas and `render` disagree, `render` is right: export is the product, and the canvas view is a live preview of it (see [the open question](./roadmap.md#open-questions) on sharing one rasterizer).
+`app` is the only crate that touches Qt, and the only one that may contain `unsafe` (generated FFI). If the on-screen canvas and `render` disagree, `render` is right: export is the product, and the canvas view is a preview of it (today the canvas *is* the `render` output, so they cannot disagree; see [the open question](./roadmap.md#open-questions) on a second rasterizer).
 
 ## Data flow of one agent edit
 
@@ -84,7 +84,7 @@ sequenceDiagram
 
 ## Concurrency model
 
-The document is owned by one `core` instance inside the app process, behind a single writer (a dedicated thread fed by a channel). The Qt UI thread, the MCP server (also in-process, so the app must be running for agents to connect) and any in-app chat send operations to it; none holds a mutable reference, and the UI observes changes through `bridge` signals. Operations from an agent and from the user interleave at operation granularity, never inside one. A conflict (an agent edits a node the user is dragging) is resolved by the user's gesture winning until it commits, then the agent's operation is validated against the new state and may be rejected with a reason the agent receives.
+The document is owned by one `Workspace` inside the app process, behind an `Arc<Mutex<…>>`. The Qt UI thread (through `EditorState`) and the MCP server's handler (on its own threads) both lock it for the duration of one call, so operations from an agent and from the user interleave at operation granularity, never inside one. The MCP server runs in the app process, so the app must be running for agents to connect; when an agent changes the document its change hook queues a call onto the Qt thread (`qt_thread().queue`), which records the touched nodes for the outline and republishes the snapshot. There is no merge between a drag in progress and an agent edit: the drag is only a ghost until the gesture commits as one operation, and the agent's operations are validated against whatever state the document is in at the moment they run, so a conflicting one is rejected with a reason the agent receives.
 
 ## Platforms
 

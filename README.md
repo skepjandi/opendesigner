@@ -41,19 +41,24 @@ Today that work happens in a terminal: you describe every pixel in text, the age
 
 ## Status
 
-**Early development.** The headless core works: `opendesigner` can create a project, apply agent-style JSON operations with undo-able checkpoints, render a frame to PNG and validate it against App Store and Google Play presets. The Qt editor and the agent bridge (MCP, skill installer) are not built yet; see the [roadmap](docs/wiki/roadmap.md) for the phases. Wiki pages carry a `Status:` banner saying what is implemented and what is design.
+**Early development.** The editor runs: open or create a project, draw rectangles, ellipses, text and frames, move and resize them, edit properties, undo and redo, pin notes for an agent, and export a frame to a PNG that is checked against App Store and Google Play rules. Coding agents connect over MCP (Claude Code and Codex are the targets; connecting them has not been tried by hand yet) and get your selection, your notes and your corrections; what they change is outlined and can be restored. The app installs an Agent Skill for the agents it finds. **Not there yet:** text is previewed but not drawn into exports, there are no images, video, device frames, or the in-app chat, and only macOS has been run. See the [roadmap](docs/wiki/roadmap.md); each wiki page says what is built and what is design.
 
 ## Try it
 
 ```bash
+# the editor (needs Qt 6; see the development guide)
+export QMAKE="$(brew --prefix qt)/bin/qmake"
+cargo run -p opendesigner-app
+
+# the headless side, no Qt needed
 cargo run -p opendesigner-cli -- new demo.od --name Demo
-cargo run -p opendesigner-cli -- show demo.od
-cargo run -p opendesigner-cli -- presets
+cargo run -p opendesigner-cli -- serve-mcp demo.od
+cargo run -p opendesigner-cli -- skill status
 ```
 
 ## Stack
 
-Rust (edition 2024) core · Qt 6 Quick/QML shell in C++20 (used under LGPLv3, dynamically linked) · `cxx-qt` bridge · FFmpeg (LGPL, shared, pinned) · Model Context Protocol · Agent Skills. Dependencies are limited to popular, well-maintained packages ([policy](AGENTS.md#dependencies)).
+Rust (edition 2024) core · Qt 6 Quick (QML) shell built with Cargo and `cxx-qt` (Qt used under LGPLv3, dynamically linked) · FFmpeg (LGPL, shared, pinned; not used yet) · Model Context Protocol · Agent Skills. Dependencies are limited to popular, well-maintained packages ([policy](AGENTS.md#dependencies)).
 
 ## Build and contribute
 

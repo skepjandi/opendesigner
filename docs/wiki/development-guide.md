@@ -1,104 +1,79 @@
 # Development Guide
 
-> **Status: Partially implemented.** The Cargo workspace exists and its checks pass (see [Commands that work today](#commands-that-work-today)); the CMake/Qt project does not, so everything marked *(intended)* below is still the contract for it. Prerequisites for the Rust–Qt bridge come from `cxx-qt`'s getting-started page (CMake 3.24+, a C++ compiler, Rust, Qt 6) and Qt 6.12's documentation.
+> **Status: Implemented for what exists.** Everything below was run on macOS arm64 (Qt 6.12 from Homebrew). Windows and Linux builds are not verified. There is no CMake project and no C++ source: Cargo builds the whole app, and `cxx-qt-build` generates and compiles the Qt glue.
 
 ## Prerequisites
 
 | Tool | Needed for |
 |------|------------|
-| Qt 6 (exact version pinned in Phase 0; the docs read were 6.12) with Qt Quick, Quick Controls, Multimedia, and the Qt Test / Quick Test modules | The app shell. Only allowlisted LGPL modules ([Qt Desktop: Licensing](./qt-desktop.md#licensing)) |
-| CMake ≥ 3.24, Ninja | Build (`cxx-qt` needs 3.24+) |
-| A C++20 compiler: Apple Clang (Xcode command line tools), MSVC, GCC or Clang | The shell |
-| Rust stable ≥ 1.85 (edition 2024) with `rustfmt`, `clippy` | Everything in `crates/` (`cxx-qt`'s MSRV is 1.85) |
-| `clang-format`, `clang-tidy` | C++ style and lint |
+| Rust stable ≥ 1.85 with `rustfmt` and `clippy` (`rust-toolchain.toml` pins `stable`) | Everything |
 | `cargo-deny` | Licenses, advisories, sources |
-| FFmpeg shared libraries matching the major Qt Multimedia uses, fetched and checksum-verified by `cargo xtask media-setup` | Phase 5 onward ([Video Editing](./video-editing.md#qt-multimedia-and-ffmpeg)) |
-| Linux: the Qt platform plugin dependencies (X11/Wayland, fontconfig, Vulkan or OpenGL drivers) | Running and packaging on Linux |
+| Qt 6 with Qt Quick Controls 2 and Qt Quick Dialogs, and its `qmake` (`brew install qt`) | The `app` crate only |
+| A C++17 compiler: Xcode command line tools, MSVC, or GCC/Clang | `cxx-qt` compiles generated C++ |
 
-Today only Rust stable (the repository pins `stable` with `rustfmt` and `clippy` in `rust-toolchain.toml`) and `cargo-deny` are needed. Qt, CMake and the C++ tools come with the shell.
-
-## Commands that work today
+The `app` crate is a workspace member but **not** a default member, so `cargo build`, `cargo test` and `cargo clippy` on a machine without Qt skip it. Build the shell with `-p opendesigner-app` and point the build at Qt:
 
 ```bash
+export QMAKE="$(brew --prefix qt)/bin/qmake"     # macOS with Homebrew; any Qt 6 qmake elsewhere
+```
+
+## Commands
+
+```bash
+# no Qt needed: core, render, store, agent, cli
 cargo fmt --all --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace            # 36 tests: core, render, store and the CLI end to end
-cargo deny check                  # advisories, bans, licenses, sources (deny.toml)
+cargo clippy --all-targets -- -D warnings
+cargo test                          # 80+ tests, including the MCP server and CLI end to end
+cargo deny check                    # advisories, bans, licenses, sources (deny.toml)
+
+# the editor (needs QMAKE; the first build compiles cxx-qt and takes a few minutes)
+cargo run -p opendesigner-app
+cargo clippy -p opendesigner-app --all-targets -- -D warnings
+cargo test -p opendesigner-app      # unit tests + the scripted offscreen session of the real window
 
 # the headless editor
 cargo run -p opendesigner-cli -- new demo.od
-cargo run -p opendesigner-cli -- apply demo.od ops.json --agent claude-code --turn t1
+cargo run -p opendesigner-cli -- serve-mcp demo.od      # agents connect over MCP
+cargo run -p opendesigner-cli -- skill status           # where the agent skill would go
 cargo run -p opendesigner-cli -- export demo.od --frame n_3 --preset apple-iphone-6.9 --out shot.png
 ```
 
 `opendesigner --help` lists every subcommand. `export` writes nothing and exits with code 2 when the image does not meet its preset.
 
-## Commands (intended)
-
-```bash
-# configure and build the shell and the Rust crates it links
-cmake --preset dev
-cmake --build --preset dev
-./build/dev/app/opendesigner         # launch the editor (path set by the preset)
-
-# Rust crates on their own (no Qt needed except for `bridge`)
-cargo check --workspace
-cargo run -p cli -- export <project> --preset <id>
-
-# checks (the contract in AGENTS.md)
-cargo fmt --all --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace               # unit, integration, golden-image tests
-ctest --preset dev --output-on-failure   # Qt Test and Qt Quick Test
-clang-format --dry-run --Werror $(git ls-files '*.cpp' '*.h')
-cargo deny check                     # licenses, advisories, sources
-cargo xtask check-qt-licensing       # fails on a GPL-only Qt module or dependency
-
-cargo bench -p render                # performance budgets from the roadmap
-cargo xtask media-setup              # fetch the pinned FFmpeg (Phase 5)
-```
-
-`CMakePresets.json` is checked in; `CMakeUserPresets.json` (your local paths) is gitignored.
+Run the editor offscreen, the way the test does: `QT_QPA_PLATFORM=offscreen target/debug/opendesigner-app --selftest=/some/empty/folder` prints `SELFTEST OK` and leaves `window.png` (a grab of the window) next to the project it built. Use a throwaway `HOME` and `OPENDESIGNER_CONFIG_DIR` so the session does not touch your real agent folders or token.
 
 ## Testing
 
 - Rust: unit tests beside the code (`#[cfg(test)]`); integration tests in each crate's `tests/`.
-- **Golden images:** `render` output compared to reference PNGs in `crates/render/tests/golden/` with a per-pixel tolerance; goldens are regenerated only by an explicit command and reviewed in the PR diff as data (the tolerance and the max-differing-pixels count are asserted, not eyeballed).
-- **C++ and QML:** Qt Test for items and the bridge, Qt Quick Test for QML behavior, run by `ctest` (offscreen platform in CI, `[INFERENCE]` to confirm). They cover presentation and bridge behavior; document logic is tested in Rust.
-- **File format:** round-trip fixtures; a format-version bump needs a migration test.
-- **Store presets:** each preset is tested against the rule it encodes (size, format, alpha, count).
-- **Agent bridge:** recorded MCP request/response fixtures; the installer tested against a temp home directory; never a real provider, key or token.
-- **Licensing guard:** a seeded GPL-only dependency must fail the check.
+- **MCP server:** protocol tests without a socket (`crates/agent/tests/mcp.rs`), socket-level security tests (token, `Host`, `Origin`, methods, sizes: `tests/server.rs`) and a test that starts the real binary and connects as an agent (`crates/cli/tests/serve.rs`).
+- **Skill installer:** snapshots a temporary home folder and asserts only the skill folders change (`crates/agent/tests/skill.rs`).
+- **The editor:** the logic is in `crates/app/src/state.rs` and unit-tested without Qt; `crates/app/tests/selftest.rs` runs `qml/SelfTest.qml` against the real window offscreen.
+- **Golden images** for `render` are not in place yet; renderer tests assert pixels at known points.
 - Screenshots and LLM visual inspection are not test evidence ([AGENTS.md](../../AGENTS.md)).
 
-## Repository layout (intended)
+## Repository layout
 
 ```
 opendesigner/
 ├── AGENTS.md  CHANGELOG.md  README.md  CONTRIBUTING.md  SECURITY.md  LICENSE
-├── CMakeLists.txt  CMakePresets.json  Cargo.toml  Cargo.lock  deny.toml  .clang-format
-├── assets/logo.svg          # app logo and brand source
-├── app/                     # C++/QML shell (the only non-bridge code that touches Qt)
-│   ├── src/                 #   bootstrap, canvas and timeline items, platform integration
-│   ├── qml/                 #   panels, inspector, agent panel, theme
-│   └── tests/               #   Qt Test, Qt Quick Test
+├── Cargo.toml  Cargo.lock  deny.toml  clippy.toml  rustfmt.toml  rust-toolchain.toml
+├── assets/logo.svg          # app logo and brand source (copied into the QML module at build time)
 ├── crates/
-│   ├── core/                # model, operations, history, project I/O
-│   ├── render/              # rasterizer, text shaping, goldens
-│   ├── store/               # presets, device frames, panorama, validation
-│   ├── media/               # decode/encode, FFmpeg manifest
-│   ├── agent/               # MCP server, skill installer, ACP client
-│   ├── bridge/              # cxx-qt: core exposed to QML (the only Rust crate that depends on Qt)
-│   └── cli/
-├── skills/opendesigner/     # skill source (generated parts are checked in)
-├── xtask/                   # build helpers (media setup, golden regen, icon set, licensing check)
+│   ├── core/                # model, operations, history, project I/O, annotations, geometry, views
+│   ├── render/              # CPU rasterizer and PNG export
+│   ├── store/               # store presets and validation
+│   ├── agent/               # MCP server, tools, token, skill generator and installer
+│   ├── cli/                 # the `opendesigner` command
+│   └── app/                 # the Qt Quick editor: src/{editor,state}.rs, qml/, tests/
 └── docs/wiki/               # this wiki
 ```
 
+Not built yet (design only): `media` (video), the in-app chat, a Windows/Linux CI for the shell.
+
 ## Conventions
 
-- Work in a worktree under `.worktrees/` (see `AGENTS.md`). Set `CARGO_TARGET_DIR` to a shared directory if disk is tight; Rust and CMake build directories are large.
-- Conventional-commit prefixes: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`, `perf`, with scope = area (`core`, `render`, `ui`, `bridge`, `canvas`, `timeline`, `media`, `mcp`, `skill`, `store`, `cli`, `build`, `repo`).
-- Qt and `cxx-qt` are pinned to exact versions; bumping either is its own PR with a changelog entry. New dependencies follow the [dependency policy](../../AGENTS.md#dependencies); exceptions are logged in the [roadmap decision log](./roadmap.md#decision-log).
+- Work in a worktree under `.worktrees/` (see `AGENTS.md`). Set `CARGO_TARGET_DIR` to a shared directory if disk is tight; the Qt shell's build output is large.
+- Conventional-commit prefixes: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`, `perf`, with scope = area (`core`, `render`, `ui`, `canvas`, `timeline`, `media`, `mcp`, `skill`, `store`, `cli`, `build`, `repo`).
+- `cxx-qt` and Qt versions are pinned; bumping either is its own PR with a changelog entry. New dependencies follow the [dependency policy](../../AGENTS.md#dependencies); exceptions are logged in the [roadmap decision log](./roadmap.md#decision-log).
 - An operation type, an MCP tool or a preset changes together with: the schema, the skill text generated from it, the wiki page, and the tests.
 - Wiki and changelog rules: [AGENTS.md](../../AGENTS.md#wiki-documentation).
