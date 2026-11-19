@@ -580,7 +580,7 @@ fn run_export(
             CliError::Invalid(e.0)
         }
     })?;
-    for note in &out.not_drawn {
+    for note in &out.warnings {
         eprintln!("warning: {note}");
     }
     if let Some(p) = preset_id.and_then(od_store::find) {

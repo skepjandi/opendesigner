@@ -8,6 +8,18 @@ All notable changes to OpenDesigner are documented here.
 
 ## 2026-11-19
 
+### feat(render): text that does not fit its box is detected and shown
+
+**Area:** `feat(render)`, `feat(app)`, `feat(mcp)`
+
+**Problem:** A longer translation or an agent's long headline could run past its box and nothing said so.
+
+**Change:** `od_render::check_text` measures each text node's layout (the cached `cosmic-text` layout, no drawing) and reports `Warning::TextOverflow` when it wraps to more rows than the box is tall; `render_frame` includes it. The MCP preview note and the export tools, the CLI and the Export result carry it as `warnings` (the key `not_drawn` is renamed, since the text is drawn). The canvas outlines the box in red with the numbers; the inspector explains it; the skill text tells agents to fix it.
+
+**Verified:** render tests (overflowing, wrapped word, fitting, unboxed text), an MCP test (preview note and export `warnings`), an app test (the snapshot lists the box and the numbers, and clears after resizing), and the window session. **Not verified:** boxes narrower than one glyph, right-to-left or vertical text, other fonts than the bundled Lato.
+
+**PR:** n/a
+
 ### perf(render): frames with many nodes are drawn in parallel bands; laid-out text is cached
 
 **Area:** `perf(render)`

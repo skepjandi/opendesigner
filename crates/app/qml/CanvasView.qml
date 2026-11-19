@@ -31,6 +31,7 @@ Item {
         return all.filter(n => n.status === "open" && n.bounds)
     }
     readonly property var unrendered: editor.unrendered ? JSON.parse(editor.unrendered) : []
+    readonly property var overflows: editor.overflows ? JSON.parse(editor.overflows) : []
     readonly property real renderScale: zoom * Screen.devicePixelRatio
 
     function toFrame(vx, vy) { return Qt.point((vx - panX) / zoom, (vy - panY) / zoom) }
@@ -121,6 +122,33 @@ Item {
                 font.pixelSize: 11
                 wrapMode: Text.WordWrap
                 elide: Text.ElideRight
+            }
+        }
+    }
+
+    // text that runs past its box: the box is outlined and says by how much
+    Repeater {
+        model: root.overflows
+        delegate: Item {
+            id: ov
+            required property var modelData
+            x: root.panX + modelData.x * root.zoom
+            y: root.panY + modelData.y * root.zoom
+            width: modelData.width * root.zoom
+            height: modelData.height * root.zoom
+            Rectangle {
+                anchors.fill: parent
+                color: "transparent"
+                border.width: 1
+                border.color: Theme.danger
+            }
+            Text {
+                anchors.top: parent.bottom
+                anchors.left: parent.left
+                anchors.topMargin: 2
+                text: "text overflows: needs " + ov.modelData.needed + ", box is " + ov.modelData.available
+                color: Theme.danger
+                font.pixelSize: 11
             }
         }
     }

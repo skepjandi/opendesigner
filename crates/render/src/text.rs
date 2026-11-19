@@ -84,47 +84,58 @@ impl Fonts {
 
 static FONTS: LazyLock<Mutex<Fonts>> = LazyLock::new(|| Mutex::new(Fonts::new()));
 
-/// Draws `node`'s text with its top-left corner at the origin of `transform`.
-pub(crate) fn draw_text(
-    pixmap: &mut Pixmap,
-    mask: Option<&Mask>,
-    node: &Node,
-    transform: Transform,
-    color: Rgba,
-    opacity: f32,
-) {
-    let Some(text) = node.text.as_deref().filter(|t| !t.is_empty()) else {
-        return;
-    };
-    let scale = transform.sx;
+/// How a text node is set, at one scale.
+struct Style<'a> {
+    text: &'a str,
+    size: f32,
+    line: f32,
+    family: &'a str,
+    weight: u16,
+    align: Align,
+    wrap_width: Option<f32>,
+}
+
+/// The style of `node`'s text at `scale`, or `None` when there is nothing to draw.
+fn style_of(node: &Node, scale: f32) -> Option<Style<'_>> {
+    let text = node.text.as_deref().filter(|t| !t.is_empty())?;
     let size = node.font_size.unwrap_or(16.0) as f32 * scale;
     let line = size * node.line_height.unwrap_or(DEFAULT_LINE_HEIGHT) as f32;
     if !(size >= 0.5 && line > 0.0) {
-        return;
+        return None;
     }
-    let family = node.font_family.as_deref().unwrap_or(DEFAULT_FAMILY);
-    let weight = node.font_weight.unwrap_or(400.0) as u16;
-    let align = match node.text_align {
-        None | Some(TextAlign::Left) => Align::Left,
-        Some(TextAlign::Center) => Align::Center,
-        Some(TextAlign::Right) => Align::Right,
-    };
-    let wrap_width = (node.width > 0.0).then_some(node.width as f32 * scale);
-    let (origin_x, origin_y) = (transform.tx.round() as i32, transform.ty.round() as i32);
+    Some(Style {
+        text,
+        size,
+        line,
+        family: node.font_family.as_deref().unwrap_or(DEFAULT_FAMILY),
+        weight: node.font_weight.unwrap_or(400.0) as u16,
+        align: match node.text_align {
+            None | Some(TextAlign::Left) => Align::Left,
+            Some(TextAlign::Center) => Align::Center,
+            Some(TextAlign::Right) => Align::Right,
+        },
+        wrap_width: (node.width > 0.0).then_some(node.width as f32 * scale),
+    })
+}
 
+/// Runs `then` on the laid-out text for `style`, laying it out first unless it is cached.
+fn with_layout<R>(
+    style: &Style<'_>,
+    then: impl FnOnce(&mut Buffer, &mut FontSystem, &mut SwashCache) -> R,
+) -> R {
     let mut guard = FONTS.lock().unwrap_or_else(PoisonError::into_inner);
     let fonts = &mut *guard;
-    if !fonts.has_family(family) || text.chars().any(|c| c as u32 > 0x24F) {
+    if !fonts.has_family(style.family) || style.text.chars().any(|c| c as u32 > 0x24F) {
         fonts.ensure_system_fonts();
     }
     let key = LayoutKey {
-        text: text.to_string(),
-        size: size.to_bits(),
-        line: line.to_bits(),
-        family: family.to_string(),
-        weight,
-        align: align as u8,
-        wrap_width: wrap_width.map(f32::to_bits),
+        text: style.text.to_string(),
+        size: style.size.to_bits(),
+        line: style.line.to_bits(),
+        family: style.family.to_string(),
+        weight: style.weight,
+        align: style.align as u8,
+        wrap_width: style.wrap_width.map(f32::to_bits),
     };
     if fonts.layouts.len() >= MAX_LAYOUTS && !fonts.layouts.contains_key(&key) {
         fonts.layouts.clear();
@@ -136,42 +147,73 @@ pub(crate) fn draw_text(
         ..
     } = fonts;
     let buffer = layouts.entry(key).or_insert_with(|| {
-        let mut buffer = Buffer::new(system, Metrics::new(size, line));
-        buffer.set_size(wrap_width, None);
+        let mut buffer = Buffer::new(system, Metrics::new(style.size, style.line));
+        buffer.set_size(style.wrap_width, None);
         let attrs = Attrs::new()
-            .family(Family::Name(family))
-            .weight(Weight(weight));
-        buffer.set_text(text, &attrs, Shaping::Advanced, Some(align));
+            .family(Family::Name(style.family))
+            .weight(Weight(style.weight));
+        buffer.set_text(style.text, &attrs, Shaping::Advanced, Some(style.align));
         buffer
     });
+    then(buffer, system, cache)
+}
 
+/// The size of `node`'s text laid out at scale 1: the widest line and the height of all lines, in
+/// document units. `None` when the node has no text to draw.
+pub(crate) fn measure(node: &Node) -> Option<(f32, f32)> {
+    let style = style_of(node, 1.0)?;
+    Some(with_layout(&style, |buffer, system, _| {
+        buffer.shape_until_scroll(system, false);
+        buffer
+            .layout_runs()
+            .fold((0.0_f32, 0.0_f32), |(w, h), run| {
+                (w.max(run.line_w), h.max(run.line_top + run.line_height))
+            })
+    }))
+}
+
+/// Draws `node`'s text with its top-left corner at the origin of `transform`.
+pub(crate) fn draw_text(
+    pixmap: &mut Pixmap,
+    mask: Option<&Mask>,
+    node: &Node,
+    transform: Transform,
+    color: Rgba,
+    opacity: f32,
+) {
+    let Some(style) = style_of(node, transform.sx) else {
+        return;
+    };
+    let (origin_x, origin_y) = (transform.tx.round() as i32, transform.ty.round() as i32);
     let (width, height) = (pixmap.width() as i32, pixmap.height() as i32);
     let mask_width = mask.map_or(0, |m| m.width() as i32);
     let alpha = f32::from(color.a) / 255.0 * opacity;
     let data = pixmap.data_mut();
-    buffer.draw(
-        system,
-        cache,
-        CtColor::rgb(color.r, color.g, color.b),
-        |gx, gy, gw, gh, c| {
-            let coverage = f32::from(c.a()) / 255.0 * alpha;
-            if coverage <= 0.0 {
-                return;
-            }
-            for dy in 0..gh as i32 {
-                for dx in 0..gw as i32 {
-                    let (x, y) = (origin_x + gx + dx, origin_y + gy + dy);
-                    if x < 0 || y < 0 || x >= width || y >= height {
-                        continue;
-                    }
-                    let clip = mask.map_or(1.0, |m| {
-                        f32::from(m.data()[(y * mask_width + x) as usize]) / 255.0
-                    });
-                    blend(data, ((y * width + x) * 4) as usize, c, coverage * clip);
+    with_layout(&style, |buffer, system, cache| {
+        buffer.draw(
+            system,
+            cache,
+            CtColor::rgb(color.r, color.g, color.b),
+            |gx, gy, gw, gh, c| {
+                let coverage = f32::from(c.a()) / 255.0 * alpha;
+                if coverage <= 0.0 {
+                    return;
                 }
-            }
-        },
-    );
+                for dy in 0..gh as i32 {
+                    for dx in 0..gw as i32 {
+                        let (x, y) = (origin_x + gx + dx, origin_y + gy + dy);
+                        if x < 0 || y < 0 || x >= width || y >= height {
+                            continue;
+                        }
+                        let clip = mask.map_or(1.0, |m| {
+                            f32::from(m.data()[(y * mask_width + x) as usize]) / 255.0
+                        });
+                        blend(data, ((y * width + x) * 4) as usize, c, coverage * clip);
+                    }
+                }
+            },
+        );
+    });
 }
 
 /// Source-over onto premultiplied RGBA8.

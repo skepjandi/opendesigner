@@ -355,6 +355,36 @@ fn preview_returns_a_png_the_agent_can_look_at() {
 }
 
 #[test]
+fn text_that_overflows_its_box_is_reported_by_the_preview_and_the_export() {
+    let f = fixture();
+    let r = f.ok(
+        "apply_ops",
+        json!({"ops": [{"op":"create","parent":f.root,"node":{
+            "kind":"frame","name":"Slide","width":1320,"height":2868,"fill":"#ffffff",
+            "children":[{"kind":"text","name":"Headline","x":100,"y":100,"width":300,"height":60,
+                         "font_size":80,"text":"A headline far too long for its little box"}]}}]}),
+    );
+    let frame = r["created"][0].as_str().unwrap().to_string();
+    let resp = f.rpc(
+        "tools/call",
+        json!({"name":"render_preview","arguments":{"frame":frame,"max_side":512}}),
+    );
+    let note = resp["result"]["content"][1]["text"].as_str().unwrap();
+    assert!(
+        note.contains("warnings:") && note.contains("overflows its box"),
+        "{note}"
+    );
+    let out = f.ok("export", json!({"frame": frame, "file": "slide.png"}));
+    assert!(
+        out["warnings"][0]
+            .as_str()
+            .unwrap()
+            .contains("overflows its box"),
+        "{out}"
+    );
+}
+
+#[test]
 fn export_validates_against_the_preset_and_stays_inside_the_project() {
     let f = fixture();
     let frame = f.create_frame();

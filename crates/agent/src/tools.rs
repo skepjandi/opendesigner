@@ -713,7 +713,7 @@ fn render_preview(ctx: &mut CallCtx, a: PreviewArgs) -> Result<Output, ToolError
     );
     if !rendered.warnings.is_empty() {
         note.push_str(&format!(
-            "; not drawn: {}",
+            "; warnings: {}",
             rendered
                 .warnings
                 .iter()
@@ -772,7 +772,7 @@ fn export(ctx: &mut CallCtx, a: ExportArgs) -> Result<Output, ToolError> {
         "bytes": file.bytes,
         "preset": a.preset,
         "preset_verified_against_primary_source": out.preset_verified,
-        "not_drawn": out.not_drawn,
+        "warnings": out.warnings,
     })))
 }
 
@@ -786,7 +786,7 @@ fn set_json(out: &ExportOutcome, preset: Option<&str>) -> Value {
         "files": files,
         "preset": preset,
         "preset_verified_against_primary_source": out.preset_verified,
-        "not_drawn": out.not_drawn,
+        "warnings": out.warnings,
     })
 }
 
