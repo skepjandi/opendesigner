@@ -1,6 +1,39 @@
 # Document Format
 
-> **Status: Design.** Intent, not a specification. The first PR that implements `core` replaces this page's examples with the real schema and bumps the format version to `1`.
+> **Status: Partially implemented.** The `core` crate (`crates/core`) implements the node model for frames, groups, rectangles, ellipses, text and image nodes, the operation set below, history with checkpoints, and project I/O at format version `1`. Sections marked *(intended)* are not built. Deviations from the original design are listed under [Implemented](#implemented-cratescore) and in the [roadmap decision log](./roadmap.md#decision-log).
+
+## Implemented (`crates/core`)
+
+| Piece | Where | Notes |
+|-------|-------|-------|
+| Node model | `model.rs` | `Document` (pages, tokens, id counter), `Page` with an immutable `Group` root, `Node` with kind, geometry, `visible`, `opacity`, `fill`, `stroke`, `corner_radius`, text fields, `image` path, `children`. Ids are `n_<counter>` / `p_<counter>` minted by the document and never reused (`next_id` only grows) |
+| Paint | `paint.rs` | `#rrggbb`, `#rrggbbaa` or `{token.name}` resolved against the document's tokens |
+| Operations | `ops.rs` | `create`, `set` (one typed `Property`), `move`, `reparent`, `delete`, and the history-only `restore`. Each returns the resolved forward operation, its inverse and the touched ids |
+| History | `history.rs` | `Session`: append-only log of `Transaction`s (actor, optional turn id, kind `edit`/`undo`/`redo`/`restore`), atomic apply with rollback, undo/redo as appended transactions, checkpoints as log positions, `restore(checkpoint)` appends the inverse of everything after it, `changed_since(position)` for the agent-change outline |
+| Limits | `limits.rs` | Coordinates ±1,000,000; sizes 0..=16,384; 1,000 operations per transaction; 100,000 nodes; nesting 64; name 200 and text 10,000 characters; 64 MB per project file. Values are rounded to four decimals |
+| Project I/O | `project.rs` | `od.toml` (format, name, id counter, page ids, tokens), `pages/<id>.json`, `.od/history/log.jsonl`, `.od/history/checkpoints.json`; atomic writes; a newer `format` is refused; unknown fields, duplicate ids, a lagging id counter and ids that are not `[A-Za-z0-9_-]{1,64}` are rejected on load |
+
+Operation JSON as agents send it (the `opendesigner apply` command and the future MCP `apply_ops` tool take this array):
+
+```json
+[
+  {"op": "create", "parent": "n_2", "node": {"kind": "text", "name": "Headline", "x": 40, "y": 80, "text": "Hold for everything.", "font_size": 96, "fill": "{brand.gold}"}},
+  {"op": "set", "id": "n_3", "prop": {"name": "opacity", "value": 0.5}},
+  {"op": "move", "id": "n_3", "x": 120, "y": 340},
+  {"op": "reparent", "id": "n_3", "parent": "n_9", "index": 0},
+  {"op": "delete", "id": "n_3"}
+]
+```
+
+Deviations from the design below, each deliberate for Phase 1:
+
+- **Colors are sRGB hex, not OKLCH.** Tokens map names to hex strings. OKLCH can be added without a format break by accepting more paint syntaxes.
+- **Tokens live in `od.toml`; there is no `presets/` or `media/` handling yet.** `image` nodes store a project-relative path that is validated for length only; resolving it inside the project root arrives with image rendering.
+- **`set` takes a typed `prop` (`{"name": "x", "value": 10}`), not a dotted path.** The set of properties is closed, so every value is validated for its type and for the node kinds it applies to.
+- **Ids are minted by the document.** `create` takes a node without an id; `restore` carries ids and is refused from front ends.
+- **No timestamps in the log.** The log is deterministic; time is a front-end concern.
+- **Undo and redo stacks are in memory.** The log and checkpoints persist; the stacks do not.
+- **Pages are set up with `add_page`, not operations**, and are not undoable yet.
 
 ## Principles
 
@@ -46,7 +79,7 @@ A page is a tree. Every node has `id`, `kind`, `name`, a transform and size, and
 
 Colors are stored in a perceptual space (OKLCH, as OpenCut's theme tokens do) and resolved to sRGB or Display P3 at export. Design tokens (colors, type scale, spacing) live in the manifest and nodes reference them by name, so an agent changes a brand color in one place.
 
-## Operations (intended)
+## Operations *(design; the implemented JSON is shown above)*
 
 ```jsonc
 { "op": "set", "id": "n_42", "path": "style.fill", "value": "{brand.gold}" }
@@ -56,7 +89,7 @@ Colors are stored in a perceptual space (OKLCH, as OpenCut's theme tokens do) an
 { "op": "delete", "id": "n_42" }
 ```
 
-Every operation envelope carries `actor` (`user` or an agent name), a `turn` id grouping one agent response, and a timestamp. Operations are the unit of undo. A *transaction* groups many operations (one drag, one agent turn) into one undo step and one checkpoint.
+Every transaction carries `actor` (`user` or `agent:<name>`) and a `turn` id grouping one agent response. A *transaction* groups many operations (one drag, one agent turn) into one undo step.
 
 ### Validation
 

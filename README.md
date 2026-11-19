@@ -41,7 +41,15 @@ Today that work happens in a terminal: you describe every pixel in text, the age
 
 ## Status
 
-**Design phase.** There is no application code yet; the repository holds the project rules and the [wiki](docs/wiki/index.md), which describes the intended design and carries a `Status: Design` banner on every page. See the [roadmap](docs/wiki/roadmap.md) for the phases and the spikes that come first.
+**Early development.** The headless core works: `opendesigner` can create a project, apply agent-style JSON operations with undo-able checkpoints, render a frame to PNG and validate it against App Store and Google Play presets. The Qt editor and the agent bridge (MCP, skill installer) are not built yet; see the [roadmap](docs/wiki/roadmap.md) for the phases. Wiki pages carry a `Status:` banner saying what is implemented and what is design.
+
+## Try it
+
+```bash
+cargo run -p opendesigner-cli -- new demo.od --name Demo
+cargo run -p opendesigner-cli -- show demo.od
+cargo run -p opendesigner-cli -- presets
+```
 
 ## Stack
 
