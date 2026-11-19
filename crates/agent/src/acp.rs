@@ -487,13 +487,18 @@ impl AcpSession {
                     .to_string());
             }
             // the editor's own server first, then the ones the user added
-            let mut mcp_servers = vec![json!({
-                "type": "http",
-                "name": "opendesigner",
-                "url": mcp.url,
-                "headers": [{"name": "Authorization",
-                             "value": format!("Bearer {}", mcp.token)}],
-            })];
+            // (no URL: the agent is only being asked what it offers, so it gets no editor to use)
+            let mut mcp_servers = if mcp.url.is_empty() {
+                Vec::new()
+            } else {
+                vec![json!({
+                    "type": "http",
+                    "name": "opendesigner",
+                    "url": mcp.url,
+                    "headers": [{"name": "Authorization",
+                                 "value": format!("Bearer {}", mcp.token)}],
+                })]
+            };
             for server in servers {
                 mcp_servers.push(acp_server(server, &command.cwd));
             }

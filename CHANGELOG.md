@@ -8,6 +8,16 @@ All notable changes to OpenDesigner are documented here.
 
 ## 2026-11-19
 
+### fix(app): the start screen's model and effort selectors work
+
+**Area:** `fix(app)`
+
+**Why:** They stayed grayed out on "Reading the models…": the property carrying the answer (`agentProbe`) was declared without its QML name, so the window never saw it. **Change:** the property is exposed correctly; the probe no longer gives the agent an editor endpoint that does not exist yet, and gives up with a message after 45 s.
+
+**Verified:** the real `omp acp` answers the probe in about 2 s from a test (mode, model and effort offered); found the cause by logging the running app (the property read `undefined`). **Not verified:** the selectors after the fix, by eye.
+
+**PR:** n/a
+
 ### feat(app): the start screen has a model and an effort selector
 
 **Area:** `feat(app)`

@@ -34,7 +34,7 @@ pub mod qobject {
         #[qproperty(QString, workspaces)]
         #[qproperty(QString, brief)]
         #[qproperty(QString, layout)]
-        #[qproperty(QString, agent_probe)]
+        #[qproperty(QString, agent_probe, cxx_name = "agentProbe")]
         #[qproperty(QString, checkerboard)]
         #[qproperty(QString, tokens)]
         #[qproperty(QString, languages)]
