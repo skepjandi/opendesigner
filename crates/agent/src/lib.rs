@@ -16,6 +16,7 @@ pub mod skill;
 pub mod token;
 pub mod tools;
 pub mod video_export;
+pub mod video_preview;
 pub mod workspaces;
 
 pub use error::AgentError;

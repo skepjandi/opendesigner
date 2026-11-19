@@ -55,6 +55,16 @@ pub struct EditorState {
     /// Where the panels are (`layout.rs`) and the file that keeps it between runs.
     layout: crate::layout::Layout,
     layout_file: Option<PathBuf>,
+    /// The frames of the video the Video tab plays, drawn on a worker thread.
+    preview: Option<PreviewSlot>,
+}
+
+/// A running or finished preview and what it was made from: it is stale when the project has
+/// had an edit since (every change, the user's or an agent's, adds to the log).
+struct PreviewSlot {
+    video: String,
+    log_len: usize,
+    preview: od_agent::video_preview::Preview,
 }
 
 /// A job on the window's progress strip: `total` 0 means "working, no percentage".
@@ -136,6 +146,7 @@ impl EditorState {
             known_dir: None,
             layout: crate::layout::Layout::default(),
             layout_file: None,
+            preview: None,
         }
     }
 
@@ -689,6 +700,72 @@ impl EditorState {
             .map_err(|e| e.0)?;
             Ok(format!("data:image/png;base64,{}", STANDARD.encode(png)))
         })
+    }
+
+    /// Starts drawing the preview of `video` on a worker thread unless the one already running
+    /// or finished is for the same video and the project has not changed since. A different
+    /// video, or an edit, cancels the old one first. Returns the status, or `{"error": ...}`
+    /// when the preview could not be started.
+    pub fn preview_start(&mut self, video: &str) -> Res<String> {
+        let id = parse_id(video)?;
+        let log_len = self.with_ws(|ws| Ok(ws.session.log().len()))?;
+        let current = self
+            .preview
+            .as_ref()
+            .is_some_and(|p| p.video == video && p.log_len == log_len);
+        if !current {
+            let (src, log_len) = self.with_ws(|ws| {
+                Ok((
+                    od_agent::video_export::Source::of(ws),
+                    ws.session.log().len(),
+                ))
+            })?;
+            let preview = match od_agent::video_preview::Preview::start(
+                src,
+                &id,
+                od_agent::video_preview::Limits::default(),
+            ) {
+                Ok(p) => p,
+                Err(e) => return Ok(json!({ "error": e.0 }).to_string()),
+            };
+            // the old preview is dropped here: its worker stops before its next picture
+            self.preview = Some(PreviewSlot {
+                video: video.to_string(),
+                log_len,
+                preview,
+            });
+        }
+        Ok(self.preview_status())
+    }
+
+    /// The preview's progress as JSON: `video`, `ready`, `total`, `fps`, `width`, `height`,
+    /// `done`, `capped`, `error` and `stale` (the project changed since it was made). `{}` when
+    /// there is none.
+    pub fn preview_status(&self) -> String {
+        let Some(p) = &self.preview else {
+            return "{}".into();
+        };
+        let stale = self
+            .with_ws(|ws| Ok(ws.session.log().len() != p.log_len))
+            .unwrap_or(true);
+        let mut status = serde_json::to_value(p.preview.status()).unwrap_or(Value::Null);
+        status["video"] = json!(p.video);
+        status["stale"] = json!(stale);
+        status.to_string()
+    }
+
+    /// Picture `index` of the preview as a PNG data URL; empty when it is not drawn yet.
+    pub fn preview_frame(&self, index: u64) -> String {
+        self.preview
+            .as_ref()
+            .and_then(|p| p.preview.frame(index))
+            .map(|png| format!("data:image/png;base64,{}", STANDARD.encode(png.as_slice())))
+            .unwrap_or_default()
+    }
+
+    /// Cancels and forgets the preview.
+    pub fn preview_stop(&mut self) {
+        self.preview = None;
     }
 
     /// For a video file the user chose: the project folder to copy it into, so the copy (it can
@@ -2337,6 +2414,78 @@ mod tests {
             s.import_to_memory(&t.path().join("notes.txt")).is_err(),
             "only pictures"
         );
+    }
+
+    #[test]
+    fn a_video_preview_is_drawn_in_the_background_and_goes_stale_when_the_project_changes() {
+        let (mut s, _t) = state();
+        let frame = s.create_node("frame", 0.0, 0.0, 200.0, 400.0).unwrap();
+        let ids = s
+            .apply_user(&[Operation::CreateVideo {
+                name: "V".into(),
+                fps: 30,
+                width: 100,
+                height: 200,
+            }])
+            .unwrap();
+        let video = ids[0].to_string();
+        s.apply_user(&[Operation::AddClip {
+            video: ids[0].clone(),
+            frame: Some(parse_id(&frame).unwrap()),
+            footage: None,
+            duration_ms: 2000,
+            index: None,
+            transition: None,
+            motion: None,
+        }])
+        .unwrap();
+        assert_eq!(s.preview_status(), "{}", "none until started");
+        let status =
+            |s: &EditorState| -> Value { serde_json::from_str(&s.preview_status()).unwrap() };
+        let first: Value = serde_json::from_str(&s.preview_start(&video).unwrap()).unwrap();
+        assert_eq!(first["video"], video.as_str());
+        assert_eq!(
+            (first["total"].as_u64(), first["fps"].as_u64()),
+            (Some(30), Some(15))
+        );
+        for _ in 0..400 {
+            if status(&s)["done"] == true {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let done = status(&s);
+        assert_eq!(
+            (done["ready"].as_u64(), done["stale"].as_bool()),
+            (Some(30), Some(false)),
+            "{done}"
+        );
+        assert!(s.preview_frame(0).starts_with("data:image/png;base64,"));
+        assert_eq!(s.preview_frame(30), "", "past the end");
+        // starting again with nothing changed keeps the finished preview
+        s.preview_start(&video).unwrap();
+        assert_eq!(status(&s)["done"], true);
+        // an edit makes it stale; starting again draws a new one
+        s.apply_user(&[Operation::AddClip {
+            video: ids[0].clone(),
+            frame: Some(parse_id(&frame).unwrap()),
+            footage: None,
+            duration_ms: 1000,
+            index: None,
+            transition: None,
+            motion: None,
+        }])
+        .unwrap();
+        assert_eq!(status(&s)["stale"], true);
+        let again: Value = serde_json::from_str(&s.preview_start(&video).unwrap()).unwrap();
+        assert_eq!(
+            (again["total"].as_u64(), again["stale"].as_bool()),
+            (Some(45), Some(false))
+        );
+        s.preview_stop();
+        assert_eq!(s.preview_status(), "{}");
+        let missing = s.preview_start("v_999").unwrap();
+        assert!(missing.contains("does not exist"), "{missing}");
     }
 
     #[test]

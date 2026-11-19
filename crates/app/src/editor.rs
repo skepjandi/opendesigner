@@ -178,6 +178,18 @@ pub mod qobject {
         #[cxx_name = "videoPreview"]
         fn video_preview(self: &Self, video: &QString, time_ms: f64, max_side: i32) -> QString;
         #[qinvokable]
+        #[cxx_name = "previewStart"]
+        fn preview_start(self: Pin<&mut Self>, video: &QString) -> QString;
+        #[qinvokable]
+        #[cxx_name = "previewStatus"]
+        fn preview_status(self: &Self) -> QString;
+        #[qinvokable]
+        #[cxx_name = "previewFrame"]
+        fn preview_frame(self: &Self, index: i32) -> QString;
+        #[qinvokable]
+        #[cxx_name = "previewStop"]
+        fn preview_stop(self: Pin<&mut Self>);
+        #[qinvokable]
         #[cxx_name = "importToMemory"]
         fn import_to_memory(self: Pin<&mut Self>, url: &QString) -> QString;
         #[qinvokable]
@@ -808,6 +820,31 @@ impl qobject::Editor {
             Ok(url) => q(&url),
             Err(_) => q(""),
         }
+    }
+
+    /// Starts (or keeps) the background preview of a video; returns its status as JSON.
+    pub fn preview_start(mut self: Pin<&mut Self>, video: &QString) -> QString {
+        match self
+            .as_mut()
+            .rust_mut()
+            .state
+            .preview_start(&video.to_string())
+        {
+            Ok(status) => q(&status),
+            Err(_) => q("{}"),
+        }
+    }
+
+    pub fn preview_status(&self) -> QString {
+        q(&self.state.preview_status())
+    }
+
+    pub fn preview_frame(&self, index: i32) -> QString {
+        q(&self.state.preview_frame(u64::try_from(index).unwrap_or(0)))
+    }
+
+    pub fn preview_stop(mut self: Pin<&mut Self>) {
+        self.as_mut().rust_mut().state.preview_stop();
     }
 
     pub fn import_to_memory(mut self: Pin<&mut Self>, url: &QString) -> QString {
