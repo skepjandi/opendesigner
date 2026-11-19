@@ -381,22 +381,25 @@ impl Handler {
             return rpc_error(id, -32603, "the editor state is unavailable");
         };
         let version_before = ws.session.log().len();
+        let dir_before = ws.dir().map(std::path::Path::to_path_buf);
         let mut ctx = CallCtx {
             ws: &mut ws,
             actor: actor.clone(),
             turns: &mut state.turns,
         };
         let result = tools::call(&mut ctx, name, args);
+        let switched = ws.dir().map(std::path::Path::to_path_buf) != dir_before;
         let touched = match &result {
-            Ok(_) => ws.session.log()[version_before..]
+            // a switch replaced the history, so there is nothing to compare with
+            Ok(_) if !switched => ws.session.log()[version_before..]
                 .iter()
                 .flat_map(|tx| tx.ops.iter().flat_map(|a| a.touched.clone()))
                 .collect(),
-            Err(_) => Vec::new(),
+            _ => Vec::new(),
         };
         drop(state);
         drop(ws);
-        if !touched.is_empty() {
+        if !touched.is_empty() || switched {
             if let Some(hook) = &self.on_change {
                 hook(ChangeEvent {
                     actor: actor.to_string(),

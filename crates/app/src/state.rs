@@ -50,6 +50,8 @@ pub struct EditorState {
     /// Work in progress the window shows as bars and spinners, by job id.
     jobs: std::collections::BTreeMap<u64, JobRow>,
     next_local_job: u64,
+    /// The workspace the window last showed, to notice when an agent switches it.
+    known_dir: Option<PathBuf>,
 }
 
 /// A job on the window's progress strip: `total` 0 means "working, no percentage".
@@ -87,6 +89,7 @@ pub struct Snapshot {
     pub memory: String,
     pub videos: String,
     pub jobs: String,
+    pub workspaces: String,
     pub tokens: String,
     pub languages: String,
     pub language: String,
@@ -126,6 +129,7 @@ impl EditorState {
             repo: None,
             jobs: Default::default(),
             next_local_job: 1_000_000,
+            known_dir: None,
         }
     }
 
@@ -180,68 +184,138 @@ impl EditorState {
         Ok(())
     }
 
-    /// What the start screen should say about `folder`: it is a project itself, it holds one in
-    /// `opendesigner/`, or it has none yet (one would be set up in `opendesigner/`).
+    /// What the start screen should say about `folder`: it is a project itself, it holds
+    /// workspaces in `opendesigner/` (listed by name), or it has none yet.
     pub fn inspect_folder(folder: &Path) -> Value {
-        let nested = folder.join(PROJECT_DIR);
+        let anchor = folder.join(PROJECT_DIR);
         let name = folder
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("Project");
-        let (found, project) = if folder.join("od.toml").is_file() {
-            ("project", folder.to_path_buf())
-        } else if nested.join("od.toml").is_file() {
-            ("nested", nested)
+        let workspaces: Vec<String> = od_agent::workspaces::list(&anchor)
+            .into_iter()
+            .map(|e| e.name)
+            .collect();
+        let found = if folder.join("od.toml").is_file() {
+            "project"
+        } else if workspaces.is_empty() {
+            "none"
         } else {
-            ("none", nested)
+            "workspaces"
         };
         json!({
             "found": found,
             "folder": folder.display().to_string(),
-            "project": project.display().to_string(),
             "name": name,
+            "workspaces": workspaces,
             "exists": folder.is_dir(),
         })
     }
 
-    /// Opens the project in `folder` (see [`EditorState::inspect_folder`]), setting one up there
-    /// when it has none and `create` is true. The agent will work in `folder`. The first frame is
-    /// not made: what exists is up to the agent.
-    pub fn open_workspace(&mut self, folder: &Path, create: bool) -> Res<()> {
-        self.open_workspace_in(folder, create, token::config_dir().ok().as_deref())
+    /// Opens a workspace of the project in `folder` (the first one when `workspace` is `None`),
+    /// making it when it does not exist and `create` is true. The agent will work in `folder`.
+    /// Nothing is drawn: what exists is up to the agent.
+    pub fn open_workspace(
+        &mut self,
+        folder: &Path,
+        workspace: Option<&str>,
+        create: bool,
+    ) -> Res<()> {
+        self.open_workspace_in(
+            folder,
+            workspace,
+            create,
+            token::config_dir().ok().as_deref(),
+        )
     }
 
     /// [`EditorState::open_workspace`] remembering the folder in `config` (`None`: not at all).
     pub fn open_workspace_in(
         &mut self,
         folder: &Path,
+        workspace: Option<&str>,
         create: bool,
         config: Option<&Path>,
     ) -> Res<()> {
-        let info = Self::inspect_folder(folder);
         if !folder.is_dir() {
             return Err(format!("{} is not a folder", folder.display()));
         }
-        let project = PathBuf::from(info["project"].as_str().unwrap_or_default());
-        match info["found"].as_str() {
-            Some("project" | "nested") => self.open_project(&project)?,
-            _ if create => {
-                let name = info["name"].as_str().unwrap_or("Project").to_string();
-                let ws = Workspace::create(&project, &name).map_err(|e| e.to_string())?;
-                self.adopt(ws);
-            }
-            _ => {
-                return Err(format!(
-                    "{} has no OpenDesigner project yet",
-                    folder.display()
-                ));
-            }
+        if folder.join("od.toml").is_file() {
+            self.open_project(folder)?;
+        } else {
+            let anchor = folder.join(PROJECT_DIR);
+            let existing = od_agent::workspaces::list(&anchor);
+            let chosen = match workspace {
+                Some(n) => existing
+                    .iter()
+                    .find(|e| e.name == n)
+                    .map(|e| e.path.clone()),
+                None => existing.first().map(|e| e.path.clone()),
+            };
+            let ws = match (chosen, create) {
+                (Some(path), _) => Workspace::open(&path).map_err(|e| e.to_string())?,
+                (None, true) => od_agent::workspaces::create(&anchor, workspace.unwrap_or("main"))?,
+                (None, false) => {
+                    return Err(format!(
+                        "{} has no OpenDesigner workspace{} yet",
+                        folder.display(),
+                        workspace
+                            .map(|n| format!(" called {n:?}"))
+                            .unwrap_or_default()
+                    ));
+                }
+            };
+            self.adopt(ws);
         }
         self.repo = Some(folder.to_path_buf());
         if let Some(dir) = config {
             remember_recent(folder, dir);
         }
         Ok(())
+    }
+
+    /// The open workspace's folder.
+    fn project_dir(&self) -> Option<PathBuf> {
+        self.with_ws(|ws| Ok(ws.dir().map(Path::to_path_buf)))
+            .ok()
+            .flatten()
+    }
+
+    /// The workspaces next to the open one and which is open, for the window.
+    pub fn workspaces_json(&self) -> String {
+        self.with_ws(|ws| Ok(workspaces_of(ws)))
+            .unwrap_or_else(|_| json!({"open": null, "names": []}).to_string())
+    }
+
+    /// Switches to (or first makes) another workspace without stopping the agent connection: the
+    /// agent's tools follow, because they share the same workspace.
+    pub fn switch_workspace(&mut self, name: &str, create: bool) -> Res<()> {
+        let dir = self.project_dir().ok_or("no project is open")?;
+        let next = if create {
+            od_agent::workspaces::create(&dir, name)?
+        } else {
+            let path = od_agent::workspaces::find(&dir, name)
+                .ok_or_else(|| format!("no workspace called {name:?}"))?;
+            Workspace::open(&path).map_err(|e| e.to_string())?
+        };
+        self.with_ws(|ws| {
+            ws.save().map_err(|e| e.to_string())?;
+            *ws = next;
+            Ok(())
+        })?;
+        self.sync_workspace();
+        Ok(())
+    }
+
+    /// Forgets what belongs to a workspace that is no longer open (language, outlines, frame).
+    pub fn sync_workspace(&mut self) {
+        let dir = self.project_dir();
+        if dir != self.known_dir {
+            self.known_dir = dir;
+            self.active_frame = None;
+            self.language = None;
+            self.agent_changed.clear();
+        }
     }
 
     /// The working folders opened before, newest first, that still exist.
@@ -267,6 +341,7 @@ impl EditorState {
     /// Chooses the open frame when none is chosen, or the chosen one is gone: the project may
     /// start empty and get its first frame from the agent.
     pub fn ensure_active_frame(&mut self) {
+        self.sync_workspace();
         let Some(ws) = self.ws.clone() else {
             return;
         };
@@ -1481,6 +1556,7 @@ impl EditorState {
             memory: memory_of(&ws).to_string(),
             videos: to_string(&view::videos(doc)),
             jobs: self.jobs_json(),
+            workspaces: workspaces_of(&ws),
             overflows: to_string(&frame.map(|f| collect_overflows(doc, f)).unwrap_or_default()),
             tokens: to_string(&view::tokens(doc)),
             languages: to_string(&view::locales(doc)),
@@ -1521,6 +1597,18 @@ fn image_problem(n: &Node, dir: Option<&std::path::Path>) -> Option<String> {
 /// marks where they are and says why.
 /// Text in `frame` that wraps to more rows than its box is tall, with the box's place in the frame.
 /// The files in a workspace's `media/` folder, for the memory tab.
+/// The open workspace's name and its siblings, as JSON (for the window's picker).
+fn workspaces_of(ws: &Workspace) -> String {
+    let Some(dir) = ws.dir() else {
+        return json!({"open": null, "names": []}).to_string();
+    };
+    json!({
+        "open": od_agent::workspaces::name_of(dir),
+        "names": od_agent::workspaces::list(dir).into_iter().map(|e| e.name).collect::<Vec<_>>(),
+    })
+    .to_string()
+}
+
 fn memory_of(ws: &Workspace) -> Value {
     let files = ws.media().unwrap_or_default();
     let videos = ws.footage().unwrap_or_default();
@@ -2494,7 +2582,7 @@ mod tests {
     }
 
     #[test]
-    fn a_working_folder_opens_its_project_or_sets_one_up_empty_and_the_agent_starts_there() {
+    fn a_working_folder_opens_a_workspace_or_sets_one_up_empty_and_the_agent_starts_there() {
         let tmp = tempfile::tempdir().unwrap();
         let (repo, config) = (tmp.path().join("my-app"), tmp.path().join("cfg"));
         std::fs::create_dir_all(&repo).unwrap();
@@ -2502,41 +2590,57 @@ mod tests {
         let info = EditorState::inspect_folder(&repo);
         assert_eq!(info["found"], "none");
         assert_eq!(info["name"], "my-app");
-        assert_eq!(
-            info["project"],
-            repo.join("opendesigner").display().to_string()
-        );
+        assert_eq!(info["workspaces"], json!([]));
 
         let mut s = EditorState::new();
         let err = s
-            .open_workspace_in(&repo, false, Some(&config))
+            .open_workspace_in(&repo, Some("store"), false, Some(&config))
             .unwrap_err();
-        assert!(err.contains("no OpenDesigner project yet"), "{err}");
+        assert!(err.contains("no OpenDesigner workspace"), "{err}");
         assert!(
             !repo.join("opendesigner").exists(),
             "nothing is made without a yes"
         );
 
-        s.open_workspace_in(&repo, true, Some(&config)).unwrap();
-        assert!(repo.join("opendesigner/od.toml").is_file());
+        s.open_workspace_in(&repo, Some("app store"), true, Some(&config))
+            .unwrap();
+        assert!(
+            repo.join("opendesigner/workspaces/app store/od.toml")
+                .is_file()
+        );
         assert!(s.snapshot().has_project);
         assert_eq!(s.snapshot().frames, "[]", "the agent decides what to make");
-        assert_eq!(s.snapshot().project_name, "my-app");
         assert_eq!(s.repo.as_deref(), Some(repo.as_path()));
-        assert_eq!(EditorState::inspect_folder(&repo)["found"], "nested");
+        let listed = EditorState::inspect_folder(&repo);
+        assert_eq!(listed["found"], "workspaces");
+        assert_eq!(listed["workspaces"], json!(["app store"]));
 
-        // opening again (also from the project folder itself) finds it
+        // opening again finds it; a second workspace sits beside it
         let mut again = EditorState::new();
         again
-            .open_workspace_in(&repo, false, Some(&config))
-            .unwrap();
-        again
-            .open_workspace_in(&repo.join("opendesigner"), false, None)
+            .open_workspace_in(&repo, None, false, Some(&config))
             .unwrap();
         assert_eq!(
-            EditorState::inspect_folder(&repo.join("opendesigner"))["found"],
-            "project"
+            serde_json::from_str::<Value>(&again.snapshot().workspaces).unwrap()["open"],
+            "app store"
         );
+        again
+            .open_workspace_in(&repo, Some("reel"), true, Some(&config))
+            .unwrap();
+        assert_eq!(
+            EditorState::inspect_folder(&repo)["workspaces"],
+            json!(["app store", "reel"])
+        );
+        // a folder that is itself a project opens as it is
+        let mut direct = EditorState::new();
+        direct
+            .open_workspace_in(
+                &repo.join("opendesigner/workspaces/reel"),
+                None,
+                false,
+                None,
+            )
+            .unwrap();
 
         let recent = EditorState::recent_projects_in(&config);
         assert_eq!(recent[0]["folder"], repo.display().to_string());
@@ -2547,14 +2651,40 @@ mod tests {
             json!([]),
             "gone folders are not offered"
         );
-        assert!(s.open_workspace_in(&repo, true, None).is_err());
+        assert!(s.open_workspace_in(&repo, None, true, None).is_err());
+    }
+
+    #[test]
+    fn switching_workspaces_keeps_each_ones_work_and_resets_the_view() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut s = EditorState::new();
+        s.open_workspace_in(tmp.path(), Some("main"), true, None)
+            .unwrap();
+        let frame = s.create_node("frame", 0.0, 0.0, 100.0, 100.0).unwrap();
+        assert!(s.snapshot().active_frame == frame);
+
+        s.switch_workspace("reel", true).unwrap();
+        let ws: Value = serde_json::from_str(&s.snapshot().workspaces).unwrap();
+        assert_eq!(
+            (ws["open"].as_str(), ws["names"].as_array().map(Vec::len)),
+            (Some("reel"), Some(2))
+        );
+        assert_eq!(s.snapshot().frames, "[]", "a new workspace is empty");
+        assert_eq!(s.snapshot().active_frame, "");
+        s.create_node("frame", 0.0, 0.0, 50.0, 50.0).unwrap();
+
+        s.switch_workspace("main", false).unwrap();
+        let frames: Vec<Value> = serde_json::from_str(&s.snapshot().frames).unwrap();
+        assert_eq!(frames.len(), 1, "the first workspace kept its own frame");
+        assert!(s.switch_workspace("nope", false).is_err());
+        assert!(s.switch_workspace("main", true).is_err(), "already exists");
     }
 
     #[test]
     fn the_first_frame_the_agent_makes_becomes_the_open_one() {
         let tmp = tempfile::tempdir().unwrap();
         let mut s = EditorState::new();
-        s.open_workspace_in(tmp.path(), true, None).unwrap();
+        s.open_workspace_in(tmp.path(), None, true, None).unwrap();
         s.ensure_active_frame();
         assert_eq!(s.snapshot().active_frame, "");
         s.apply_user(&[Operation::Create {

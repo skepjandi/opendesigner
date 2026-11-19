@@ -1034,3 +1034,98 @@ fn a_long_export_does_not_hold_the_editor_reports_progress_and_can_be_stopped() 
         "a stopped export leaves nothing"
     );
 }
+
+#[test]
+fn an_agent_keeps_separate_deliverables_in_separate_workspaces_and_switching_is_announced() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("opendesigner");
+    let ws = Arc::new(Mutex::new(Workspace::create(&dir, "old").unwrap()));
+    let announced: Arc<Mutex<Vec<String>>> = Arc::default();
+    let log = announced.clone();
+    let handler = Handler::new(ws.clone()).with_change_hook(Arc::new(
+        move |e: od_agent::mcp::ChangeEvent| {
+            log.lock().unwrap().push(e.tool);
+        },
+    ));
+    let session = init(&handler, "claude-code");
+    let call = |name: &str, args: Value| -> (bool, Value) {
+        let out = handler.handle(
+            Some(&session),
+            json!({"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":name,"arguments":args}}),
+        );
+        let r = out.body.unwrap()["result"].clone();
+        let text = r["content"][0]["text"].as_str().unwrap_or("").to_string();
+        (
+            r["isError"].as_bool().unwrap(),
+            serde_json::from_str(&text).unwrap_or(Value::String(text)),
+        )
+    };
+
+    let (err, listed) = call("list_workspaces", json!({}));
+    assert!(!err);
+    assert_eq!(listed["open"], "main");
+    assert_eq!(listed["workspaces"][0]["open"], true);
+
+    // work in the first, then start a second one for something else
+    let root = ws.lock().unwrap().session.document().pages[0]
+        .root
+        .id
+        .to_string();
+    let (err, r) = call(
+        "apply_ops",
+        json!({"ops":[{"op":"create","parent":root,"node":{"kind":"frame","name":"Store 1","width":100,"height":100}}]}),
+    );
+    assert!(!err, "{r}");
+    let (err, r) = call("create_workspace", json!({"name": "instagram reel"}));
+    assert!(!err, "{r}");
+    assert!(
+        ws.lock().unwrap().session.document().pages[0]
+            .root
+            .children
+            .is_empty(),
+        "the new one is empty"
+    );
+    assert_eq!(
+        ws.lock().unwrap().dir().unwrap(),
+        dir.join("workspaces/instagram reel")
+    );
+    assert!(
+        announced
+            .lock()
+            .unwrap()
+            .contains(&"create_workspace".to_string())
+    );
+
+    let (_, listed) = call("list_workspaces", json!({}));
+    let names: Vec<&str> = listed["workspaces"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|w| w["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["main", "instagram reel"]);
+    assert_eq!(
+        listed["workspaces"][0]["frames"], 1,
+        "the first keeps its frame"
+    );
+
+    let (err, _) = call("open_workspace", json!({"name": "main"}));
+    assert!(!err);
+    assert_eq!(
+        ws.lock().unwrap().session.document().pages[0]
+            .root
+            .children
+            .len(),
+        1
+    );
+    for bad in [
+        json!({"name": "main"}),
+        json!({"name": "../x"}),
+        json!({"name": "instagram reel"}),
+    ] {
+        let (err, _) = call("create_workspace", bad);
+        assert!(err);
+    }
+    let (err, why) = call("open_workspace", json!({"name": "nope"}));
+    assert!(err && why.as_str().unwrap().contains("there are:"));
+}

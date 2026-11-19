@@ -151,6 +151,22 @@ ApplicationWindow {
                     }
                 }
                 ComboBox {
+                    id: workspaceBox
+                    visible: backend.hasProject
+                    implicitWidth: 170
+                    implicitHeight: Theme.row
+                    readonly property var info: backend.workspaces ? JSON.parse(backend.workspaces) : ({ open: null, names: [] })
+                    model: info.names.concat(["New workspace…"])
+                    currentIndex: Math.max(0, info.names.indexOf(info.open))
+                    onActivated: i => {
+                        if (i === info.names.length) { newWorkspaceDialog.open(); currentIndex = Math.max(0, info.names.indexOf(info.open)) }
+                        else backend.switchWorkspace(info.names[i], false)
+                    }
+                    ToolTip.visible: hovered
+                    ToolTip.delay: 600
+                    ToolTip.text: "Workspaces: one per deliverable (the agent can start them too)"
+                }
+                ComboBox {
                     id: languageBox
                     visible: backend.hasProject
                     implicitWidth: 150
@@ -607,6 +623,19 @@ ApplicationWindow {
                 }
             }
         }
+    }
+
+    Modal {
+        id: newWorkspaceDialog
+        title: "New workspace"
+        width: 440
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        onOpened: { workspaceName.text = ""; workspaceName.forceActiveFocus() }
+        contentItem: ColumnLayout {
+            Label { text: "A separate design for one deliverable (an app store set, a reel, a landing page)."; color: Theme.muted; font.pixelSize: 12; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+            Field { id: workspaceName; Layout.fillWidth: true; placeholderText: "app store" }
+        }
+        onAccepted: if (workspaceName.text.trim() !== "") backend.switchWorkspace(workspaceName.text.trim(), true)
     }
 
     // ---------- keyboard shortcuts ----------
