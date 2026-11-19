@@ -56,6 +56,18 @@ pub mod qobject {
         #[cxx_name = "openProject"]
         fn open_project(self: Pin<&mut Self>, path: &QString);
         #[qinvokable]
+        #[cxx_name = "inspectFolder"]
+        fn inspect_folder(self: &Self, url: &QString) -> QString;
+        #[qinvokable]
+        #[cxx_name = "openWorkspace"]
+        fn open_workspace(self: Pin<&mut Self>, url: &QString, create: bool) -> bool;
+        #[qinvokable]
+        #[cxx_name = "recentProjects"]
+        fn recent_projects(self: &Self) -> QString;
+        #[qinvokable]
+        #[cxx_name = "chatStartWith"]
+        fn chat_start_with(self: Pin<&mut Self>, command: &QString, prompt: &QString);
+        #[qinvokable]
         #[cxx_name = "saveProject"]
         fn save_project(self: Pin<&mut Self>);
         #[qinvokable]
@@ -380,6 +392,7 @@ impl qobject::Editor {
     }
 
     fn refresh(mut self: Pin<&mut Self>) {
+        self.as_mut().rust_mut().state.ensure_active_frame();
         let snap = self.state.snapshot();
         self.as_mut().publish(&snap);
         let revision = *self.revision() + 1;
@@ -409,6 +422,33 @@ impl qobject::Editor {
         {
             self.as_mut().show("Project created", false);
         }
+    }
+
+    pub fn inspect_folder(&self, url: &QString) -> QString {
+        let path = path_from_url(&url.to_string());
+        q(&EditorState::inspect_folder(Path::new(&path)).to_string())
+    }
+
+    pub fn open_workspace(mut self: Pin<&mut Self>, url: &QString, create: bool) -> bool {
+        let path = path_from_url(&url.to_string());
+        let opened = self
+            .as_mut()
+            .act(|s| s.open_workspace(Path::new(&path), create))
+            .is_some();
+        if opened {
+            self.as_mut().show("Project ready", false);
+        }
+        opened
+    }
+
+    pub fn recent_projects(&self) -> QString {
+        q(&EditorState::recent_projects().to_string())
+    }
+
+    pub fn chat_start_with(mut self: Pin<&mut Self>, command: &QString, prompt: &QString) {
+        self.as_mut().chat_start(command);
+        let prompt = prompt.to_string();
+        self.as_mut().rust_mut().state.chat_first_prompt(&prompt);
     }
 
     pub fn open_project(mut self: Pin<&mut Self>, path: &QString) {

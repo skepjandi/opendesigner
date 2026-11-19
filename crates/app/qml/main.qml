@@ -281,12 +281,12 @@ ApplicationWindow {
         color: Theme.canvasBg
         ColumnLayout {
             anchors.centerIn: parent
-            width: Math.min(520, parent.width - 60)
-            spacing: 14
+            width: Math.min(560, parent.width - 60)
+            spacing: 10
             Image {
                 source: "qrc:/qt/qml/org/opendesigner/app/qml/logo.svg"
-                sourceSize.height: 140
-                Layout.preferredHeight: 140
+                sourceSize.height: 90
+                Layout.preferredHeight: 90
                 Layout.alignment: Qt.AlignHCenter
                 fillMode: Image.PreserveAspectFit
             }
@@ -298,16 +298,15 @@ ApplicationWindow {
                 Layout.alignment: Qt.AlignHCenter
             }
             Label {
-                text: "Design store and web assets with an agent, guiding it by pointing."
+                text: "Your agent makes the assets and videos; you guide it by pointing."
                 color: Theme.muted
                 font.pixelSize: 14
                 Layout.alignment: Qt.AlignHCenter
             }
-            RowLayout {
-                Layout.alignment: Qt.AlignHCenter
-                spacing: 10
-                Btn { text: "New project…"; primary: true; implicitHeight: 36; onClicked: newDialog.openDialog() }
-                Btn { text: "Open project…"; implicitHeight: 36; onClicked: openDialog.open() }
+            StartPanel {
+                Layout.fillWidth: true
+                Layout.topMargin: 10
+                editor: backend
             }
         }
     }
@@ -321,7 +320,14 @@ ApplicationWindow {
         header: Label { text: dlg.title; color: Theme.text; font.pixelSize: 15; font.bold: true; padding: 14 }
     }
 
-    FolderDialog { id: openDialog; title: "Open an OpenDesigner project folder"; onAccepted: backend.openProject(selectedFolder.toString()) }
+    // Open another project (or start the agent on one): the same panel as the start screen.
+    Modal {
+        id: openDialog
+        title: "Open a project"
+        width: 580
+        standardButtons: Dialog.Close
+        contentItem: StartPanel { editor: backend; onStarted: openDialog.close() }
+    }
     FileDialog {
         id: imageDialog
         property string targetId: ""
@@ -334,50 +340,6 @@ ApplicationWindow {
         }
         onRejected: targetId = ""
     }
-    FolderDialog { id: parentDialog; title: "Where should the project folder go?"; onAccepted: newDialog.parentUrl = selectedFolder.toString() }
-
-    Modal {
-        id: newDialog
-        title: "New project"
-        width: 520
-        standardButtons: Dialog.Ok | Dialog.Cancel
-        property string parentUrl: ""
-        property var presets: []
-        function openDialog() {
-            presets = JSON.parse(backend.framePresets())
-            nameField.text = "My store assets"
-            sizeBox.currentIndex = 0
-            open()
-        }
-        contentItem: ColumnLayout {
-            spacing: 10
-            Label { text: "Name"; color: Theme.muted; font.pixelSize: 12 }
-            Field { id: nameField; Layout.fillWidth: true }
-            Label { text: "First frame"; color: Theme.muted; font.pixelSize: 12 }
-            ComboBox {
-                id: sizeBox
-                Layout.fillWidth: true
-                model: newDialog.presets.map(p => p.label)
-            }
-            Label { text: "Folder"; color: Theme.muted; font.pixelSize: 12 }
-            RowLayout {
-                Label {
-                    Layout.fillWidth: true
-                    text: newDialog.parentUrl === "" ? "Choose where to create it" : backend.localPath(newDialog.parentUrl)
-                    color: newDialog.parentUrl === "" ? Theme.muted : Theme.text
-                    elide: Text.ElideMiddle
-                }
-                Btn { text: "Choose…"; onClicked: parentDialog.open() }
-            }
-        }
-        onAccepted: {
-            if (parentUrl === "" || nameField.text.trim() === "") { win.toast("Choose a folder and a name", true); return }
-            const p = presets[sizeBox.currentIndex]
-            const dir = backend.localPath(parentUrl) + "/" + nameField.text.trim().replace(/[\/\\]/g, "-") + ".od"
-            backend.newProject(dir, nameField.text.trim(), p.width, p.height)
-        }
-    }
-
     Modal {
         id: pinDialog
         title: "Pin a note"

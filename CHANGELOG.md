@@ -8,6 +8,16 @@ All notable changes to OpenDesigner are documented here.
 
 ## 2026-11-19
 
+### feat(app): start screen: choose the working folder, the agent and the first task
+
+**Area:** `feat(app)`
+
+**Change:** The launch screen (and "Open another project") now asks where you are working (usually a repository), which agent to start (installed ones marked) and what it should make first. The agent starts in that folder, so it can run your app and take screenshots; the design lives in `opendesigner/` inside it, opened if present or set up empty (no frame is made: the agent decides). The task you type is sent once the agent is connected. Recent folders are remembered in the config folder. The "new project with a first frame and size" dialog is gone. When the agent makes the first frame, it becomes the open one.
+
+**Verified:** app tests (inspect, refuse without a yes, create empty, reopen from folder or project, recent list, first frame adoption, the first task reaching the scripted agent) and the window session loading the panel with no QML warnings. **Not verified:** the panel by hand (folder dialog, clicks), a real agent receiving the task.
+
+**PR:** n/a
+
 ### feat(ui): an agent-first window: pointing tools only, macOS shortcuts and gestures, drops go to the agent's memory
 
 **Area:** `feat(ui)`
