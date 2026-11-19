@@ -285,43 +285,55 @@ Item {
             }
         }
 
-        // the slash commands the agent understands
-        Popup {
-            id: commandPopup
-            width: Math.min(420, parent ? parent.width - 20 : 420)
-            y: -commandList.implicitHeight - 8
-            padding: 6
-            visible: root.commandList.length > 0 && root.showCommands
-            background: Rectangle { radius: Theme.radius; color: Theme.panelRaised; border.width: 1; border.color: Theme.border }
-            contentItem: ListView {
-                id: commandList
-                implicitHeight: Math.min(260, contentHeight)
-                model: root.commandList
-                clip: true
-                ScrollBar.vertical: ScrollBar {}
-                delegate: Rectangle {
-                    required property var modelData
-                    width: commandList.width
-                    height: 44
-                    color: "transparent"
-                    Label {
-                        anchors.fill: parent
-                        anchors.margins: 4
-                        text: "/" + modelData.name + (modelData.hint ? " " + modelData.hint : "") + "\n" + modelData.description
-                        color: Theme.text
-                        font.pixelSize: 11
-                        wrapMode: Text.WordWrap
-                        elide: Text.ElideRight
-                    }
-                    TapHandler { onTapped: root.useCommand(modelData.name) }
-                }
-            }
-        }
-
         RowLayout {
+            id: inputRow
             Layout.fillWidth: true
             visible: root.connected
             spacing: 6
+
+            // the agent's slash commands, listed just above the message field
+            Popup {
+                id: commandPopup
+                parent: inputRow
+                x: 0
+                width: Math.min(460, inputRow.width)
+                height: Math.min(300, commandList.contentHeight + 12)
+                y: -height - 6
+                padding: 6
+                focus: false
+                closePolicy: Popup.NoAutoClose
+                visible: root.commandList.length > 0 && root.showCommands
+                background: Rectangle { radius: Theme.radius; color: Theme.panelRaised; border.width: 1; border.color: Theme.border }
+                contentItem: ListView {
+                    id: commandList
+                    model: root.commandList
+                    clip: true
+                    boundsBehavior: Flickable.StopAtBounds
+                    ScrollBar.vertical: ScrollBar {}
+                    delegate: Rectangle {
+                        id: cmdRow
+                        required property var modelData
+                        width: commandList.width
+                        height: cmdText.implicitHeight + 10
+                        radius: 4
+                        color: cmdTap.hovered ? Theme.field : "transparent"
+                        Label {
+                            id: cmdText
+                            x: 6; y: 5
+                            width: parent.width - 12
+                            text: "/" + cmdRow.modelData.name + (cmdRow.modelData.hint ? " " + cmdRow.modelData.hint : "") + (cmdRow.modelData.description ? "\n" + cmdRow.modelData.description : "")
+                            color: Theme.text
+                            font.pixelSize: 11
+                            wrapMode: Text.WordWrap
+                            maximumLineCount: 3
+                            elide: Text.ElideRight
+                        }
+                        HoverHandler { id: cmdTap }
+                        TapHandler { onTapped: root.useCommand(cmdRow.modelData.name) }
+                    }
+                }
+            }
+
             Btn {
                 text: "Direction"
                 onClicked: direction.open()

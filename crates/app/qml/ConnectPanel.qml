@@ -344,6 +344,7 @@ Rectangle {
     Dialog {
         id: skillConfirm
         modal: true
+        Overlay.modal: Rectangle { color: Qt.rgba(0, 0, 0, 0.55) }
         anchors.centerIn: Overlay.overlay
         width: Math.min(560, Overlay.overlay ? Overlay.overlay.width - 40 : 560)
         title: "Install the OpenDesigner skill?"
@@ -382,6 +383,7 @@ Rectangle {
     Dialog {
         id: serverDialog
         modal: true
+        Overlay.modal: Rectangle { color: Qt.rgba(0, 0, 0, 0.55) }
         anchors.centerIn: Overlay.overlay
         width: Math.min(560, Overlay.overlay ? Overlay.overlay.width - 40 : 560)
         title: root.editing === "" ? "Add an MCP server" : "Change the MCP server"
@@ -451,6 +453,7 @@ Rectangle {
         id: removeDialog
         property string serverName: ""
         modal: true
+        Overlay.modal: Rectangle { color: Qt.rgba(0, 0, 0, 0.55) }
         anchors.centerIn: Overlay.overlay
         width: Math.min(460, Overlay.overlay ? Overlay.overlay.width - 40 : 460)
         title: "Remove the MCP server?"

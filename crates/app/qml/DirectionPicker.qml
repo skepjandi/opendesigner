@@ -20,10 +20,9 @@ Dialog {
     property string density: ""
     property string customColors: ""
 
-    function toggle(list, id) {
-        const at = list.indexOf(id)
-        if (at >= 0) list.splice(at, 1)
-        else list.push(id)
+    // arrays are replaced, not changed in place, so what depends on them updates
+    function toggled(list, id) {
+        return list.indexOf(id) >= 0 ? list.filter(x => x !== id) : list.concat([id])
     }
     function selection() {
         return {
@@ -41,9 +40,12 @@ Dialog {
 
     title: "Direction"
     modal: true
-    width: Math.min(720, parent ? parent.width - 60 : 720)
-    height: Math.min(680, parent ? parent.height - 60 : 680)
-    standardButtons: Dialog.Cancel
+    // always in the middle of the window and sized by it, wherever the button that opened it is
+    parent: Overlay.overlay
+    anchors.centerIn: Overlay.overlay
+    width: Math.min(720, Overlay.overlay ? Overlay.overlay.width - 60 : 720)
+    height: Math.min(680, Overlay.overlay ? Overlay.overlay.height - 60 : 680)
+    Overlay.modal: Rectangle { color: Qt.rgba(0, 0, 0, 0.55) }
     onOpened: {
         if (picker.styles.length === 0) picker.styles = ["swiss"]
         if (picker.palette === "") picker.palette = "midnight-gold"
@@ -85,7 +87,7 @@ Dialog {
                         active: picker.styles.indexOf(modelData.id) >= 0
                         implicitHeight: 26
                         font.pixelSize: 11
-                        onClicked: picker.toggle(picker.styles, modelData.id)
+                        onClicked: picker.styles = picker.toggled(picker.styles, modelData.id)
                         ToolTip.visible: hovered
                         ToolTip.text: modelData.note
                     }
@@ -100,7 +102,15 @@ Dialog {
                     model: picker.catalog.palettes
                     delegate: Btn {
                         required property var modelData
-                        text: "■ " + modelData.name
+                        text: modelData.name
+                        leftPadding: 30
+                        Rectangle {
+                            x: 8; anchors.verticalCenter: parent.verticalCenter
+                            width: 16; height: 12; radius: 3
+                            color: modelData.colors[0]
+                            border.width: 1; border.color: Theme.border
+                            Rectangle { x: parent.width - 6; y: 0; width: 6; height: parent.height; radius: 3; color: modelData.colors[3] }
+                        }
                         active: picker.palette === modelData.id && picker.customColors === ""
                         implicitHeight: 26
                         font.pixelSize: 11
@@ -152,7 +162,7 @@ Dialog {
                         active: picker.moods.indexOf(modelData.id) >= 0
                         implicitHeight: 26
                         font.pixelSize: 11
-                        onClicked: picker.toggle(picker.moods, modelData.id)
+                        onClicked: picker.moods = picker.toggled(picker.moods, modelData.id)
                     }
                 }
             }
@@ -203,7 +213,7 @@ Dialog {
                         active: picker.imagery.indexOf(modelData.id) >= 0
                         implicitHeight: 26
                         font.pixelSize: 11
-                        onClicked: picker.toggle(picker.imagery, modelData.id)
+                        onClicked: picker.imagery = picker.toggled(picker.imagery, modelData.id)
                     }
                 }
             }
