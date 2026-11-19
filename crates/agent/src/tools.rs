@@ -166,9 +166,11 @@ pub fn definitions() -> Vec<Value> {
             "apply_ops",
             "Change the design with a list of operations, applied together or not at all. \
              Operations: {op:'create', parent, index?, node:{kind, name?, x, y, width, height, fill?, stroke?, \
-             corner_radius?, opacity?, visible?, text?, font_size?, image?, children?}}, \
+             corner_radius?, opacity?, visible?, text?, font_size?, font_family?, font_weight?, text_align?, \
+             line_height?, image?, children?}}, \
              {op:'set', id, prop:{name, value}} with name one of name, x, y, width, height, visible, opacity, \
-             fill, stroke, corner_radius, text, font_size, image, {op:'move', id, x, y}, \
+             fill, stroke, corner_radius, text, font_size, font_family, font_weight, text_align, line_height, \
+             image, {op:'move', id, x, y}, \
              {op:'reparent', id, parent, index?}, {op:'delete', id}. Colors are '#rrggbb', '#rrggbbaa' or \
              '{token.name}'. Ids are minted for you; the result lists the created ids. A checkpoint is taken \
              before your first change in a turn so the user can restore it.",

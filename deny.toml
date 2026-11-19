@@ -3,6 +3,12 @@ all-features = true
 
 [advisories]
 version = 2
+# ttf-parser is marked unmaintained (no vulnerability). It is reached only through fontdb, which
+# cosmic-text uses to read the bundled font and the machine's installed fonts; a project file or an
+# agent can name a family but never supplies font bytes. Exit plan and evidence: roadmap decision log.
+ignore = [
+    { id = "RUSTSEC-2026-0192", reason = "unmaintained, no vulnerability; fonts come from the app bundle and the user's machine only" },
+]
 
 [licenses]
 version = 2

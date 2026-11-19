@@ -410,3 +410,66 @@ fn operations_round_trip_through_json_as_agents_will_send_them() {
     );
     assert!(serde_json::from_str::<Operation>(r#"{"op":"delete","id":"../etc"}"#).is_err());
 }
+
+#[test]
+fn text_styling_is_validated_undoable_and_only_for_text() {
+    use od_core::TextAlign;
+    let (mut s, root) = session();
+    let mut headline = NewNode::new(NodeKind::Text);
+    headline.text = Some("Hold".into());
+    headline.font_weight = Some(700.0);
+    headline.text_align = Some(TextAlign::Center);
+    let text = created_id(&mut s, &root, headline);
+    let node = s.document().node(&text).unwrap();
+    assert_eq!(node.font_weight, Some(700.0));
+    assert_eq!(node.text_align, Some(TextAlign::Center));
+
+    let set = |s: &mut Session, id: &NodeId, prop: Property| {
+        s.apply(
+            Actor::User,
+            None,
+            &[Operation::Set {
+                id: id.clone(),
+                prop,
+            }],
+        )
+    };
+    let before = s.document().clone();
+    for bad in [
+        Property::FontWeight(Some(50.0)),
+        Property::FontWeight(Some(f64::NAN)),
+        Property::LineHeight(Some(9.0)),
+        Property::FontFamily(Some("  ".into())),
+        Property::FontFamily(Some("a\nb".into())),
+        Property::FontFamily(Some("x".repeat(101))),
+    ] {
+        assert!(
+            matches!(
+                set(&mut s, &text, bad.clone()),
+                Err(OpError::OutOfBounds { .. })
+            ),
+            "{bad:?} should be refused"
+        );
+    }
+    assert!(
+        same_content(&before, s.document()),
+        "a refused set changes nothing"
+    );
+
+    set(&mut s, &text, Property::FontFamily(Some("Inter".into()))).unwrap();
+    set(&mut s, &text, Property::LineHeight(Some(1.5))).unwrap();
+    assert_eq!(
+        s.document().node(&text).unwrap().font_family.as_deref(),
+        Some("Inter")
+    );
+    s.undo(Actor::User).unwrap();
+    s.undo(Actor::User).unwrap();
+    assert_eq!(s.document().node(&text).unwrap().font_family, None);
+    assert_eq!(s.document().node(&text).unwrap().line_height, None);
+
+    let rect_id = created_id(&mut s, &root, rect(0.0, 0.0, 10.0, 10.0));
+    assert!(matches!(
+        set(&mut s, &rect_id, Property::FontWeight(Some(400.0))),
+        Err(OpError::NotApplicable { .. })
+    ));
+}

@@ -708,24 +708,18 @@ impl EditorState {
     }
 }
 
-/// Text and image nodes in a frame: the renderer does not draw them yet, so the canvas previews
-/// them with an overlay (and exports report them).
+/// Image nodes in a frame: the renderer does not draw them yet, so the canvas marks where they are
+/// (and exports report them).
 fn collect_unrendered(doc: &od_core::Document, frame: &NodeId) -> Vec<Value> {
     fn walk(doc: &od_core::Document, frame: &NodeId, n: &Node, out: &mut Vec<Value>) {
         if !n.visible {
             return;
         }
-        if matches!(n.kind, NodeKind::Text | NodeKind::Image) {
+        if n.kind == NodeKind::Image {
             if let Some(b) = geometry::bounds_in_frame(doc, frame, &n.id) {
-                let fill = n
-                    .fill
-                    .as_ref()
-                    .and_then(|p| p.resolve(&doc.tokens).ok())
-                    .map(|c| c.to_hex());
                 out.push(json!({
-                    "id": n.id, "kind": n.kind.as_str(), "x": b.x, "y": b.y,
-                    "width": b.width, "height": b.height, "text": n.text,
-                    "font_size": n.font_size, "fill": fill, "opacity": n.opacity,
+                    "id": n.id, "kind": "image", "x": b.x, "y": b.y,
+                    "width": b.width, "height": b.height,
                 }));
             }
         }

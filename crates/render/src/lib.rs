@@ -1,6 +1,8 @@
-//! CPU rasterizer for OpenDesigner documents: frames, groups, rectangles and ellipses to pixels,
-//! and PNG export. Text and images are not drawn yet; they are reported as warnings so an export
+//! CPU rasterizer for OpenDesigner documents: frames, groups, rectangles, ellipses and text to
+//! pixels, and PNG export. Images are not drawn yet; they are reported as warnings so an export
 //! never silently drops content (`docs/wiki/roadmap.md`, Phase 2).
+
+mod text;
 
 use std::collections::BTreeMap;
 
@@ -38,7 +40,6 @@ pub enum RenderError {
 /// Content the renderer could not draw.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Warning {
-    TextNotRendered(NodeId),
     ImageNotRendered(NodeId),
 }
 
@@ -117,7 +118,16 @@ fn draw(
         NodeKind::Ellipse => Rect::from_xywh(0.0, 0.0, w, h).and_then(PathBuilder::from_oval),
         NodeKind::Group => None,
         NodeKind::Text => {
-            ctx.warnings.push(Warning::TextNotRendered(node.id.clone()));
+            let color = match &node.fill {
+                Some(fill) => fill.resolve(ctx.tokens)?,
+                None => od_core::Rgba {
+                    r: 0,
+                    g: 0,
+                    b: 0,
+                    a: 255,
+                },
+            };
+            text::draw_text(pixmap, mask, node, transform, color, opacity);
             None
         }
         NodeKind::Image => {
@@ -372,14 +382,172 @@ mod tests {
     }
 
     #[test]
-    fn text_and_images_are_reported_not_dropped_silently() {
+    fn images_are_reported_not_dropped_silently() {
         let (mut s, frame) = frame_session();
-        let t = add(&mut s, &frame, NewNode::new(NodeKind::Text));
         let i = add(&mut s, &frame, NewNode::new(NodeKind::Image));
         let r = render_frame(s.document(), &frame, 1.0).unwrap();
-        assert_eq!(
-            r.warnings,
-            vec![Warning::TextNotRendered(t), Warning::ImageNotRendered(i)]
+        assert_eq!(r.warnings, vec![Warning::ImageNotRendered(i)]);
+    }
+
+    /// A white 400x200 frame with one black text node at (20, 20).
+    fn text_frame(configure: impl FnOnce(&mut NewNode)) -> Rendered {
+        let (mut s, frame) = frame_session();
+        let set = |p: od_core::Property| Operation::Set {
+            id: frame.clone(),
+            prop: p,
+        };
+        s.apply(
+            Actor::User,
+            None,
+            &[
+                set(od_core::Property::Width(400.0)),
+                set(od_core::Property::Height(200.0)),
+                set(od_core::Property::Fill(Some(
+                    Paint::parse("#ffffff").unwrap(),
+                ))),
+            ],
+        )
+        .unwrap();
+        let mut t = NewNode::new(NodeKind::Text);
+        t.x = 20.0;
+        t.y = 20.0;
+        t.fill = Some(Paint::parse("#000000").unwrap());
+        t.font_size = Some(40.0);
+        configure(&mut t);
+        add(&mut s, &frame, t);
+        render_frame(s.document(), &frame, 1.0).unwrap()
+    }
+
+    /// Count of non-white pixels and their bounding box (x0, y0, x1, y1).
+    fn ink(r: &Rendered) -> (usize, Option<(u32, u32, u32, u32)>) {
+        let mut count = 0;
+        let mut bounds: Option<(u32, u32, u32, u32)> = None;
+        for y in 0..r.pixmap.height() {
+            for x in 0..r.pixmap.width() {
+                if px(r, x, y) != [255, 255, 255, 255] {
+                    count += 1;
+                    bounds = Some(match bounds {
+                        None => (x, y, x, y),
+                        Some((a, b, c, d)) => (a.min(x), b.min(y), c.max(x), d.max(y)),
+                    });
+                }
+            }
+        }
+        (count, bounds)
+    }
+
+    #[test]
+    fn text_is_drawn_at_its_position_and_renders_the_same_every_time() {
+        let draw = || {
+            text_frame(|t| {
+                t.text = Some("Hold".into());
+            })
+        };
+        let (first, second) = (draw(), draw());
+        assert_eq!(first.pixmap.data(), second.pixmap.data());
+        let (count, bounds) = ink(&first);
+        let (x0, y0, x1, y1) = bounds.expect("text leaves ink");
+        assert!(count > 200, "{count} inked pixels");
+        assert!(
+            x0 >= 18 && y0 >= 18,
+            "ink starts at the node's corner: {x0},{y0}"
+        );
+        assert!(
+            x1 < 20 + 160 && y1 < 20 + 60,
+            "four glyphs at 40px: {x1},{y1}"
+        );
+        assert!(first.warnings.is_empty());
+    }
+
+    #[test]
+    fn weight_changes_the_glyphs_and_size_scales_them() {
+        let regular = ink(&text_frame(|t| t.text = Some("Hold".into()))).0;
+        let bold = ink(&text_frame(|t| {
+            t.text = Some("Hold".into());
+            t.font_weight = Some(700.0);
+        }))
+        .0;
+        let large = ink(&text_frame(|t| {
+            t.text = Some("Hold".into());
+            t.font_size = Some(80.0);
+        }))
+        .0;
+        assert!(bold > regular, "bold {bold} vs regular {regular}");
+        assert!(large > regular * 3, "large {large} vs regular {regular}");
+    }
+
+    #[test]
+    fn alignment_moves_the_ink_inside_the_box_and_a_width_wraps_lines() {
+        let boxed = |align| {
+            ink(&text_frame(|t| {
+                t.text = Some("Hi".into());
+                t.width = 300.0;
+                t.text_align = align;
+            }))
+            .1
+            .expect("ink")
+        };
+        let left = boxed(None);
+        let centre = boxed(Some(od_core::TextAlign::Center));
+        let right = boxed(Some(od_core::TextAlign::Right));
+        assert!(
+            left.0 < centre.0 && centre.0 < right.0,
+            "{left:?} {centre:?} {right:?}"
+        );
+        assert!(
+            right.2 <= 20 + 300,
+            "right-aligned ink stays inside the box"
+        );
+
+        let one_line = ink(&text_frame(|t| t.text = Some("aaa bbb ccc ddd".into())))
+            .1
+            .expect("ink");
+        let wrapped = ink(&text_frame(|t| {
+            t.text = Some("aaa bbb ccc ddd".into());
+            t.width = 120.0;
+        }))
+        .1
+        .expect("ink");
+        assert!(
+            wrapped.3 > one_line.3 + 30,
+            "wrapped {wrapped:?} vs one line {one_line:?}"
+        );
+        assert!(
+            wrapped.2 <= 20 + 120 + 2,
+            "no line is wider than the box: {wrapped:?}"
+        );
+    }
+
+    #[test]
+    fn text_respects_opacity_the_frame_clip_and_unknown_families() {
+        let faint = text_frame(|t| {
+            t.text = Some("Hold".into());
+            t.opacity = Some(0.25);
+        });
+        let darkest = (0..faint.pixmap.width())
+            .flat_map(|x| (0..faint.pixmap.height()).map(move |y| (x, y)))
+            .map(|(x, y)| px(&faint, x, y)[0])
+            .min()
+            .expect("pixels");
+        assert!(
+            darkest > 150,
+            "a quarter-opacity black glyph stays light: {darkest}"
+        );
+
+        let clipped = text_frame(|t| {
+            t.text = Some("Hold".into());
+            t.x = 380.0;
+        });
+        assert_eq!(clipped.pixmap.width(), 400);
+        assert!(ink(&clipped).0 > 0, "the part inside the frame is drawn");
+
+        let fallback = text_frame(|t| {
+            t.text = Some("Hold".into());
+            t.font_family = Some("No Such Family Xyz".into());
+        });
+        assert!(
+            ink(&fallback).0 > 200,
+            "a missing family falls back to the bundled font"
         );
     }
 

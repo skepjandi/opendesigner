@@ -54,7 +54,7 @@ OpenCut's rewrite states it as a principle: business logic lives in Rust, and ea
 | Crate | Responsibility | Depends on Qt? | Status |
 |-------|----------------|----------------|--------|
 | `core` | Node model, validated operations, history/checkpoints, project I/O, annotations, workspace and guidance, geometry (bounds, hit tests), panel views ([Document Format](./document-format.md)) | no | built |
-| `render` | CPU rasterizer and PNG export: frames, groups, rectangles, ellipses; text and images are reported, not drawn yet | no | partial |
+| `render` | CPU rasterizer and PNG export: frames, groups, rectangles, ellipses, text (shaped, wrapped, aligned; one style per node); images are reported, not drawn yet | no | partial |
 | `store` | Export presets and validation ([Store Assets](./store-assets.md)); device frames and panoramas are not built | no | partial |
 | `agent` | MCP server and tools, token, skill generator and installer ([Agent Integration](./agent-integration.md)); the ACP client is not built | no | built (MCP, skill) |
 | `cli` | Headless commands over the same operations | no | built |

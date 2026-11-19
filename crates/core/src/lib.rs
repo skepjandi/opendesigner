@@ -18,7 +18,7 @@ pub mod workspace;
 pub use annotations::{Annotation, AnnotationStatus, AnnotationTarget, Annotations};
 pub use error::{OpError, ProjectError};
 pub use history::{Actor, Checkpoint, Session, Transaction, TransactionKind, TxReceipt};
-pub use model::{Document, Node, NodeId, NodeKind, Page, Stroke};
+pub use model::{Document, Node, NodeId, NodeKind, Page, Stroke, TextAlign};
 pub use ops::{AppliedOp, NewNode, Operation, Property};
 pub use paint::{Paint, Rgba};
 pub use workspace::{Guidance, Workspace};

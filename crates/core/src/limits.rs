@@ -10,6 +10,11 @@ pub const MAX_NAME_LEN: usize = 200;
 pub const MAX_TEXT_LEN: usize = 10_000;
 pub const MAX_PATH_LEN: usize = 1_024;
 pub const MAX_FONT_SIZE: f64 = 2_000.0;
+pub const MAX_FAMILY_LEN: usize = 100;
+pub const MIN_FONT_WEIGHT: f64 = 100.0;
+pub const MAX_FONT_WEIGHT: f64 = 900.0;
+pub const MIN_LINE_HEIGHT: f64 = 0.5;
+pub const MAX_LINE_HEIGHT: f64 = 4.0;
 pub const MAX_STROKE_WIDTH: f64 = 1_000.0;
 pub const MAX_OPS_PER_TRANSACTION: usize = 1_000;
 pub const MAX_NODES: usize = 100_000;
@@ -47,6 +52,24 @@ pub fn text_within(what: &'static str, s: &str, max: usize) -> Result<(), OpErro
         return Err(OpError::OutOfBounds {
             what,
             detail: "contains control characters".to_string(),
+        });
+    }
+    Ok(())
+}
+
+/// A font family name: non-empty, bounded, printable.
+pub fn family_name(s: &str) -> Result<(), OpError> {
+    if s.trim().is_empty() {
+        return Err(OpError::OutOfBounds {
+            what: "font_family",
+            detail: "is empty".to_string(),
+        });
+    }
+    text_within("font_family", s, MAX_FAMILY_LEN)?;
+    if s.contains('\n') {
+        return Err(OpError::OutOfBounds {
+            what: "font_family",
+            detail: "contains a line break".to_string(),
         });
     }
     Ok(())

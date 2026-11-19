@@ -99,6 +99,14 @@ pub struct Stroke {
     pub width: f64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TextAlign {
+    Left,
+    Center,
+    Right,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Node {
@@ -123,6 +131,18 @@ pub struct Node {
     pub text: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub font_size: Option<f64>,
+    /// Family name; unset means the bundled default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub font_family: Option<String>,
+    /// 100 to 900; unset means 400.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub font_weight: Option<f64>,
+    /// Unset means left.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text_align: Option<TextAlign>,
+    /// Multiple of the font size; unset means 1.2.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line_height: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -162,6 +182,10 @@ impl Node {
             corner_radius: 0.0,
             text: (kind == NodeKind::Text).then(String::new),
             font_size: (kind == NodeKind::Text).then_some(16.0),
+            font_family: None,
+            font_weight: None,
+            text_align: None,
+            line_height: None,
             image: None,
             children: Vec::new(),
         }
@@ -418,6 +442,25 @@ pub(crate) fn validate_node_fields(
     finite_in("corner_radius", node.corner_radius, 0.0, limits::MAX_SIZE)?;
     if let Some(size) = node.font_size {
         finite_in("font_size", size, 1.0, limits::MAX_FONT_SIZE)?;
+    }
+    if let Some(family) = &node.font_family {
+        limits::family_name(family)?;
+    }
+    if let Some(w) = node.font_weight {
+        finite_in(
+            "font_weight",
+            w,
+            limits::MIN_FONT_WEIGHT,
+            limits::MAX_FONT_WEIGHT,
+        )?;
+    }
+    if let Some(h) = node.line_height {
+        finite_in(
+            "line_height",
+            h,
+            limits::MIN_LINE_HEIGHT,
+            limits::MAX_LINE_HEIGHT,
+        )?;
     }
     if let Some(text) = &node.text {
         text_within("text", text, limits::MAX_TEXT_LEN)?;

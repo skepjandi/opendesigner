@@ -36,7 +36,7 @@ Item {
             return check(ids.rect !== "" && ids.ellipse !== "" && ids.text !== "", "shapes were not created") &&
                    check(JSON.parse(editor.layers).length === 5, "layers should list the page, the frame and three shapes") &&
                    check(editor.hitTest(150, 250) === ids.rect, "hit test should find the rectangle") &&
-                   check(JSON.parse(editor.unrendered).length === 1, "the text node is previewed by the overlay")
+                   check(JSON.parse(editor.unrendered).length === 0, "text is drawn by the renderer, so nothing is left to overlay")
         },
         function () { canvas.fit(); return true },
         function () {
