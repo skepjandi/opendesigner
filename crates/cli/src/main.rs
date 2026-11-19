@@ -13,7 +13,9 @@ use od_core::{
 mod serve;
 mod skillcmd;
 
+use od_agent::export::{Plan, export_assets};
 use od_render::RenderError;
+use od_store::devices::Device;
 use od_store::{ImageFacts, Preset, Verification};
 use thiserror::Error;
 
@@ -78,6 +80,44 @@ enum Command {
         /// Keep the alpha channel (stores reject it for screenshots).
         #[arg(long)]
         alpha: bool,
+    },
+    /// Render several frames into the project's exports/ as <prefix>-01.png, -02, ... and
+    /// validate them as a set; nothing is written unless all of them pass.
+    ExportSet {
+        dir: PathBuf,
+        /// Frame ids in order (repeat the flag); every frame in the project when omitted.
+        #[arg(long = "frame")]
+        frames: Vec<String>,
+        #[arg(long)]
+        prefix: String,
+        #[arg(long)]
+        preset: Option<String>,
+        #[arg(long, default_value_t = 1.0)]
+        scale: f32,
+    },
+    /// Render one wide frame and cut it into equal slides (a panorama) in the project's exports/.
+    ExportPanorama {
+        dir: PathBuf,
+        #[arg(long)]
+        frame: String,
+        #[arg(long)]
+        slices: u32,
+        #[arg(long)]
+        prefix: String,
+        #[arg(long)]
+        preset: Option<String>,
+        #[arg(long, default_value_t = 1.0)]
+        scale: f32,
+    },
+    /// Print a device frame as a `create` node for `apply`: phone, phone-punch-hole, tablet or
+    /// tablet-wide.
+    Device {
+        kind: String,
+        #[arg(long)]
+        screen_width: f64,
+        /// A media/ path to show on the screen.
+        #[arg(long)]
+        image: Option<String>,
     },
     /// Validate PNG files as one set against a store preset.
     Validate {
@@ -287,6 +327,72 @@ fn run(cli: Cli) -> Result<(), CliError> {
         } => {
             export(&dir, &frame, &out, preset_id.as_deref(), scale, alpha)?;
         }
+        Command::ExportSet {
+            dir,
+            frames,
+            prefix,
+            preset: preset_id,
+            scale,
+        } => {
+            let ws = Workspace::open(&dir)?;
+            let frames = if frames.is_empty() {
+                od_core::view::frames(ws.session.document())
+                    .iter()
+                    .map(|f| NodeId::parse(&f.id))
+                    .collect::<Result<Vec<_>, _>>()?
+            } else {
+                frames
+                    .iter()
+                    .map(|f| NodeId::parse(f))
+                    .collect::<Result<Vec<_>, _>>()?
+            };
+            let plan = Plan::Set {
+                frames: &frames,
+                prefix: &prefix,
+            };
+            run_export(&ws, &plan, preset_id.as_deref(), scale)?;
+        }
+        Command::ExportPanorama {
+            dir,
+            frame,
+            slices,
+            prefix,
+            preset: preset_id,
+            scale,
+        } => {
+            let ws = Workspace::open(&dir)?;
+            let frame = NodeId::parse(&frame)?;
+            let plan = Plan::Panorama {
+                frame: &frame,
+                slices,
+                prefix: &prefix,
+            };
+            run_export(&ws, &plan, preset_id.as_deref(), scale)?;
+        }
+        Command::Device {
+            kind,
+            screen_width,
+            image,
+        } => {
+            let device = Device::parse(&kind).ok_or_else(|| {
+                let ids: Vec<&str> = Device::ALL.iter().map(|d| d.id()).collect();
+                CliError::Invalid(format!(
+                    "unknown device {kind:?}; use one of {}",
+                    ids.join(", ")
+                ))
+            })?;
+            if !(screen_width.is_finite() && (50.0..=8192.0).contains(&screen_width)) {
+                return Err(CliError::Invalid(
+                    "--screen-width must be 50 to 8192".into(),
+                ));
+            }
+            let node = od_store::devices::template(device, screen_width, image.as_deref());
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&node)
+                    .map_err(|e| CliError::Invalid(e.to_string()))?
+            );
+        }
         Command::Validate {
             preset: preset_id,
             files,
@@ -412,6 +518,34 @@ fn note_verification(p: &Preset) {
             p.id, p.source
         );
     }
+}
+
+fn run_export(
+    ws: &Workspace,
+    plan: &Plan,
+    preset_id: Option<&str>,
+    scale: f32,
+) -> Result<(), CliError> {
+    let out = export_assets(ws, plan, preset_id, Some(scale), false).map_err(|e| {
+        if e.0.starts_with("not written") {
+            CliError::Violations(e.0)
+        } else {
+            CliError::Invalid(e.0)
+        }
+    })?;
+    for note in &out.not_drawn {
+        eprintln!("warning: {note}");
+    }
+    if let Some(p) = preset_id.and_then(od_store::find) {
+        note_verification(p);
+    }
+    for f in &out.files {
+        println!(
+            "wrote {} ({} bytes, {}x{})",
+            f.path, f.bytes, f.width, f.height
+        );
+    }
+    Ok(())
 }
 
 fn export(

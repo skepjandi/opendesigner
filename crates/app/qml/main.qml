@@ -106,6 +106,14 @@ ApplicationWindow {
                     ToolTip.delay: 600
                     ToolTip.text: "Add a PNG, JPEG or WebP image (or drop one on the canvas)"
                 }
+                Btn {
+                    text: "Device…"
+                    enabled: backend.activeFrame !== ""
+                    onClicked: deviceDialog.openDialog()
+                    ToolTip.visible: hovered
+                    ToolTip.delay: 600
+                    ToolTip.text: "Add a phone or tablet frame with a screen to drop a capture on"
+                }
                 Item { Layout.fillWidth: true }
                 Btn { text: "Undo"; enabled: backend.canUndo; onClicked: backend.undo() }
                 Btn { text: "Redo"; enabled: backend.canRedo; onClicked: backend.redo() }
@@ -183,6 +191,7 @@ ApplicationWindow {
                     SplitView.preferredHeight: 360
                     SplitView.minimumHeight: 160
                     onRequestPin: nodeId => pinDialog.openFor(nodeId, 0, 0, 0, 0)
+                    onRequestReplaceImage: nodeId => { imageDialog.targetId = nodeId; imageDialog.open() }
                 }
                 AgentPanel {
                     id: agent
@@ -245,9 +254,15 @@ ApplicationWindow {
     FolderDialog { id: openDialog; title: "Open an OpenDesigner project folder"; onAccepted: backend.openProject(selectedFolder.toString()) }
     FileDialog {
         id: imageDialog
-        title: "Add an image"
+        property string targetId: ""
+        title: targetId !== "" ? "Choose the new picture" : "Add an image"
         nameFilters: ["Images (*.png *.jpg *.jpeg *.webp)"]
-        onAccepted: backend.importImage(selectedFile.toString())
+        onAccepted: {
+            if (targetId !== "") backend.replaceImage(selectedFile.toString(), targetId)
+            else backend.importImage(selectedFile.toString())
+            targetId = ""
+        }
+        onRejected: targetId = ""
     }
     FolderDialog { id: parentDialog; title: "Where should the project folder go?"; onAccepted: newDialog.parentUrl = selectedFolder.toString() }
 
@@ -338,38 +353,95 @@ ApplicationWindow {
     }
 
     Modal {
-        id: exportDialog
-        title: "Export the open frame"
-        width: 540
+        id: deviceDialog
+        title: "Add a device frame"
+        width: 440
         standardButtons: Dialog.Ok | Dialog.Cancel
-        property var presets: []
+        property var kinds: []
         function openDialog() {
-            presets = JSON.parse(backend.framePresets()).filter(p => p.id.indexOf("web-") !== 0)
-            fileField.text = "shot-01.png"
-            presetBox.currentIndex = 0
+            kinds = JSON.parse(backend.deviceKinds())
+            kindBox.currentIndex = 0
             open()
         }
         contentItem: ColumnLayout {
             spacing: 8
+            ComboBox {
+                id: kindBox
+                Layout.fillWidth: true
+                model: deviceDialog.kinds.map(k => k.label)
+            }
+            Label {
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+                color: Theme.muted
+                font.pixelSize: 11
+                text: "A generic outline with typical proportions, as large as fits the frame. Drop a screenshot on its screen to fill it; drop another to swap it."
+            }
+        }
+        onAccepted: backend.addDevice(deviceDialog.kinds[kindBox.currentIndex].id)
+    }
+
+    Modal {
+        id: exportDialog
+        title: "Export"
+        width: 560
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        property var presets: []
+        property string mode: "frame"
+        function openDialog() {
+            presets = JSON.parse(backend.framePresets()).filter(p => p.id.indexOf("web-") !== 0)
+            mode = "frame"
+            fileField.text = "shot-01.png"
+            presetBox.currentIndex = 0
+            slicesBox.value = 3
+            open()
+        }
+        contentItem: ColumnLayout {
+            spacing: 8
+            Label { text: "What to export"; color: Theme.muted; font.pixelSize: 12 }
+            RadioButton {
+                text: "The open frame"
+                checked: exportDialog.mode === "frame"
+                onClicked: { exportDialog.mode = "frame"; fileField.text = "shot-01.png" }
+            }
+            RadioButton {
+                text: "Every frame on this page, as a set"
+                checked: exportDialog.mode === "set"
+                onClicked: { exportDialog.mode = "set"; fileField.text = "shot" }
+            }
+            RowLayout {
+                RadioButton {
+                    text: "Cut the open frame into"
+                    checked: exportDialog.mode === "panorama"
+                    onClicked: { exportDialog.mode = "panorama"; fileField.text = "shot" }
+                }
+                SpinBox { id: slicesBox; from: 2; to: 50; value: 3; editable: true; enabled: exportDialog.mode === "panorama" }
+                Label { text: "equal slides (a panorama)"; color: Theme.text }
+            }
             Label { text: "Check against"; color: Theme.muted; font.pixelSize: 12 }
             ComboBox {
                 id: presetBox
                 Layout.fillWidth: true
                 model: ["No store preset"].concat(exportDialog.presets.map(p => p.label))
             }
-            Label { text: "File name (saved in the project's exports folder)"; color: Theme.muted; font.pixelSize: 12 }
+            Label {
+                text: exportDialog.mode === "frame" ? "File name (saved in the project's exports folder)"
+                                                    : "Name stem: shot gives shot-01.png, shot-02.png, ..."
+                color: Theme.muted
+                font.pixelSize: 12
+            }
             Field { id: fileField; Layout.fillWidth: true }
             Label {
                 Layout.fillWidth: true
                 wrapMode: Text.WordWrap
                 color: Theme.muted
                 font.pixelSize: 11
-                text: "A file that does not meet the chosen store's rules is not written; you are told which rule it breaks."
+                text: "With a store chosen, every image and the number of images must meet its rules or nothing is written; you are told which rule each file breaks."
             }
         }
         onAccepted: {
             const preset = presetBox.currentIndex > 0 ? exportDialog.presets[presetBox.currentIndex - 1].id : ""
-            backend.exportFrame(preset, fileField.text.trim())
+            backend.exportAssets(exportDialog.mode, preset, fileField.text.trim(), slicesBox.value)
         }
     }
 

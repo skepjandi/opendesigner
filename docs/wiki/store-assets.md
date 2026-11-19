@@ -1,6 +1,6 @@
 # Store Assets
 
-> **Status: Design.** "Today" sections describe the two reference projects as read on 2026-11-19. The studio is intent. Store rules change; every rule here carries its source and must be re-checked before the preset ships ([invariant 9](../../AGENTS.md)).
+> **Status: Partially implemented.** Built: set and panorama export with all-or-nothing validation, generic device frames, swapping a capture by dropping a file on a screen (see [What is built](#what-is-built)). Design only: localization, safe areas, text-share and forbidden-word checks, the full web/icon set, capture helpers, the importer. "Today" sections describe the two reference projects as read on 2026-11-19. Store rules change; every rule here carries its source and must be re-checked before the preset ships ([invariant 9](../../AGENTS.md)). The built presets are copied from the reference projects and have **not** been checked against Apple's or Google's own pages (the tools say so).
 
 ## Today: how GitNotēs and OpenMedia make store art
 
@@ -33,6 +33,19 @@ From GitNotēs' `assets/store/README.md` (which cites Apple and Google), `[INFER
 | Google | text | tagline ≤ 20% of the image; no "Best"/"#1"/price/call-to-action text |
 
 Edge cases the existing scripts already learned, which presets must carry: Google's 2:1 limit means an iPhone 17 Pro Max capture (2.17:1) cannot be reused as-is, so Android sets are separate renders with an Android status bar instead of iOS chrome; Apple lists 6.9" as optional-with-fallback and 6.3" as the mandatory slot.
+
+## What is built
+
+| Piece | Where | Behavior |
+|-------|-------|----------|
+| Presets and validation | `crates/store` | Nine presets: size rule, format, alpha, count. `validate_image`, `validate_set` |
+| Export | `crates/agent/src/export.rs` | One entry point, `export_assets(plan)`, for the editor, the MCP tools and the CLI. A plan is one frame, a **set** (several frames, `<prefix>-01.png`, ...) or a **panorama** (one wide frame cut into equal columns). Everything is rendered and validated first, including the count for sets and panoramas; only then are files written, and a failed write removes the ones already written. A refusal names each file and the rule it breaks |
+| Panorama | `od_render::slice_columns` | The frame width (times scale) must divide by the slide count; slices are exact pixel columns, so a ribbon or a device placed across a seam lines up |
+| Device frames | `crates/store/src/devices.rs` | `phone` (camera island), `phone-punch-hole`, `tablet` (4:3) and `tablet-wide` (16:10): a group of body, `Screen` and camera made of ordinary nodes, so it is editable, undoable and attributed like anything else. These are **neutral shapes with typical proportions, not any manufacturer's artwork**; a screen is a placeholder rectangle until a capture is dropped on it, then an image node with `cover` fit |
+| Editor | `app` | Device button, Export dialog (frame, set, panorama, with or without a preset), drop a file on the canvas: onto an image it swaps the picture (one undoable edit, layout kept), elsewhere it adds an image; Replace button in the inspector |
+| MCP and CLI | `export_set`, `export_panorama`, `device_template`; `opendesigner export-set`, `export-panorama`, `device` | The same plans and templates |
+
+Not built: per-locale text overrides, safe areas and the "Art Safe Area" check, text-share and forbidden-word rules, a status-bar overlay, web/social/icon presets, capture helpers.
 
 ## The studio (intended)
 

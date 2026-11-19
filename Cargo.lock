@@ -1046,6 +1046,7 @@ dependencies = [
 name = "opendesigner-store"
 version = "0.0.1"
 dependencies = [
+ "opendesigner-core",
  "png",
  "thiserror 2.0.21",
 ]

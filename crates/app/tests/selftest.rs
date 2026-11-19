@@ -75,12 +75,21 @@ fn the_editor_window_runs_a_scripted_session() {
     // the project the session built
     let project = work.join("p.od");
     let page = std::fs::read_to_string(project.join("pages/p_1.json")).unwrap();
-    for name in ["\"rect\"", "\"ellipse\"", "\"text\""] {
+    for name in ["\"rect\"", "\"ellipse\"", "\"text\"", "\"Screen\""] {
         assert!(page.contains(name), "{name} missing from the saved page");
     }
     let notes = std::fs::read_to_string(project.join("annotations.json")).unwrap();
     assert!(notes.contains("make this bigger"));
     assert!(project.join("exports/shot.png").exists());
+    assert!(
+        project.join("exports/slide-01.png").exists(),
+        "the set export wrote its slide"
+    );
+    assert!(
+        project.join("exports/pano-01.png").exists()
+            && project.join("exports/pano-02.png").exists(),
+        "the panorama was cut into two files"
+    );
     assert_eq!(
         std::fs::read(project.join("media/fixture.png")).unwrap(),
         fixture,

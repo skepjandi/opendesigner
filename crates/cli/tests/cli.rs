@@ -161,3 +161,82 @@ fn bad_input_fails_with_a_reason_and_no_changes() {
     assert!(String::from_utf8_lossy(&out.stderr).contains("unknown preset"));
     assert!(ok(&["presets"]).contains("apple-iphone-6.9"));
 }
+
+/// The studio flow without a window: a device frame from the command line, applied as an ordinary
+/// operation, then a panorama cut into App Store slides, all-or-nothing.
+#[test]
+fn a_device_frame_and_a_panorama_work_from_the_command_line() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("studio.od");
+    let dir_s = s(&dir);
+    ok(&["new", dir_s, "--name", "Studio"]);
+    let page = fs::read_to_string(dir.join("pages/p_1.json")).unwrap();
+    let root: serde_json::Value = serde_json::from_str(&page).unwrap();
+    let root_id = root["root"]["id"].as_str().unwrap().to_string();
+
+    let device: serde_json::Value =
+        serde_json::from_str(&ok(&["device", "phone", "--screen-width", "800"])).unwrap();
+    assert_eq!(device["children"][1]["name"], "Screen");
+    let bad = od(&["device", "watch", "--screen-width", "800"]);
+    assert!(!bad.status.success());
+    assert!(
+        !od(&["device", "phone", "--screen-width", "4"])
+            .status
+            .success()
+    );
+
+    let mut frame = serde_json::json!({
+        "kind": "frame", "name": "Wide", "width": 3 * 1320, "height": 2868,
+        "fill": "#060b1c", "children": [device]
+    });
+    frame["children"][0]["x"] = 300.into();
+    let ops = tmp.path().join("ops.json");
+    fs::write(
+        &ops,
+        serde_json::json!([{"op": "create", "parent": root_id, "node": frame}]).to_string(),
+    )
+    .unwrap();
+    let receipt: serde_json::Value = serde_json::from_str(&ok(&["apply", dir_s, s(&ops)])).unwrap();
+    let wide = receipt["created"][0].as_str().unwrap().to_string();
+
+    let out = ok(&[
+        "export-panorama",
+        dir_s,
+        "--frame",
+        &wide,
+        "--slices",
+        "3",
+        "--prefix",
+        "shot",
+        "--preset",
+        "apple-iphone-6.9",
+    ]);
+    assert_eq!(out.matches("wrote exports/shot-0").count(), 3, "{out}");
+    let files: Vec<String> = (1..=3)
+        .map(|n| s(&dir.join(format!("exports/shot-0{n}.png"))).to_string())
+        .collect();
+    let mut validate = vec!["validate", "--preset", "apple-iphone-6.9"];
+    validate.extend(files.iter().map(String::as_str));
+    ok(&validate);
+
+    let refused = od(&[
+        "export-panorama",
+        dir_s,
+        "--frame",
+        &wide,
+        "--slices",
+        "5",
+        "--prefix",
+        "bad",
+        "--preset",
+        "apple-iphone-6.9",
+    ]);
+    assert!(!refused.status.success());
+    assert!(
+        !dir.join("exports/bad-01.png").exists(),
+        "nothing is written on a refusal"
+    );
+
+    let set = ok(&["export-set", dir_s, "--prefix", "all"]);
+    assert!(set.contains("wrote exports/all-01.png"), "{set}");
+}

@@ -82,8 +82,17 @@ pub mod qobject {
         #[cxx_name = "importImage"]
         fn import_image(self: Pin<&mut Self>, url: &QString) -> QString;
         #[qinvokable]
-        #[cxx_name = "importImageAt"]
-        fn import_image_at(self: Pin<&mut Self>, url: &QString, x: f64, y: f64) -> QString;
+        #[cxx_name = "replaceImage"]
+        fn replace_image(self: Pin<&mut Self>, url: &QString, id: &QString) -> QString;
+        #[qinvokable]
+        #[cxx_name = "dropImage"]
+        fn drop_image(self: Pin<&mut Self>, url: &QString, x: f64, y: f64) -> QString;
+        #[qinvokable]
+        #[cxx_name = "deviceKinds"]
+        fn device_kinds(self: &Self) -> QString;
+        #[qinvokable]
+        #[cxx_name = "addDevice"]
+        fn add_device(self: Pin<&mut Self>, kind: &QString) -> QString;
         #[qinvokable]
         #[cxx_name = "deleteSelected"]
         fn delete_selected(self: Pin<&mut Self>);
@@ -146,8 +155,14 @@ pub mod qobject {
         #[cxx_name = "renderCanvas"]
         fn render_canvas(self: Pin<&mut Self>, scale: f64);
         #[qinvokable]
-        #[cxx_name = "exportFrame"]
-        fn export_frame(self: Pin<&mut Self>, preset: &QString, file: &QString) -> QString;
+        #[cxx_name = "exportAssets"]
+        fn export_assets(
+            self: Pin<&mut Self>,
+            mode: &QString,
+            preset: &QString,
+            name: &QString,
+            slices: i32,
+        ) -> QString;
 
         #[qinvokable]
         #[cxx_name = "startMcp"]
@@ -394,8 +409,32 @@ impl qobject::Editor {
         self.import_image_impl(url, None)
     }
 
-    pub fn import_image_at(self: Pin<&mut Self>, url: &QString, x: f64, y: f64) -> QString {
-        self.import_image_impl(url, Some((x, y)))
+    pub fn replace_image(mut self: Pin<&mut Self>, url: &QString, id: &QString) -> QString {
+        let (path, id) = (path_from_url(&url.to_string()), id.to_string());
+        q(&self
+            .as_mut()
+            .act(|s| s.replace_image(std::path::Path::new(&path), &id))
+            .unwrap_or_default())
+    }
+
+    pub fn drop_image(mut self: Pin<&mut Self>, url: &QString, x: f64, y: f64) -> QString {
+        let path = path_from_url(&url.to_string());
+        q(&self
+            .as_mut()
+            .act(|s| s.drop_image(std::path::Path::new(&path), x, y))
+            .unwrap_or_default())
+    }
+
+    pub fn device_kinds(&self) -> QString {
+        q(&EditorState::device_kinds().to_string())
+    }
+
+    pub fn add_device(mut self: Pin<&mut Self>, kind: &QString) -> QString {
+        let kind = kind.to_string();
+        q(&self
+            .as_mut()
+            .act(|s| s.add_device(&kind, None))
+            .unwrap_or_default())
     }
 
     pub fn delete_selected(mut self: Pin<&mut Self>) {
@@ -512,18 +551,28 @@ impl qobject::Editor {
         }
     }
 
-    pub fn export_frame(mut self: Pin<&mut Self>, preset: &QString, file: &QString) -> QString {
-        let (preset, file) = (preset.to_string(), file.to_string());
+    pub fn export_assets(
+        mut self: Pin<&mut Self>,
+        mode: &QString,
+        preset: &QString,
+        name: &QString,
+        slices: i32,
+    ) -> QString {
+        let (mode, preset, name) = (mode.to_string(), preset.to_string(), name.to_string());
         let preset = (!preset.is_empty()).then_some(preset);
-        let out = self.state.export(preset.as_deref(), &file);
-        let json = match out {
+        let slices = u32::try_from(slices).unwrap_or(0);
+        let json = match self.state.export(&mode, preset.as_deref(), &name, slices) {
             Ok(v) => v,
             Err(e) => serde_json::json!({"error": e}),
         };
         if let Some(err) = json.get("error").and_then(|e| e.as_str()) {
             self.as_mut().show(err, true);
-        } else if let Some(path) = json.get("path").and_then(|p| p.as_str()) {
-            self.as_mut().show(&format!("Exported {path}"), false);
+        } else if let Some(files) = json.get("files").and_then(|f| f.as_array()) {
+            let text = match files.as_slice() {
+                [one] => format!("Exported {}", one["path"].as_str().unwrap_or("")),
+                many => format!("Exported {} files to the exports folder", many.len()),
+            };
+            self.as_mut().show(&text, false);
         }
         q(&json.to_string())
     }

@@ -2,8 +2,8 @@
 //! into closed types and every rejection carries a reason the agent can act on
 //! (`docs/wiki/agent-integration.md#the-mcp-server`).
 
+use crate::export::{ExportOutcome, Plan, export_assets, export_name, exports_dir, preset};
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
@@ -245,6 +245,51 @@ pub fn definitions() -> Vec<Value> {
             false,
         ),
         tool(
+            "export_set",
+            "Render several frames to exports/<prefix>-01.png, -02, ... in the order given, validated \
+             as a set against a store preset (every image, and the count of images). Nothing is \
+             written unless every image and the count meet the preset.",
+            json!({
+                "frames": {"type": "array", "items": id("Id of a frame node."), "minItems": 1, "maxItems": 50},
+                "prefix": id("File name stem, for example shot (gives shot-01.png)."),
+                "preset": id("A preset id from list_export_presets."),
+                "scale": {"type": "number", "minimum": 0.01, "maximum": 16},
+                "alpha": {"type": "boolean", "description": "Keep transparency (ignored when the preset forbids it)."}
+            }),
+            &["frames", "prefix"],
+            false,
+        ),
+        tool(
+            "export_panorama",
+            "Render one wide frame and cut it into `slices` equal columns, exports/<prefix>-01.png, \
+             -02, ... so a background, ribbon or device can cross the seams between store \
+             screenshots. The frame width (times scale) must divide evenly; each slice and the count \
+             are validated against the preset before anything is written.",
+            json!({
+                "frame": id("Id of the wide frame."),
+                "slices": {"type": "integer", "minimum": 1, "maximum": 50},
+                "prefix": id("File name stem, for example shot (gives shot-01.png)."),
+                "preset": id("A preset id from list_export_presets."),
+                "scale": {"type": "number", "minimum": 0.01, "maximum": 16},
+                "alpha": {"type": "boolean", "description": "Keep transparency (ignored when the preset forbids it)."}
+            }),
+            &["frame", "slices", "prefix"],
+            false,
+        ),
+        tool(
+            "device_template",
+            "A generic phone or tablet outline (body, screen, camera) as a node you can put in an \
+             apply_ops create operation. The node named Screen is where a capture goes: pass an \
+             `image` from list_media, or set `image` on Screen later.",
+            json!({
+                "kind": {"type": "string", "enum": ["phone", "phone-punch-hole", "tablet", "tablet-wide"]},
+                "screen_width": {"type": "number", "minimum": 50, "maximum": 8192, "description": "Width of the screen in document units."},
+                "image": id("A media/ path from list_media.")
+            }),
+            &["kind", "screen_width"],
+            true,
+        ),
+        tool(
             "validate_export",
             "Check exported PNGs in exports/ as one set against a store preset.",
             json!({"preset": id("A preset id."), "files": {"type": "array", "items": {"type": "string"}, "maxItems": 100}}),
@@ -285,6 +330,9 @@ pub fn call(ctx: &mut CallCtx, name: &str, args: Value) -> Result<Output, ToolEr
         "list_media" => list_media(ctx),
         "render_preview" => render_preview(ctx, parse(args)?),
         "export" => export(ctx, parse(args)?),
+        "export_set" => export_set(ctx, parse(args)?),
+        "export_panorama" => export_panorama(ctx, parse(args)?),
+        "device_template" => device_template(parse(args)?),
         "validate_export" => validate_export(ctx, parse(args)?),
         other => fail(format!("unknown tool {other:?}")),
     }
@@ -664,32 +712,6 @@ fn render_preview(ctx: &mut CallCtx, a: PreviewArgs) -> Result<Output, ToolError
     })
 }
 
-/// File names only: `shot-01.png`. No separators, no leading dot, no traversal.
-fn export_name(file: &str) -> Result<&str, ToolError> {
-    let ok = file.len() <= 100
-        && file.ends_with(".png")
-        && !file.contains("..")
-        && file
-            .chars()
-            .next()
-            .is_some_and(|c| c.is_ascii_alphanumeric())
-        && file
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'));
-    if ok {
-        Ok(file)
-    } else {
-        fail("file must be a plain name like shot-01.png (letters, digits . _ -)")
-    }
-}
-
-fn exports_dir(ws: &Workspace) -> Result<PathBuf, ToolError> {
-    match ws.dir() {
-        Some(d) => Ok(d.join("exports")),
-        None => fail("the project has no folder on disk, so there is nowhere to export to"),
-    }
-}
-
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ExportArgs {
@@ -703,81 +725,123 @@ struct ExportArgs {
     alpha: bool,
 }
 
-fn preset(id: &str) -> Result<&'static od_store::Preset, ToolError> {
-    od_store::find(id).ok_or_else(|| {
-        let ids: Vec<&str> = od_store::PRESETS.iter().map(|p| p.id).collect();
-        ToolError(format!(
-            "unknown preset {id:?}; available: {}",
-            ids.join(", ")
-        ))
-    })
-}
-
-/// What an export wrote.
-pub struct ExportOutcome {
-    /// Relative to the project folder, for example `exports/shot-01.png`.
-    pub path: String,
-    pub width: u32,
-    pub height: u32,
-    pub bytes: usize,
-    pub not_drawn: Vec<String>,
-    pub preset_verified: Option<bool>,
-}
-
-/// Renders `frame` into `<project>/exports/<file>`, validated against `preset` when given. Nothing
-/// is written when the image does not meet the preset. Shared by the `export` tool and the editor.
-pub fn export_frame(
-    ws: &Workspace,
-    frame: &NodeId,
-    file: &str,
-    preset_id: Option<&str>,
-    scale: Option<f32>,
-    alpha: bool,
-) -> Result<ExportOutcome, ToolError> {
-    let file = export_name(file)?;
-    let dir = exports_dir(ws)?;
-    let target = preset_id.map(preset).transpose()?;
-    let rendered =
-        od_render::render_frame(ws.session.document(), frame, scale.unwrap_or(1.0), ws.dir())?;
-    let keep_alpha = alpha && target.is_none_or(|p| p.allow_alpha);
-    let png = od_render::encode_png(&rendered.pixmap, keep_alpha)?;
-    if let Some(p) = target {
-        let facts = od_store::inspect_png(&png).map_err(|e| ToolError(e.to_string()))?;
-        let violations = p.validate_image(&facts);
-        if !violations.is_empty() {
-            let list: Vec<String> = violations.iter().map(|v| format!("- {v}")).collect();
-            return fail(format!(
-                "not written: the export does not meet {} ({}):\n{}",
-                p.id,
-                p.source,
-                list.join("\n")
-            ));
-        }
-    }
-    std::fs::create_dir_all(&dir)?;
-    std::fs::write(dir.join(file), &png)?;
-    Ok(ExportOutcome {
-        path: format!("exports/{file}"),
-        width: rendered.pixmap.width(),
-        height: rendered.pixmap.height(),
-        bytes: png.len(),
-        not_drawn: rendered.warnings.iter().map(ToString::to_string).collect(),
-        preset_verified: target
-            .map(|p| matches!(p.verification, od_store::Verification::PrimaryChecked(_))),
-    })
-}
-
 fn export(ctx: &mut CallCtx, a: ExportArgs) -> Result<Output, ToolError> {
     let id = node_id(&a.frame)?;
-    let out = export_frame(ctx.ws, &id, &a.file, a.preset.as_deref(), a.scale, a.alpha)?;
+    let plan = Plan::Frame {
+        frame: &id,
+        file: &a.file,
+    };
+    let out = export_assets(ctx.ws, &plan, a.preset.as_deref(), a.scale, a.alpha)?;
+    let Some(file) = out.files.first() else {
+        return fail("nothing was exported");
+    };
     Ok(Output::json(&json!({
-        "path": out.path,
-        "width": out.width,
-        "height": out.height,
-        "bytes": out.bytes,
+        "path": file.path,
+        "width": file.width,
+        "height": file.height,
+        "bytes": file.bytes,
         "preset": a.preset,
         "preset_verified_against_primary_source": out.preset_verified,
         "not_drawn": out.not_drawn,
+    })))
+}
+
+fn set_json(out: &ExportOutcome, preset: Option<&str>) -> Value {
+    let files: Vec<Value> = out
+        .files
+        .iter()
+        .map(|f| json!({"path": f.path, "width": f.width, "height": f.height, "bytes": f.bytes}))
+        .collect();
+    json!({
+        "files": files,
+        "preset": preset,
+        "preset_verified_against_primary_source": out.preset_verified,
+        "not_drawn": out.not_drawn,
+    })
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ExportSetArgs {
+    frames: Vec<String>,
+    prefix: String,
+    #[serde(default)]
+    preset: Option<String>,
+    #[serde(default)]
+    scale: Option<f32>,
+    #[serde(default)]
+    alpha: bool,
+}
+
+fn export_set(ctx: &mut CallCtx, a: ExportSetArgs) -> Result<Output, ToolError> {
+    let frames = a
+        .frames
+        .iter()
+        .map(|f| node_id(f))
+        .collect::<Result<Vec<_>, _>>()?;
+    let plan = Plan::Set {
+        frames: &frames,
+        prefix: &a.prefix,
+    };
+    let out = export_assets(ctx.ws, &plan, a.preset.as_deref(), a.scale, a.alpha)?;
+    Ok(Output::json(&set_json(&out, a.preset.as_deref())))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PanoramaArgs {
+    frame: String,
+    slices: u32,
+    prefix: String,
+    #[serde(default)]
+    preset: Option<String>,
+    #[serde(default)]
+    scale: Option<f32>,
+    #[serde(default)]
+    alpha: bool,
+}
+
+fn export_panorama(ctx: &mut CallCtx, a: PanoramaArgs) -> Result<Output, ToolError> {
+    let id = node_id(&a.frame)?;
+    let plan = Plan::Panorama {
+        frame: &id,
+        slices: a.slices,
+        prefix: &a.prefix,
+    };
+    let out = export_assets(ctx.ws, &plan, a.preset.as_deref(), a.scale, a.alpha)?;
+    Ok(Output::json(&set_json(&out, a.preset.as_deref())))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DeviceArgs {
+    kind: String,
+    screen_width: f64,
+    #[serde(default)]
+    image: Option<String>,
+}
+
+fn device_template(a: DeviceArgs) -> Result<Output, ToolError> {
+    let Some(device) = od_store::devices::Device::parse(&a.kind) else {
+        let ids: Vec<&str> = od_store::devices::Device::ALL
+            .iter()
+            .map(|d| d.id())
+            .collect();
+        return fail(format!(
+            "unknown device {:?}; available: {}",
+            a.kind,
+            ids.join(", ")
+        ));
+    };
+    if !(a.screen_width.is_finite() && (50.0..=8192.0).contains(&a.screen_width)) {
+        return fail("screen_width must be between 50 and 8192");
+    }
+    let node = od_store::devices::template(device, a.screen_width, a.image.as_deref());
+    Ok(Output::json(&json!({
+        "node": node,
+        "usage": "Put this node in an apply_ops create operation (set parent, then x and y on the \
+                  group to place it). Swap the capture later by setting `image` on the node named \
+                  Screen.",
     })))
 }
 

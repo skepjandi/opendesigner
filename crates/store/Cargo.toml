@@ -13,6 +13,7 @@ publish.workspace = true
 name = "od_store"
 
 [dependencies]
+opendesigner-core = { path = "../core" }
 thiserror.workspace = true
 png.workspace = true
 

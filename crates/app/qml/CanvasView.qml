@@ -367,12 +367,12 @@ Item {
             lastScale = scale
         }
     }
-    // dropping image files adds them to the frame where they land
+    // dropping image files: onto an image (a device's screen) swaps its picture, elsewhere adds an image
     DropArea {
         anchors.fill: parent
         onDropped: drop => {
             const p = root.toFrame(drop.x, drop.y)
-            for (const url of drop.urls) root.editor.importImageAt(url.toString(), p.x, p.y)
+            for (const url of drop.urls) root.editor.dropImage(url.toString(), p.x, p.y)
         }
     }
 }
