@@ -41,6 +41,15 @@ ScrollView {
     readonly property var existing: info && info.found === "workspaces" ? info.workspaces : []
     readonly property bool direct: info !== null && info.found === "project"
     property bool makeNew: existing.length === 0
+    // optional: what the work is for (null: the agent decides)
+    property var format: null
+    readonly property string formatLabel: {
+        if (!format) return "The agent decides"
+        if (format.id) {
+            for (const s of JSON.parse(editor.formats())) for (const f of s.formats) if (f.id === format.id) return f.label + "  " + f.width + "×" + f.height
+        }
+        return "Custom " + format.width + "×" + format.height + (format.fps ? " · " + format.fps + " fps" : "")
+    }
     clip: true
     implicitWidth: 540
     contentWidth: availableWidth
@@ -159,6 +168,28 @@ ScrollView {
             text: "You stay signed in to the agent yourself. It is started on this computer when you press the button, and its work appears here live."
         }
 
+        Label { text: "Size and format (optional)"; color: Theme.text; font.pixelSize: 15; font.bold: true }
+        RowLayout {
+            Layout.fillWidth: true
+            Label { Layout.fillWidth: true; text: root.formatLabel; color: root.format ? Theme.text : Theme.muted; elide: Text.ElideRight }
+            Btn { text: formatPicker.visible ? "Done" : "Choose…"; onClicked: formatPicker.visible = !formatPicker.visible }
+        }
+        FormatPicker {
+            id: formatPicker
+            visible: false
+            Layout.fillWidth: true
+            editor: root.editor
+            current: root.format ? (root.format.id || "custom") : ""
+            onPicked: f => { root.format = f; formatPicker.visible = false }
+        }
+        Label {
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+            color: Theme.muted
+            font.pixelSize: 11
+            text: "If you pick nothing the agent chooses what fits (a reel, a store set, a landing page). If you do pick, it keeps to it and asks you before changing it."
+        }
+
         Label { text: "What should it make first?"; color: Theme.text; font.pixelSize: 15; font.bold: true }
         ScrollView {
             Layout.fillWidth: true
@@ -185,6 +216,7 @@ ScrollView {
                 onClicked: {
                     const name = root.direct ? "" : (root.makeNew ? newName.text.trim() : root.existing[workspaceBox.currentIndex])
                     if (!root.editor.openWorkspace(root.folderUrl, name, true)) return
+                    if (root.format) root.editor.setFormat(root.format.id || "", root.format.kind || "", root.format.width || 0, root.format.height || 0, root.format.fps || 0)
                     if (root.agentChosen) root.editor.chatStartWith(root.command, prompt.text)
                     root.started()
                 }

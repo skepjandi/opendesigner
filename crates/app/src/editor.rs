@@ -32,6 +32,7 @@ pub mod qobject {
         #[qproperty(QString, videos)]
         #[qproperty(QString, jobs)]
         #[qproperty(QString, workspaces)]
+        #[qproperty(QString, brief)]
         #[qproperty(QString, tokens)]
         #[qproperty(QString, languages)]
         #[qproperty(QString, language)]
@@ -110,6 +111,22 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "importImage"]
         fn import_image(self: Pin<&mut Self>, url: &QString) -> QString;
+        #[qinvokable]
+        #[cxx_name = "formats"]
+        fn formats(self: &Self) -> QString;
+        #[qinvokable]
+        #[cxx_name = "setFormat"]
+        fn set_format(
+            self: Pin<&mut Self>,
+            id: &QString,
+            kind: &QString,
+            width: i32,
+            height: i32,
+            fps: i32,
+        );
+        #[qinvokable]
+        #[cxx_name = "answerFormat"]
+        fn answer_format(self: Pin<&mut Self>, approve: bool);
         #[qinvokable]
         #[cxx_name = "deviceAccess"]
         fn device_access(self: &Self) -> bool;
@@ -304,6 +321,7 @@ pub struct EditorRust {
     videos: QString,
     jobs: QString,
     workspaces: QString,
+    brief: QString,
     tokens: QString,
     languages: QString,
     language: QString,
@@ -416,6 +434,7 @@ impl qobject::Editor {
         self.as_mut().set_videos(q(&snap.videos));
         self.as_mut().set_jobs(q(&snap.jobs));
         self.as_mut().set_workspaces(q(&snap.workspaces));
+        self.as_mut().set_brief(q(&snap.brief));
         self.as_mut().set_tokens(q(&snap.tokens));
         self.as_mut().set_languages(q(&snap.languages));
         self.as_mut().set_language(q(&snap.language));
@@ -558,6 +577,31 @@ impl qobject::Editor {
             .as_mut()
             .act(|s| s.create_node(&kind, x, y, w, h))
             .unwrap_or_default())
+    }
+
+    pub fn formats(&self) -> QString {
+        q(&EditorState::formats())
+    }
+
+    pub fn set_format(
+        mut self: Pin<&mut Self>,
+        id: &QString,
+        kind: &QString,
+        width: i32,
+        height: i32,
+        fps: i32,
+    ) {
+        let (id, kind) = (id.to_string(), kind.to_string());
+        let (w, h, r) = (
+            u32::try_from(width).unwrap_or(0),
+            u32::try_from(height).unwrap_or(0),
+            u32::try_from(fps).unwrap_or(0),
+        );
+        self.as_mut().act(|s| s.set_format(&id, &kind, w, h, r));
+    }
+
+    pub fn answer_format(mut self: Pin<&mut Self>, approve: bool) {
+        self.as_mut().act(|s| s.answer_format(approve));
     }
 
     pub fn device_access(&self) -> bool {

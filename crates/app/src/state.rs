@@ -90,6 +90,7 @@ pub struct Snapshot {
     pub videos: String,
     pub jobs: String,
     pub workspaces: String,
+    pub brief: String,
     pub tokens: String,
     pub languages: String,
     pub language: String,
@@ -1411,6 +1412,56 @@ impl EditorState {
         answer_skill_offer_in(&home, &config, install)
     }
 
+    /// The sections of formats the user can pick from, as JSON.
+    pub fn formats() -> String {
+        od_agent::formats::sections_json().to_string()
+    }
+
+    /// The user chooses the workspace's format: a list entry (`id`), their own size (`kind`,
+    /// `width`, `height`, `fps`), or nothing at all (all empty), which hands the choice back to
+    /// the agent.
+    pub fn set_format(
+        &mut self,
+        id: &str,
+        kind: &str,
+        width: u32,
+        height: u32,
+        fps: u32,
+    ) -> Res<()> {
+        let chosen = if !id.is_empty() {
+            Some(
+                od_agent::formats::find(id)
+                    .map(od_agent::formats::BriefFormat::from)
+                    .ok_or_else(|| format!("no format {id:?}"))?,
+            )
+        } else if kind.is_empty() {
+            None
+        } else {
+            Some(od_agent::formats::custom(
+                kind,
+                width,
+                height,
+                (fps > 0).then_some(fps),
+            )?)
+        };
+        self.with_ws(|ws| {
+            let dir = ws.dir().ok_or("the project has no folder")?.to_path_buf();
+            let mut brief = od_agent::formats::load_brief(&dir);
+            brief.user_set(chosen);
+            od_agent::formats::save_brief(&dir, &brief)
+        })
+    }
+
+    /// The user answers the agent's request to change the format.
+    pub fn answer_format(&mut self, approve: bool) -> Res<()> {
+        self.with_ws(|ws| {
+            let dir = ws.dir().ok_or("the project has no folder")?.to_path_buf();
+            let mut brief = od_agent::formats::load_brief(&dir);
+            brief.answer(approve)?;
+            od_agent::formats::save_brief(&dir, &brief)
+        })
+    }
+
     /// Whether the agent may look for pictures and videos outside the project.
     pub fn device_access() -> bool {
         od_agent::device::enabled()
@@ -1563,6 +1614,7 @@ impl EditorState {
             videos: to_string(&view::videos(doc)),
             jobs: self.jobs_json(),
             workspaces: workspaces_of(&ws),
+            brief: brief_of(&ws),
             overflows: to_string(&frame.map(|f| collect_overflows(doc, f)).unwrap_or_default()),
             tokens: to_string(&view::tokens(doc)),
             languages: to_string(&view::locales(doc)),
@@ -1603,6 +1655,13 @@ fn image_problem(n: &Node, dir: Option<&std::path::Path>) -> Option<String> {
 /// marks where they are and says why.
 /// Text in `frame` that wraps to more rows than its box is tall, with the box's place in the frame.
 /// The files in a workspace's `media/` folder, for the memory tab.
+/// What the open workspace is for (its format, who chose it, a waiting request), as JSON.
+fn brief_of(ws: &Workspace) -> String {
+    ws.dir()
+        .map_or(Value::Null, |d| od_agent::formats::load_brief(d).to_json())
+        .to_string()
+}
+
 /// The open workspace's name and its siblings, as JSON (for the window's picker).
 fn workspaces_of(ws: &Workspace) -> String {
     let Some(dir) = ws.dir() else {
@@ -2730,6 +2789,51 @@ mod tests {
         assert_eq!(frames.len(), 1, "the first workspace kept its own frame");
         assert!(s.switch_workspace("nope", false).is_err());
         assert!(s.switch_workspace("main", true).is_err(), "already exists");
+    }
+
+    #[test]
+    fn the_user_picks_a_format_answers_the_agents_request_and_can_hand_the_choice_back() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut s = EditorState::new();
+        s.open_workspace_in(tmp.path(), Some("reel"), true, None)
+            .unwrap();
+        let brief =
+            |s: &EditorState| -> Value { serde_json::from_str(&s.snapshot().brief).unwrap() };
+        assert_eq!(brief(&s)["chosen_by"], "none");
+
+        s.set_format("reel", "", 0, 0, 0).unwrap();
+        assert_eq!(brief(&s)["format"]["width"], 1080);
+        assert_eq!(brief(&s)["chosen_by"], "user");
+        assert!(s.set_format("nope", "", 0, 0, 0).is_err());
+        assert!(
+            s.set_format("", "video", 1081, 1920, 30).is_err(),
+            "odd video size"
+        );
+
+        // the agent asks for another size; the file is how the two sides share it
+        let dir = s.with_ws(|ws| Ok(ws.dir().unwrap().to_path_buf())).unwrap();
+        let mut b = od_agent::formats::load_brief(&dir);
+        b.agent_set(
+            od_agent::formats::find("youtube")
+                .map(od_agent::formats::BriefFormat::from)
+                .unwrap(),
+            "the footage is landscape",
+        );
+        od_agent::formats::save_brief(&dir, &b).unwrap();
+        assert_eq!(
+            brief(&s)["pending_request"]["reason"],
+            "the footage is landscape"
+        );
+        s.answer_format(false).unwrap();
+        assert_eq!(brief(&s)["format"]["width"], 1080, "kept");
+        assert!(s.answer_format(true).is_err(), "nothing is waiting");
+
+        s.set_format("", "image", 1000, 500, 0).unwrap();
+        assert_eq!(brief(&s)["format"]["label"], "Custom 1000x500");
+        s.set_format("", "", 0, 0, 0).unwrap();
+        assert_eq!(brief(&s)["chosen_by"], "none");
+        let all: Value = serde_json::from_str(&EditorState::formats()).unwrap();
+        assert_eq!(all[0]["section"], "Video");
     }
 
     #[test]

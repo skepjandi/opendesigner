@@ -19,6 +19,7 @@ fn main() {
             "qml/Field.qml",
             "qml/JsonModel.qml",
             "qml/VideoPanel.qml",
+            "qml/FormatPicker.qml",
             "qml/StartPanel.qml",
             "qml/LayersPanel.qml",
             "qml/InspectorPanel.qml",

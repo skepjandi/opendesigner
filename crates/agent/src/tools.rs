@@ -103,6 +103,63 @@ pub fn definitions() -> Vec<Value> {
             true,
         ),
         tool(
+            "get_playbook",
+            "Craft guidance for making work that is not mediocre. Topics: design (images), style \
+             (named looks with rules), video, motion (timings, easing, recipes), formats (sizes and \
+             safe zones). Call it with no topic for the list; read the ones that apply before you \
+             build, not after.",
+            json!({"topic": {"type": "string", "enum": ["design", "style", "video", "motion", "formats"]}}),
+            &[],
+            true,
+        ),
+        tool(
+            "review_frame",
+            "An art director's check of one frame, in numbers: text contrast against what is \
+             under it, text too small to read at thumbnail size, text too close to or past an edge, \
+             overlapping text, text that overflows its box, misaligned left edges, too many fonts, \
+             hard-coded colors that should be tokens, and a size that differs from what the user \
+             chose. Fix every `error`, and every `warn` unless you have a reason. Does not change \
+             the design.",
+            json!({"frame": id("Id of a frame from list_pages or get_tree.")}),
+            &["frame"],
+            true,
+        ),
+        tool(
+            "list_formats",
+            "Sizes to make things in, in sections (Video, Store images, Social images, Web and \
+             icons): id, label, width, height, frame rate. Use when the workspace has no format \
+             yet; then record your pick with set_format.",
+            json!({}),
+            &[],
+            true,
+        ),
+        tool(
+            "get_brief",
+            "What this workspace is for: its format (size, aspect ratio, frame rate), who chose it \
+             (the user or you), a request waiting for the user's answer, and the user's last answer.",
+            json!({}),
+            &[],
+            true,
+        ),
+        tool(
+            "set_format",
+            "Set this workspace's format: a `format` id from list_formats, or a custom size \
+             (`kind` video or image, `width`, `height`, `fps` for video). If the user chose the \
+             current format this does NOT change it: the user is asked, and you must stop and wait \
+             (call get_brief later to read the answer). If they chose nothing it applies at once. \
+             A video cannot be created or resized away from a format the user chose.",
+            json!({
+                "format": id("An id from list_formats."),
+                "kind": {"type": "string", "enum": ["video", "image"]},
+                "width": {"type": "integer", "minimum": 16, "maximum": 16384},
+                "height": {"type": "integer", "minimum": 16, "maximum": 16384},
+                "fps": {"type": "integer", "minimum": 1, "maximum": 60},
+                "reason": id("One line for the user: why this format.")
+            }),
+            &["reason"],
+            false,
+        ),
+        tool(
             "get_selection",
             "The nodes the user has selected, with their data.",
             json!({}),
@@ -435,7 +492,12 @@ fn persist(ws: &Workspace) -> Result<(), ToolError> {
 
 pub fn call(ctx: &mut CallCtx, name: &str, args: Value) -> Result<Output, ToolError> {
     match name {
-        "get_guidance" => Ok(Output::json(&to_json(&ctx.ws.guidance())?)),
+        "get_guidance" => get_guidance(ctx),
+        "get_playbook" => get_playbook(parse(args)?),
+        "review_frame" => review_frame_tool(ctx, parse(args)?),
+        "list_formats" => Ok(Output::json(&crate::formats::sections_json())),
+        "get_brief" => Ok(Output::json(&brief_of(ctx).to_json())),
+        "set_format" => set_format(ctx, parse(args)?),
         "get_selection" => Ok(Output::json(&to_json(&ctx.ws.guidance().selection)?)),
         "get_annotations" => get_annotations(ctx, parse(args)?),
         "resolve_annotation" => resolve_annotation(ctx, parse(args)?),
@@ -706,7 +768,175 @@ struct ApplyArgs {
     summary: Option<String>,
 }
 
+fn brief_of(ctx: &CallCtx) -> crate::formats::Brief {
+    ctx.ws
+        .dir()
+        .map(crate::formats::load_brief)
+        .unwrap_or_default()
+}
+
+fn get_guidance(ctx: &mut CallCtx) -> Result<Output, ToolError> {
+    let mut v = to_json(&ctx.ws.guidance())?;
+    let brief = brief_of(ctx);
+    v["brief"] = brief.to_json();
+    v["before_you_build"] = json!(
+        "Call get_playbook: design (images), style (pick a named look), video and motion (video), \
+         formats (sizes). Review your work with review_frame and render_preview before you say it is done."
+    );
+    Ok(Output::json(&v))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PlaybookArgs {
+    #[serde(default)]
+    topic: Option<String>,
+}
+
+fn get_playbook(a: PlaybookArgs) -> Result<Output, ToolError> {
+    match a.topic {
+        None => {
+            let mut out = String::from("Playbooks (call get_playbook with a topic):\n\n");
+            for (name, about, _) in crate::playbook::TOPICS {
+                out.push_str(&format!("- {name}: {about}\n"));
+            }
+            out.push_str(&format!("\n{}\n", crate::playbook::QUALITY_BAR));
+            Ok(Output::text(out))
+        }
+        Some(name) => crate::playbook::topic(&name)
+            .map(Output::text)
+            .ok_or_else(|| {
+                ToolError(format!(
+                    "no playbook {name:?}; topics: {}",
+                    crate::playbook::TOPICS
+                        .iter()
+                        .map(|(n, _, _)| *n)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ))
+            }),
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ReviewArgs {
+    frame: NodeId,
+}
+
+fn review_frame_tool(ctx: &mut CallCtx, a: ReviewArgs) -> Result<Output, ToolError> {
+    let doc = ctx.ws.session.document();
+    let mut v = crate::review::review_frame(doc, &a.frame).map_err(ToolError)?;
+    let brief = brief_of(ctx);
+    if let (Some(f), Some(size)) = (
+        brief.format.as_ref().filter(|f| f.kind == "image"),
+        v["size"]
+            .as_array()
+            .map(|s| (s[0].as_f64().unwrap_or(0.0), s[1].as_f64().unwrap_or(0.0))),
+    ) {
+        let (w, h) = (f64::from(f.width), f64::from(f.height));
+        // a panorama is a whole number of slides side by side
+        let slides = (size.0 / w).round();
+        let matches = (size.0 - w).abs() < 0.5 && (size.1 - h).abs() < 0.5
+            || (slides >= 2.0 && (size.0 - slides * w).abs() < 0.5 && (size.1 - h).abs() < 0.5);
+        if !matches && size.0 >= 200.0 {
+            let by = if brief.chosen_by_user {
+                "the user chose"
+            } else {
+                "you set"
+            };
+            if let Some(list) = v["findings"].as_array_mut() {
+                list.push(json!({
+                    "severity": if brief.chosen_by_user { "warn" } else { "info" },
+                    "node": null, "name": null,
+                    "message": format!("this frame is {}x{} but {by} {} ({}x{}) for the workspace", size.0, size.1, f.label, f.width, f.height),
+                }));
+            }
+        }
+    }
+    Ok(Output::json(&v))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SetFormatArgs {
+    #[serde(default)]
+    format: Option<String>,
+    #[serde(default)]
+    kind: Option<String>,
+    #[serde(default)]
+    width: Option<u32>,
+    #[serde(default)]
+    height: Option<u32>,
+    #[serde(default)]
+    fps: Option<u32>,
+    reason: String,
+}
+
+fn set_format(ctx: &mut CallCtx, a: SetFormatArgs) -> Result<Output, ToolError> {
+    let dir = ctx
+        .ws
+        .dir()
+        .map(std::path::Path::to_path_buf)
+        .ok_or_else(|| ToolError("the project has no folder to keep a format in".into()))?;
+    let new = match (&a.format, &a.kind, a.width, a.height) {
+        (Some(id), None, None, None) => crate::formats::find(id)
+            .map(crate::formats::BriefFormat::from)
+            .ok_or_else(|| ToolError(format!("no format {id:?}; call list_formats")))?,
+        (None, Some(kind), Some(w), Some(h)) => {
+            crate::formats::custom(kind, w, h, a.fps).map_err(ToolError)?
+        }
+        _ => {
+            return Err(ToolError(
+                "give either `format` (an id from list_formats) or `kind`, `width` and `height`"
+                    .into(),
+            ));
+        }
+    };
+    let mut brief = crate::formats::load_brief(&dir);
+    let label = new.label.clone();
+    let outcome = brief.agent_set(new, &a.reason);
+    crate::formats::save_brief(&dir, &brief).map_err(ToolError)?;
+    Ok(Output::json(&match outcome {
+        crate::formats::SetOutcome::Applied => json!({
+            "applied": true, "format": brief.format,
+            "next": "Say what you chose and why in one line, then build at this size.",
+        }),
+        crate::formats::SetOutcome::NeedsApproval => json!({
+            "applied": false,
+            "waiting_for_user": true,
+            "message": format!("The user chose {} for this workspace. They have been asked whether to change it to {label}. Stop and tell them what you would change and why; do not build at the new size until get_brief shows it approved.", brief.format.as_ref().map_or("a format", |f| f.label.as_str())),
+        }),
+    }))
+}
+
+fn check_brief(ctx: &CallCtx, ops: &[Operation]) -> Result<(), ToolError> {
+    let brief = brief_of(ctx);
+    if !brief.chosen_by_user {
+        return Ok(());
+    }
+    for op in ops {
+        let verdict = match op {
+            Operation::CreateVideo {
+                width, height, fps, ..
+            } => brief.check_video(Some(*width), Some(*height), Some(*fps)),
+            Operation::SetVideo {
+                prop: od_core::VideoProperty::Size { width, height },
+                ..
+            } => brief.check_video(Some(*width), Some(*height), None),
+            Operation::SetVideo {
+                prop: od_core::VideoProperty::Fps(r),
+                ..
+            } => brief.check_video(None, None, Some(*r)),
+            _ => Ok(()),
+        };
+        verdict.map_err(ToolError)?;
+    }
+    Ok(())
+}
+
 fn apply_ops(ctx: &mut CallCtx, a: ApplyArgs) -> Result<Output, ToolError> {
+    check_brief(ctx, &a.ops)?;
     let turn = match a.turn {
         Some(t) => t,
         None => {
