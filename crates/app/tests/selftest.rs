@@ -179,6 +179,18 @@ fn the_editor_window_runs_a_scripted_session() {
         given["mcpServers"][0]["headers"][0]["value"],
         format!("Bearer {}", token.trim())
     );
+    // the MCP server the user added is given to the agent as well, in the ACP stdio form
+    assert!(given["mcpServers"][1].get("type").is_none());
+    assert_eq!(given["mcpServers"][1]["name"], "selftest-mcp");
+    // the program is sent as the path to the executable, as the ACP stdio transport wants
+    let command = given["mcpServers"][1]["command"].as_str().unwrap();
+    assert!(
+        command.ends_with("echo") || command.ends_with("echo.exe"),
+        "{command}"
+    );
+    assert_eq!(given["mcpServers"][1]["args"][0], "hello");
+    assert_eq!(given["mcpServers"][1]["env"][0]["name"], "SELFTEST_KEY");
+    assert_eq!(given["mcpServers"][1]["env"][0]["value"], "value");
     assert_eq!(given["cwd"], project.display().to_string());
     assert!(
         tmp.path().join("cfg/mcp-token").exists(),

@@ -177,6 +177,13 @@ ScrollView {
             font.pixelSize: 11
             text: "You stay signed in to the agent yourself. It is started on this computer when you press the button, and its work appears here live."
         }
+        Label {
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+            color: Theme.muted
+            font.pixelSize: 11
+            text: "It also gets the MCP servers you added in the Connect panel, so it can call them (speech models, for example) while it works."
+        }
 
         Label { text: "Size and format (optional)"; color: Theme.text; font.pixelSize: 15; font.bold: true }
         RowLayout {

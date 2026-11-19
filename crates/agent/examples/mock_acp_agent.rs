@@ -1,8 +1,8 @@
 //! A scripted Agent Client Protocol agent for the tests of `od_agent::acp`. It prints a banner
 //! (not JSON, as some real agents do), answers `initialize` and `session/new`, and for a prompt
 //! streams text, a thought and a tool call, asks permission, asks the client for a file (which the
-//! client must refuse) and ends the turn. the first argument picks a misbehavior (`version`, `nohttp`, `auth`)
-//! and the second names a file that receives the `session/new` parameters.
+//! client must refuse) and ends the turn. the first argument picks a misbehavior (`version`, `nohttp`, `auth`,
+//! `notice`) and the second names a file that receives the `session/new` parameters.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::io::{BufRead, Write};
@@ -85,6 +85,15 @@ fn main() {
                             {"modelId": "m1", "name": "One"}, {"modelId": "m2", "name": "Two"}]}}}));
                 } else {
                     send(json!({"jsonrpc": "2.0", "id": id, "result": {"sessionId": session}}));
+                }
+                if mode == "notice" {
+                    // an agent that could not start one of the MCP servers says so and goes on
+                    update(
+                        session,
+                        json!({"sessionUpdate": "notice", "severity": "warning",
+                               "title": "MCP server unavailable",
+                               "description": "Continuing without it."}),
+                    );
                 }
             }
             Some("session/set_config_option") => {

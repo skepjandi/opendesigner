@@ -8,11 +8,14 @@
 //! permission themselves), it never starts anything except the command the user configured, and it
 //! holds no agent credentials: the agent signs in on its own.
 //!
+//! The MCP servers the user added are handed to the agent as connection details: the agent starts
+//! them, in its own process, and says so when it cannot.
+//!
 //! Spec: <https://agentclientprotocol.com/protocol/v1/overview>. The protocol is moving (a v2 is
 //! being drafted); this speaks v1 and refuses an agent that answers with another version.
 
 use std::collections::{HashMap, VecDeque};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -24,6 +27,8 @@ use tokio::process::{Child, Command};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::error::AgentError;
+use crate::mcp_servers::{self, McpServer};
+use crate::program;
 
 const PROTOCOL_VERSION: u64 = 1;
 /// Long enough for `npx` to download an adapter the first time (measured: over a minute).
@@ -143,8 +148,14 @@ pub enum ChatEvent {
     },
     /// The slash commands the agent understands, whole.
     Commands(Vec<SlashCommand>),
-    /// Something to tell the user that does not end the turn (a setting was refused).
-    Notice(String),
+    /// Something the agent tells the user that does not end the turn: a live notice (the agent
+    /// could not start one of the MCP servers, for example) or a refused setting.
+    Notice {
+        /// `info`, `warning` or `error`.
+        severity: String,
+        title: String,
+        detail: String,
+    },
     /// The agent process ended.
     Exited(String),
 }
@@ -170,6 +181,29 @@ fn rpc_error(v: &Value) -> String {
         Some(code) => format!("{message} (code {code})"),
         None => message.to_string(),
     }
+}
+
+/// The server as the agent is told about it: the ACP stdio form, with the program as the path to
+/// the executable (the agent inherits our environment, so a name on `PATH` is resolved here).
+fn acp_server(server: &McpServer, session_cwd: &Path) -> Value {
+    let mut value = mcp_servers::to_acp(server);
+    value["command"] = json!(program_path(&server.command, session_cwd));
+    value
+}
+
+/// The program as the agent should start it: the path to the executable.
+fn program_path(program: &str, session_cwd: &Path) -> String {
+    let path = Path::new(program);
+    if path.is_absolute() {
+        return program.to_string();
+    }
+    if program.contains('/') || program.contains('\\') {
+        // a relative path is taken from the session's folder
+        return session_cwd.join(program).display().to_string();
+    }
+    program::which(program)
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| program.to_string())
 }
 
 fn choices_of(options: &Value) -> Vec<ConfigChoice> {
@@ -311,6 +345,13 @@ fn event_for(update: &Value) -> Option<ChatEvent> {
             id: "mode".to_string(),
             value: update["currentModeId"].as_str()?.to_string(),
         }),
+        // a live notice: the agent telling the user about something, here that it could not
+        // start one of the MCP servers
+        "notice" => Some(ChatEvent::Notice {
+            severity: update["severity"].as_str().unwrap_or("info").to_string(),
+            title: update["title"].as_str().unwrap_or("").to_string(),
+            detail: update["description"].as_str().unwrap_or("").to_string(),
+        }),
         _ => None,
     }
 }
@@ -341,11 +382,13 @@ fn permission_event(id: u64, params: &Value) -> ChatEvent {
 }
 
 impl AcpSession {
-    /// Starts the agent, negotiates the protocol and opens a session that uses `mcp`. Events of
-    /// the session arrive on `events` until the agent exits.
+    /// Starts the agent, negotiates the protocol and opens a session that uses `mcp` and the MCP
+    /// servers the user added (`servers`). Events of the session arrive on `events` until the agent
+    /// exits.
     pub async fn start(
         command: &AgentCommand,
         mcp: &McpEndpoint,
+        servers: &[McpServer],
         events: mpsc::UnboundedSender<ChatEvent>,
     ) -> Result<AcpSession, AgentError> {
         let mut child = Command::new(&command.program)
@@ -425,7 +468,9 @@ impl AcpSession {
                     "initialize",
                     json!({
                         "protocolVersion": PROTOCOL_VERSION,
-                        "clientCapabilities": {},
+                        // the agent may send live notices (that it could not start one of the
+                        // MCP servers, for example), which the window shows in the chat
+                        "clientCapabilities": {"session": {"notices": {}}},
                         "clientInfo": {"name": "opendesigner", "title": "OpenDesigner",
                                        "version": env!("CARGO_PKG_VERSION")},
                     }),
@@ -441,18 +486,23 @@ impl AcpSession {
                 return Err("this agent cannot connect to MCP servers over HTTP, which the editor's local server needs"
                     .to_string());
             }
+            // the editor's own server first, then the ones the user added
+            let mut mcp_servers = vec![json!({
+                "type": "http",
+                "name": "opendesigner",
+                "url": mcp.url,
+                "headers": [{"name": "Authorization",
+                             "value": format!("Bearer {}", mcp.token)}],
+            })];
+            for server in servers {
+                mcp_servers.push(acp_server(server, &command.cwd));
+            }
             let created = session
                 .request(
                     "session/new",
                     json!({
                         "cwd": command.cwd.display().to_string(),
-                        "mcpServers": [{
-                            "type": "http",
-                            "name": "opendesigner",
-                            "url": mcp.url,
-                            "headers": [{"name": "Authorization",
-                                         "value": format!("Bearer {}", mcp.token)}],
-                        }],
+                        "mcpServers": mcp_servers,
                     }),
                 )
                 .await?;
@@ -584,7 +634,11 @@ impl AcpSession {
                     }
                 }
                 Ok(_) => ChatEvent::ConfigSet { id, value },
-                Err(e) => ChatEvent::Notice(format!("The agent did not accept that setting: {e}")),
+                Err(e) => ChatEvent::Notice {
+                    severity: "error".to_string(),
+                    title: "The agent did not accept that setting".to_string(),
+                    detail: e,
+                },
             };
             let _ = events.send(event);
         });

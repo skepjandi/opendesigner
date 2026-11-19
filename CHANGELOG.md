@@ -8,6 +8,16 @@ All notable changes to OpenDesigner are documented here.
 
 ## 2026-11-19
 
+### feat(app): the chat can call the MCP servers the user adds, so the agent reaches MiniMax's speech models
+
+**Area:** `feat(acp)`, `feat(app)`
+
+**Why:** "the agent should be able to reach other MCP servers, specifically minimax-mcp (MiniMax speech models: text to speech and speech to text), so it can make a voice-over or transcribe footage". The chat offered the agent exactly one MCP server: our own editor server. **Change:** (1) The Connect tab has a list of MCP servers the user adds: a name, the command that starts it, an optional working directory and optional environment variables (`KEY=value` per line, for example `MINIMAX_API_KEY`). They are kept in the app's config folder (`mcp-servers.json`, readable by the user only, because a value may be a key) and are written only by the user: no MCP tool touches the list, and an agent cannot. (2) The ACP `session/new` now carries them after the editor's own server, in the ACP stdio form (`{"type": "stdio", "name", "command", "args", "env": [{"name", "value"}]}`). The client asks for the ACP `notice` updates, so an agent that could not start a server says so, the window shows it in the chat and the session carries on without that server. The window also explains what these servers are and how to install `minimax-mcp`: the user installs it, the app never ships or starts a third-party server.
+
+**Verified:** ACP tests (the user's servers are sent in the stdio form with the editor's server first; a notice from the agent is reported and the session goes on), config tests (the list round-trips, a bad name or command is refused, a variable keeps the value that is stored), app tests, window session (the agent is given the server the session added). **Not verified:** against a real `minimax-mcp` server (it was not installed on this machine) or a real agent (only the scripted one); the Connect tab by eye.
+
+**PR:** n/a
+
 ### fix(app): a frame with no background is transparent, not a white screen
 
 **Area:** `fix(app)`, `fix(mcp)`, `fix(render)`

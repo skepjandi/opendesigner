@@ -1,6 +1,6 @@
 # Agent Integration
 
-> **Status: Partially implemented.** The MCP server, the skill generator/installer (`crates/agent`, `opendesigner skill …`), per-agent connection instructions (`od_agent::connect`) and the Chat tab are built and tested; the Qt app runs the MCP server in-process and has a Connect tab (a picker of agents with the exact thing to paste, and the skill install) and a Chat tab (see [In-app chat](#in-app-chat)). On the first start with an agent present and no skill installed, a dialog lists every file it would write and offers Install, Not now or Don't ask again (remembered in the config folder). The design is agent-agnostic: MCP over Streamable HTTP and ACP are open protocols, and the skill goes where each agent reads skills. **Checked against real agents (2026-11-19):** with **omp 19.0.0**, signed in, a full turn through the in-app chat's own ACP client (`omp acp`) called `get_guidance`, `list_pages` and `apply_ops` on this server, created a frame and a text node, and the edit is attributed `agent:omp-coding-agent` in the project history; the same server was also read from a project `.omp/mcp.json` by `omp -p`. **opencode 1.19.3** listed the server as connected from an `opencode.json`, and `opencode acp` opened a chat session. Claude Code 2.1.318 connected over HTTP with the bearer token and listed the tools; Gemini CLI 0.38.2, the Claude adapter and the Codex adapter answered the chat's ACP handshake (Gemini and Codex with a sign-in error, which the chat reports). **Not checked:** a model turn with Claude Code, Codex or Gemini CLI (not signed in here), Codex, Gemini and Cursor connecting to MCP, and any of it on Windows or Linux. Skill locations were verified against each agent's docs on 2026-11-19 (see the target table).
+> **Status: Partially implemented.** The MCP server, the skill generator/installer (`crates/agent`, `opendesigner skill …`), per-agent connection instructions (`od_agent::connect`) and the Chat tab are built and tested; the Qt app runs the MCP server in-process and has a Connect tab (a picker of agents with the exact thing to paste, and the skill install) and a Chat tab (see [In-app chat](#in-app-chat)). On the first start with an agent present and no skill installed, a dialog lists every file it would write and offers Install, Not now or Don't ask again (remembered in the config folder). The Connect tab also holds the MCP servers the user adds for the chat (see [Extra MCP servers](#extra-mcp-servers)). The design is agent-agnostic: MCP over Streamable HTTP and ACP are open protocols, and the skill goes where each agent reads skills. **Checked against real agents (2026-11-19):** with **omp 19.0.0**, signed in, a full turn through the in-app chat's own ACP client (`omp acp`) called `get_guidance`, `list_pages` and `apply_ops` on this server, created a frame and a text node, and the edit is attributed `agent:omp-coding-agent` in the project history; the same server was also read from a project `.omp/mcp.json` by `omp -p`. **opencode 1.19.3** listed the server as connected from an `opencode.json`, and `opencode acp` opened a chat session. Claude Code 2.1.318 connected over HTTP with the bearer token and listed the tools; Gemini CLI 0.38.2, the Claude adapter and the Codex adapter answered the chat's ACP handshake (Gemini and Codex with a sign-in error, which the chat reports). **Not checked:** a model turn with Claude Code, Codex or Gemini CLI (not signed in here), Codex, Gemini and Cursor connecting to MCP, and any of it on Windows or Linux. Skill locations were verified against each agent's docs on 2026-11-19 (see the target table).
 
 The point of OpenDesigner is that the user guides an agent *with the GUI*. Three mechanisms carry that, and the app installs the first two on first run.
 
@@ -162,6 +162,84 @@ Agents start every task blank. `.opendesigner/` next to the assets folder (the p
 - Rules and limits (names, no symlinks, 64 KB per note, 200 notes, 2 MB total, atomic writes): [Security](./security.md#agent-memory).
 - The Memory panel lists the notes under **Notes for the agent** (read-only, copyable); edit them with any editor.
 
+## Extra MCP servers
+
+The chat can hand the agent more MCP servers than the editor's own: programs the user installed on
+this computer (a speech model server, a search API, a database). They are listed in the
+**Connect** tab and are given to the agent with the session, so the agent can call them while it
+works.
+
+### What the user adds
+
+| Field | What it is |
+|-------|------------|
+| Name | How the server is called in the chat: letters, digits, spaces, `-` and `_`, at most 40 characters. It is the name the agent sees. |
+| Command | The program that starts the server and its arguments (`npx -y minimax-mcp`), split on spaces with quotes, **no shell**. |
+| Working directory | Where the server runs; the session's folder (the project) when it is empty. |
+| Environment variables | `KEY=value` per line, given to that server when it starts. |
+
+The list lives in the app's config folder (`mcp-servers.json`, next to the connection token;
+`OPENDESIGNER_CONFIG_DIR` overrides the folder). The file is readable by the user only, because a
+value may be a key:
+
+```json
+[
+  {
+    "name": "minimax-mcp",
+    "command": "npx",
+    "args": ["-y", "minimax-mcp"],
+    "env": [{ "name": "MINIMAX_API_KEY", "value": "…" }]
+  }
+]
+```
+
+Only the user writes this list, through the app. No MCP tool adds or changes a server, and no
+agent can.
+
+### The MiniMax example
+
+`minimax-mcp` is the MiniMax MCP server: it gives the agent speech models (text to speech and
+transcription), so the agent can voice a video or write down what a clip says. Install it the way
+MiniMax documents — `npx -y minimax-mcp` or `uvx minimax-mcp`, their README has the current
+command — then add it in the Connect tab with the name `minimax-mcp` and the command you
+installed. Put your `MINIMAX_API_KEY` in the environment variables: it is kept in the config
+folder, given to that server only, and never shown again (the window lists the names of the
+variables; to keep a value, write its name on a line of its own).
+
+### What goes on the wire
+
+The ACP `session/new` request carries the editor's own MCP server first (over HTTP, with the
+bearer token) and then the user's, in the ACP stdio form:
+
+```json
+{
+  "name": "minimax-mcp",
+  "command": "/opt/homebrew/bin/npx",
+  "args": ["-y", "minimax-mcp"],
+  "env": [{ "name": "MINIMAX_API_KEY", "value": "…" }]
+}
+```
+
+What was checked (2026-11-20): the ACP v1 schema (`https://agentclientprotocol.com/protocol/v1/schema`)
+defines `McpServer` as a union of an HTTP variant (`{"type": "http", …}`), an SSE variant and a
+stdio variant with `name`, `command`, `args` and `env` (`[{name, value}]`); the session-setup page
+shows the same stdio example. **The v1 stdio variant has no `type` field** — the discriminator
+`"type": "stdio"` was added in the v2 draft, so it is not sent: the shape above is exactly the v1
+one, and the session's working directory is the project folder, so no extra field is needed.
+The program is sent as the path to the executable (a name on `PATH` is resolved when the session
+starts), because the spec asks for an absolute path.
+
+### When a server does not start
+
+The agent starts the servers itself and says so when it cannot start one: ACP v1 has a live
+`notice` update for that (`{"sessionUpdate": "notice", "severity": "warning", …}`), and the client
+asks for it (`clientCapabilities.session.notices`). The window shows the notice in the chat and
+the session carries on without the server. Nothing the app does can start a server the user did
+not install, so a failure is the user's to fix (the notice says which server).
+
+Not verified: no real MCP server was started on this machine, and no agent other than the scripted
+one was asked to start one.
+
 ## Guidance context
 
 This is the feature the whole app exists for. The editor maintains, and exposes to agents, what the user is pointing at:
@@ -180,9 +258,9 @@ The agent's output is shown, not applied silently: changed nodes are outlined, a
 A chat panel (Kino's "chat panel in your project") that drives an agent over the **Agent Client Protocol**: the user picks the agent they already use and are signed in to (their own subscription); OpenDesigner starts it as a child process and shows its turns, tool calls and permission requests inline.
 
 - **Protocol.** ACP version 1: newline-delimited JSON-RPC 2.0 over the child's stdio (`initialize`, `session/new`, `session/prompt`, `session/cancel`, `session/update` notifications, `session/request_permission`). An agent that answers with another version is refused with a message saying so. Lines that are not JSON are ignored (some agents print a banner). ACP is changing (a v2 draft exists, and adapter package names have been renamed more than once), so this is the part most likely to need updating.
-- **What the agent is given.** `session/new` carries the project folder as the working directory and one MCP server: the editor's own, over HTTP, with the bearer token in an `Authorization` header (the agent must advertise `mcpCapabilities.http`, or the chat says it cannot connect). The agent therefore edits the design through `apply_ops` like any other agent: attributed, checkpointed, outlined. The first prompt of a conversation carries a short preamble telling it to call `get_guidance`, which returns the selection, the pinned notes and the user's recent hand edits.
+- **What the agent is given.** `session/new` carries the project folder as the working directory and one MCP server: the editor's own, over HTTP, with the bearer token in an `Authorization` header (the agent must advertise `mcpCapabilities.http`, or the chat says it cannot connect). The MCP servers the user added come after it (see [Extra MCP servers](#extra-mcp-servers)). The agent therefore edits the design through `apply_ops` like any other agent: attributed, checkpointed, outlined. The first prompt of a conversation carries a short preamble telling it to call `get_guidance`, which returns the selection, the pinned notes and the user's recent hand edits.
 - **What the client serves.** Nothing: no file-system or terminal capability is declared, and a request for either is answered with "method not supported". Agents do their own file and shell work in their own process; their own permission prompts arrive as `session/request_permission` and are shown with the agent's options (Allow, Reject, ...) for the user to pick, or Cancel.
-- **What starts.** Only the command the user typed or picked in the panel (a program and arguments, split on spaces with quotes, **no shell**); it is remembered next to the connection token. No project file and no agent can set it. Presets in the panel, each marked "found" when the programs it needs are on `PATH`: `omp acp`, `npx -y @agentclientprotocol/claude-agent-acp`, `npx -y @agentclientprotocol/codex-acp`, `gemini --acp`, `opencode acp`, or any command you type (any ACP agent works).
+- **What starts.** Only the command the user typed or picked in the panel (a program and arguments, split on spaces with quotes, **no shell**); it is remembered next to the connection token. No project file and no agent can set it. Presets in the panel, each marked "found" when the programs it needs are on `PATH`: `omp acp`, `npx -y @agentclientprotocol/claude-agent-acp`, `npx -y @agentclientprotocol/codex-acp`, `gemini --acp`, `opencode acp`, or any command you type (any ACP agent works). The MCP servers the user added are not started by the app either: the agent starts them (see [Extra MCP servers](#extra-mcp-servers)).
 - **Credentials.** The agent signs in on its own; OpenDesigner never sees its credentials. The agent does receive the local MCP token, which only opens the loopback server of this app.
 - **Plans.** An ACP `plan` update (the agent's whole plan; each one replaces the last) is shown as a checklist above the conversation and cleared when the user sends the next message. Checked with real omp: its `todo` tool arrives as `plan` updates the client parses.
 - **Not built:** images in prompts, session resume and a session list, several conversations, per-turn checkpoints named after the chat (the checkpoint comes from the MCP `apply_ops` turn as for any agent).

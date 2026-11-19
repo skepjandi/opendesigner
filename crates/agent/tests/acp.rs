@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use od_agent::acp::{AcpSession, AgentCommand, ChatEvent, McpEndpoint};
+use od_agent::mcp_servers::{EnvVar, McpServer};
 use serde_json::Value;
 use tokio::sync::mpsc;
 
@@ -63,8 +64,20 @@ async fn start(
     mpsc::UnboundedSender<ChatEvent>,
     mpsc::UnboundedReceiver<ChatEvent>,
 ) {
+    start_with(mode, log, &[]).await
+}
+
+async fn start_with(
+    mode: &str,
+    log: Option<&std::path::Path>,
+    servers: &[McpServer],
+) -> (
+    Result<AcpSession, od_agent::AgentError>,
+    mpsc::UnboundedSender<ChatEvent>,
+    mpsc::UnboundedReceiver<ChatEvent>,
+) {
     let (tx, rx) = mpsc::unbounded_channel();
-    let session = AcpSession::start(&command(mode, log), &endpoint(), tx.clone()).await;
+    let session = AcpSession::start(&command(mode, log), &endpoint(), servers, tx.clone()).await;
     (session, tx, rx)
 }
 
@@ -209,7 +222,7 @@ async fn setup_failures_say_what_to_do() {
         args: Vec::new(),
         cwd: std::env::temp_dir(),
     };
-    let err = AcpSession::start(&missing, &endpoint(), tx)
+    let err = AcpSession::start(&missing, &endpoint(), &[], tx)
         .await
         .err()
         .unwrap();
@@ -281,7 +294,101 @@ async fn the_agents_settings_and_commands_are_offered_and_can_be_changed() {
     };
     assert_eq!(all[1].current, "high");
     session.set_config("model", "forbidden", ConfigVia::Option, tx.clone());
-    assert!(matches!(next(&mut rx).await, ChatEvent::Notice(m) if m.contains("no such value")));
+    let ChatEvent::Notice {
+        severity,
+        title,
+        detail,
+    } = next(&mut rx).await
+    else {
+        panic!("the refused setting is reported");
+    };
+    assert_eq!(severity, "error");
+    assert!(title.contains("did not accept"), "{title}");
+    assert!(detail.contains("no such value"), "{detail}");
+}
+
+#[tokio::test]
+async fn the_users_mcp_servers_are_sent_with_the_session() {
+    let tmp = tempfile::tempdir().unwrap();
+    let log = tmp.path().join("session-new.json");
+    let servers = vec![
+        McpServer {
+            name: "minimax-mcp".into(),
+            command: "npx".into(),
+            args: vec!["-y".into(), "minimax-mcp".into()],
+            env: vec![EnvVar {
+                name: "MINIMAX_API_KEY".into(),
+                value: "secret".into(),
+            }],
+        },
+        McpServer {
+            name: "plain".into(),
+            command: "/usr/local/bin/server".into(),
+            args: Vec::new(),
+            env: Vec::new(),
+        },
+    ];
+    let (session, _tx, _rx) = start_with("", Some(&log), &servers).await;
+    let session = session.unwrap();
+
+    let params: Value = serde_json::from_str(&std::fs::read_to_string(&log).unwrap()).unwrap();
+    let given = params["mcpServers"].as_array().unwrap();
+    assert_eq!(given.len(), 3, "the editor's server and the user's two");
+    // the editor's own server comes first
+    assert_eq!(given[0]["type"], "http");
+    assert_eq!(given[0]["name"], "opendesigner");
+    // the user's servers are the ACP stdio form
+    // the v1 stdio shape: no "type" field
+    assert!(given[1].get("type").is_none());
+    assert_eq!(given[1]["name"], "minimax-mcp");
+    // the program is sent as the path to the executable, as the ACP stdio transport wants
+    let program = given[1]["command"].as_str().unwrap();
+    assert!(program.ends_with("npx"), "{program}");
+    assert_eq!(given[1]["args"][0], "-y");
+    assert_eq!(given[1]["args"][1], "minimax-mcp");
+    assert_eq!(given[1]["env"][0]["name"], "MINIMAX_API_KEY");
+    assert_eq!(given[1]["env"][0]["value"], "secret");
+    assert_eq!(given[2]["name"], "plain");
+    assert_eq!(given[2]["command"], "/usr/local/bin/server");
+    assert_eq!(given[2]["args"].as_array().unwrap().len(), 0);
+    assert_eq!(given[2]["env"].as_array().unwrap().len(), 0);
+    session.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_server_the_agent_could_not_start_is_reported_and_the_session_goes_on() {
+    let (session, tx, mut rx) = start("notice", None).await;
+    let session = Arc::new(session.unwrap());
+    let ChatEvent::Notice {
+        severity,
+        title,
+        detail,
+    } = next(&mut rx).await
+    else {
+        panic!("the agent's notice");
+    };
+    assert_eq!(severity, "warning");
+    assert_eq!(title, "MCP server unavailable");
+    assert_eq!(detail, "Continuing without it.");
+
+    // the session still works
+    session.prompt("make it bigger", tx.clone());
+    let mut text = String::new();
+    loop {
+        match next(&mut rx).await {
+            ChatEvent::Text(t) => text.push_str(&t),
+            ChatEvent::Permission { request, .. } => {
+                session.answer_permission(request, Some("yes"))
+            }
+            ChatEvent::TurnEnded(reason) => {
+                assert_eq!(reason, "end_turn");
+                break;
+            }
+            _ => {}
+        }
+    }
+    assert!(text.contains("Hello"), "{text}");
+    session.shutdown().await;
 }
 
 #[tokio::test]

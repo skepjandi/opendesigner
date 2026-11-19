@@ -238,6 +238,15 @@ Item {
                    check(canvas !== null, "the canvas should be back after a reset")
         },
         function () {
+            // the MCP servers the user added: the agent is given them with the session
+            const err = editor.saveMcpServer("", "selftest-mcp", "echo hello", "SELFTEST_KEY=value")
+            const list = JSON.parse(editor.mcpServers())
+            return check(err === "", "the server was not saved: " + err) &&
+                   check(list.length === 1 && list[0].name === "selftest-mcp", "the server is not listed: " + editor.mcpServers()) &&
+                   check(list[0].command === "echo hello", "the command is not listed: " + editor.mcpServers()) &&
+                   check(list[0].env.length === 1 && list[0].env[0] === "SELFTEST_KEY", "the variable is listed by name only")
+        },
+        function () {
             if (agentCommand === "") return true // the chat needs an agent; the test passes one
             editor.chatStart(agentCommand)
             return check(!editor.messageIsError, "the chat should start: " + editor.message)
@@ -270,6 +279,12 @@ Item {
                        check(plan === "Read the guidance=completed,Make it bigger=in_progress", "the agent's plan: " + plan)
             editor.chatStop()
             return ok && check(JSON.parse(editor.chat).status === "off", "the chat should stop")
+        },
+        function () {
+            const err = editor.removeMcpServer("selftest-mcp")
+            const list = JSON.parse(editor.mcpServers())
+            return check(err === "", "the server was not removed: " + err) &&
+                   check(list.length === 0, "the server should be gone: " + editor.mcpServers())
         },
         function () {
             grabTarget.grabToImage(function (result) {

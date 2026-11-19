@@ -9,6 +9,7 @@
 | The user's files (projects, media, anything on disk) | An agent or a malicious project must not read or write outside the project |
 | Agent credentials and subscriptions | Held by the agent's own tool, never by us; direct-provider keys, if built, are financial exposure |
 | MCP bearer token | Possession lets a local process drive the editor |
+| The user's own MCP servers and their keys | A server the user installed runs with the user's rights; its key lives in the app's config folder |
 | Agent configuration and history files | The installer must not touch them |
 | Unreleased app and marketing material in projects | Leaks via exports, logs or the network |
 | The update channel, if enabled | Supply-chain path to every install |
@@ -73,6 +74,20 @@ Video export runs the `ffmpeg` program (found in `OPENDESIGNER_FFMPEG`, next to 
 ## Device access
 
 The user chose to let agents reach pictures and videos anywhere on the computer, so that "use the logo in my Pictures folder" works without hunting for a file dialog. This replaces the earlier rule that no tool reads outside the project (invariant 5). What stays: it is read-only and narrow. `find_files` lists names, sizes and dates of PNG, JPEG, WebP, MP4, MOV and M4V files under the home folder (hidden folders, caches and package folders skipped, symlinks not followed, 200 results); `import_file` copies one file into the project's `media/` after the same magic-byte check the user's imports get (so a text file renamed `.png` is refused), never overwriting and never touching the original. No tool returns file contents, lists other file types, or writes outside `media/` and `exports/`. A switch in the Connect tab (a marker file `device-access-off` in the config folder) turns it off; it is on by default because the user asked. Residual risk: an agent can learn the names of the user's pictures and copy them into a project, from where an export could carry them out; a prompt-injected agent could do the same. Turn the switch off when running an agent you do not trust.
+
+## Other MCP servers
+
+The user can add MCP servers of their own to the in-app chat (the Connect tab): programs they
+installed on this computer, such as a speech model server
+([Agent Integration](./agent-integration.md#extra-mcp-servers)).
+
+| Threat | Mitigation |
+|--------|------------|
+| The app runs a program the user did not mean to run | The app never starts one by itself. The list is written only by the user, through the Connect tab, and the servers are handed to the agent as connection details; the agent starts them, in its own process, when it needs them |
+| The program gets more rights than the user expects | It runs as the user, in the user's own session, with the user's rights. The app cannot sandbox it and does not pretend to: the user chooses the program and installs it themselves |
+| The key of a server leaks | The value is kept in the app's config folder (`mcp-servers.json`, mode `0600` on Unix), is never shown in the window again, and is given only to that server, in the environment it is started with. It is never written into a project, an export, a log or a skill |
+| An agent adds or changes a server | No MCP tool touches the list; the file is written only by the app's own actions for the user |
+| A server reaches further than the editor's own | The editor's MCP server can only write inside the project. A user's server is that user's program: it may do whatever the user allowed when installing it. The app neither checks nor limits it, and says so in the window |
 
 ## Network
 
