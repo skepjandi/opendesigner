@@ -17,6 +17,10 @@ Rectangle {
         return node ? all.find(o => o.id === node.id) || null : null
     }
 
+    // focus the text of the selected text layer (Return)
+    function editText() {
+        if (node && node.kind === "text") { textEdit.forceActiveFocus(); textEdit.selectAll() }
+    }
     function num(v) { return (Math.round(v * 100) / 100).toString() }
     function setNum(prop, text) {
         const v = parseFloat(text)
@@ -256,6 +260,7 @@ Rectangle {
                     font.pixelSize: 12
                 }
                 TextArea {
+                    id: textEdit
                     Layout.fillWidth: true
                     Layout.preferredHeight: 80
                     wrapMode: TextEdit.Wrap

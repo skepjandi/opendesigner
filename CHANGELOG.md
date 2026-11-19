@@ -8,6 +8,16 @@ All notable changes to OpenDesigner are documented here.
 
 ## 2026-11-19
 
+### feat(ui): an agent-first window: pointing tools only, macOS shortcuts and gestures, drops go to the agent's memory
+
+**Area:** `feat(ui)`
+
+**Change:** The toolbar loses the rectangle, ellipse, text, frame, image and device tools and the colors/languages/open/save buttons (the last four are in a "⋯" menu): the agent creates things and decides their names and sizes; the user selects, moves, edits properties, pins notes and corrects. Added the Hand tool, a shortcut set taken from Figma and Penpot (`V` `H` `C`, `⇧1` fit, `⇧2` selection, `⌘0` 100%, `N` frames, `Tab` layers, arrows to nudge, `⌘]` `⌘[` order, `Return` to edit text, `⌘L` agent chat, `⇧⌘E`, `?` list) and a shortcut dialog, ⌘/⌥-scroll zoom. Files dropped on the window are copied to the project's `media/` folder (the agent's memory) and not placed on the design.
+
+**Verified:** the window session loads the new QML with no warnings (it fails on any) and the existing scripted session passes; app unit tests pass. **Not verified:** the keys and gestures themselves (no synthesized key events; not tried on a real keyboard or trackpad here), Magic Mouse.
+
+**PR:** n/a
+
 ### fix(ui): the canvas and the panels update without flashing or jumping
 
 **Area:** `fix(ui)`

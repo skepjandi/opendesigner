@@ -25,6 +25,8 @@ Rectangle {
     property string skillResult: ""
     property alias tab: bar.currentIndex
 
+    // ⌘L: show the chat tab (the chat panel puts the cursor in its message field)
+    function focusChat() { tab = 3; chatPanel.focusInput() }
     function refreshSkill() { skillRows = JSON.parse(editor.skillStatus()) }
     Component.onCompleted: {
         refreshSkill()
@@ -388,7 +390,7 @@ Rectangle {
             }
 
             // ---- chat ----
-            ChatPanel { editor: root.editor }
+            ChatPanel { id: chatPanel; editor: root.editor }
         }
     }
 

@@ -454,6 +454,19 @@ impl EditorState {
 
     /// Copies the image into the project's `media/`, adds an image node for it in the active
     /// frame (at most 80% of the frame, centered on `center` or on the frame) and selects it.
+    /// Copies a file the user chose into the project's `media/` folder without placing it
+    /// anywhere: it waits there for the agent (`list_media`). Returns its reference.
+    pub fn import_to_memory(&mut self, src: &std::path::Path) -> Res<String> {
+        self.with_ws(|ws| {
+            let reference = ws.import_media(src).map_err(|e| e.to_string())?;
+            let path = ws.media_path(&reference).map_err(|e| e.to_string())?;
+            od_render::image_dimensions(&path).inspect_err(|_| {
+                let _ = std::fs::remove_file(&path);
+            })?;
+            Ok(reference)
+        })
+    }
+
     pub fn import_image(
         &mut self,
         src: &std::path::Path,
