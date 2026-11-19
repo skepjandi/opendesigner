@@ -3,6 +3,7 @@
 
 pub mod acp;
 pub mod connect;
+pub mod device;
 pub mod error;
 pub mod export;
 pub mod mcp;

@@ -63,7 +63,7 @@ Item {
             RowLayout {
                 Layout.fillWidth: true
                 Btn {
-                    text: root.chat.status === "starting" ? "Starting…" : "Connect"
+                    text: root.chat.status === "starting" ? "Starting the agent…" : "Connect"
                     primary: true
                     enabled: root.chat.status !== "starting" && commandField.text.trim() !== "" && root.editor.hasProject
                     onClicked: root.editor.chatStart(commandField.text)
@@ -80,6 +80,8 @@ Item {
                 color: root.chat.status === "busy" ? Theme.accent : Theme.muted
                 font.pixelSize: 12
                 text: root.chat.status === "busy" ? "The agent is working…" : "Connected"
+                leftPadding: busy.visible ? 24 : 0
+                BusyIndicator { id: busy; running: visible; visible: root.chat.status === "busy"; implicitWidth: 18; implicitHeight: 18; anchors.verticalCenter: parent.verticalCenter }
             }
             Btn { text: "Cancel"; visible: root.chat.status === "busy"; onClicked: root.editor.chatCancel() }
             Btn { text: "Disconnect"; onClicked: root.editor.chatStop() }

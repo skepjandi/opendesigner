@@ -12,7 +12,7 @@ use base64::engine::general_purpose::STANDARD;
 use od_agent::acp::{AgentCommand, McpEndpoint};
 use od_agent::connect;
 use od_agent::export::{Plan, export_assets};
-use od_agent::mcp::{ChangeEvent, Handler};
+use od_agent::mcp::{ChangeEvent, Handler, JobHook, JobState, JobUpdate, Jobs};
 use od_agent::skill;
 use od_agent::{RunningServer, token};
 use od_core::annotations::AnnotationTarget;
@@ -33,6 +33,7 @@ struct Server {
     running: Option<RunningServer>,
     url: String,
     token_file: PathBuf,
+    jobs: Arc<Jobs>,
 }
 
 pub struct EditorState {
@@ -46,6 +47,18 @@ pub struct EditorState {
     /// The folder the user chose to work in (usually a repository); the agent starts there. The
     /// project itself lives in `<repo>/opendesigner`.
     repo: Option<PathBuf>,
+    /// Work in progress the window shows as bars and spinners, by job id.
+    jobs: std::collections::BTreeMap<u64, JobRow>,
+    next_local_job: u64,
+}
+
+/// A job on the window's progress strip: `total` 0 means "working, no percentage".
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JobRow {
+    pub label: String,
+    pub done: u64,
+    pub total: u64,
+    pub cancellable: bool,
 }
 
 /// The project folder inside a chosen working folder.
@@ -73,6 +86,7 @@ pub struct Snapshot {
     pub overflows: String,
     pub memory: String,
     pub videos: String,
+    pub jobs: String,
     pub tokens: String,
     pub languages: String,
     pub language: String,
@@ -110,6 +124,8 @@ impl EditorState {
             agent_changed: BTreeSet::new(),
             server: None,
             repo: None,
+            jobs: Default::default(),
+            next_local_job: 1_000_000,
         }
     }
 
@@ -582,11 +598,29 @@ impl EditorState {
     pub fn video_preview(&self, video: &str, time_ms: u64, max_side: u32) -> Res<String> {
         let id = parse_id(video)?;
         self.with_ws(|ws| {
-            let (png, ..) =
-                od_agent::video_export::video_frame_png(ws, &id, time_ms, None, max_side)
-                    .map_err(|e| e.0)?;
+            let (png, ..) = od_agent::video_export::video_frame_png(
+                &od_agent::video_export::Source::of(ws),
+                &id,
+                time_ms,
+                None,
+                max_side,
+            )
+            .map_err(|e| e.0)?;
             Ok(format!("data:image/png;base64,{}", STANDARD.encode(png)))
         })
+    }
+
+    /// For a video file the user chose: the project folder to copy it into, so the copy (it can
+    /// be gigabytes) can run on another thread. `None` for anything that is not a video.
+    pub fn footage_import_target(&self, src: &std::path::Path) -> Option<PathBuf> {
+        use std::io::Read;
+        let mut head = [0u8; 12];
+        let n = std::fs::File::open(src).ok()?.read(&mut head).ok()?;
+        if !od_core::media::sniff_footage(&head[..n]) {
+            return None;
+        }
+        self.with_ws(|ws| ws.dir().map(Path::to_path_buf).ok_or_else(String::new))
+            .ok()
     }
 
     pub fn import_to_memory(&mut self, src: &std::path::Path) -> Res<String> {
@@ -600,6 +634,7 @@ impl EditorState {
             })
             .unwrap_or(false);
         if is_video {
+            // Callers that must not wait use `footage_import_target` and copy on a thread.
             return self.with_ws(|ws| ws.import_footage(src).map_err(|e| e.to_string()));
         }
         self.with_ws(|ws| {
@@ -1053,12 +1088,27 @@ impl EditorState {
         token_file: &Path,
         on_change: Arc<dyn Fn(ChangeEvent) + Send + Sync>,
     ) -> Res<String> {
+        self.start_mcp_with_jobs(token_file, on_change, Arc::new(|_| {}))
+    }
+
+    /// [`EditorState::start_mcp`] that also reports the progress of long jobs (video exports).
+    pub fn start_mcp_with_jobs(
+        &mut self,
+        token_file: &Path,
+        on_change: Arc<dyn Fn(ChangeEvent) + Send + Sync>,
+        on_job: JobHook,
+    ) -> Res<String> {
         if let Some(s) = &self.server {
             return Ok(s.url.clone());
         }
         let ws = self.ws.clone().ok_or("open a project first")?;
         let secret = token::load_or_create(token_file).map_err(|e| e.to_string())?;
-        let handler = Arc::new(Handler::new(ws).with_change_hook(on_change));
+        let jobs = Arc::new(Jobs::default());
+        let handler = Arc::new(
+            Handler::new(ws)
+                .with_change_hook(on_change)
+                .with_job_hook(on_job, Arc::clone(&jobs)),
+        );
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
             .enable_all()
@@ -1073,8 +1123,80 @@ impl EditorState {
             running: Some(running),
             url: url.clone(),
             token_file: token_file.to_path_buf(),
+            jobs,
         });
         Ok(url)
+    }
+
+    /// Applies a progress report from a long job; returns a message for the user when it ended.
+    pub fn job_update(&mut self, u: JobUpdate) -> Option<(String, bool)> {
+        match u.state {
+            JobState::Running => {
+                self.jobs.insert(
+                    u.id,
+                    JobRow {
+                        label: u.label,
+                        done: u.done,
+                        total: u.total,
+                        cancellable: true,
+                    },
+                );
+                None
+            }
+            JobState::Finished => {
+                self.jobs.remove(&u.id);
+                Some((
+                    format!("{} done", u.label.replace("Exporting", "Exported")),
+                    false,
+                ))
+            }
+            JobState::Cancelled => {
+                self.jobs.remove(&u.id);
+                Some((format!("{} stopped", u.label), false))
+            }
+            JobState::Failed(why) => {
+                self.jobs.remove(&u.id);
+                Some((format!("{} failed: {why}", u.label), true))
+            }
+        }
+    }
+
+    /// Asks a running agent job to stop (a local job cannot be stopped).
+    pub fn cancel_job(&self, id: u64) {
+        if let Some(s) = &self.server {
+            s.jobs.cancel(id);
+        }
+    }
+
+    /// Adds a job of our own (no percentage) and returns its id.
+    pub fn begin_local_job(&mut self, label: &str) -> u64 {
+        self.next_local_job += 1;
+        self.jobs.insert(
+            self.next_local_job,
+            JobRow {
+                label: label.to_string(),
+                done: 0,
+                total: 0,
+                cancellable: false,
+            },
+        );
+        self.next_local_job
+    }
+
+    pub fn end_local_job(&mut self, id: u64) {
+        self.jobs.remove(&id);
+    }
+
+    pub fn jobs_json(&self) -> String {
+        Value::Array(
+            self.jobs
+                .iter()
+                .map(|(id, j)| {
+                    json!({"id": id.to_string(), "label": j.label, "done": j.done, "total": j.total, "cancellable": j.cancellable})
+                })
+                .collect(),
+        )
+        .to_string()
     }
 
     pub fn stop_mcp(&mut self) {
@@ -1206,6 +1328,16 @@ impl EditorState {
         let config = token::config_dir().map_err(|e| e.to_string())?;
         let home = skill::home_dir().map_err(|e| e.to_string())?;
         answer_skill_offer_in(&home, &config, install)
+    }
+
+    /// Whether the agent may look for pictures and videos outside the project.
+    pub fn device_access() -> bool {
+        od_agent::device::enabled()
+    }
+
+    pub fn set_device_access(on: bool) -> Res<()> {
+        let dir = token::config_dir().map_err(|e| e.to_string())?;
+        od_agent::device::set_enabled_in(&dir, on).map_err(|e| e.to_string())
     }
 
     pub fn skill_status(&self) -> Res<Value> {
@@ -1348,6 +1480,7 @@ impl EditorState {
             ),
             memory: memory_of(&ws).to_string(),
             videos: to_string(&view::videos(doc)),
+            jobs: self.jobs_json(),
             overflows: to_string(&frame.map(|f| collect_overflows(doc, f)).unwrap_or_default()),
             tokens: to_string(&view::tokens(doc)),
             languages: to_string(&view::locales(doc)),
@@ -2027,6 +2160,48 @@ mod tests {
         let url = s.video_preview(&video, 0, 64).unwrap();
         assert!(url.starts_with("data:image/png;base64,"));
         assert!(s.video_preview("v_999", 0, 64).is_err());
+    }
+
+    #[test]
+    fn a_running_job_shows_progress_and_its_end_says_what_happened() {
+        let mut s = EditorState::new();
+        let update = |state, done, total| JobUpdate {
+            id: 7,
+            label: "Exporting reel.mp4".into(),
+            done,
+            total,
+            state,
+        };
+        assert!(s.job_update(update(JobState::Running, 0, 0)).is_none());
+        let rows: Vec<Value> = serde_json::from_str(&s.jobs_json()).unwrap();
+        assert_eq!(
+            (rows[0]["total"].as_u64(), rows[0]["cancellable"].as_bool()),
+            (Some(0), Some(true))
+        );
+        s.job_update(update(JobState::Running, 30, 120));
+        let rows: Vec<Value> = serde_json::from_str(&s.jobs_json()).unwrap();
+        assert_eq!(
+            (
+                rows.len(),
+                rows[0]["done"].as_u64(),
+                rows[0]["total"].as_u64()
+            ),
+            (1, Some(30), Some(120))
+        );
+        assert_eq!(
+            s.job_update(update(JobState::Finished, 1, 1)),
+            Some(("Exported reel.mp4 done".to_string(), false))
+        );
+        assert_eq!(s.jobs_json(), "[]");
+        s.job_update(update(JobState::Running, 1, 2));
+        let (text, is_error) = s
+            .job_update(update(JobState::Failed("no space".into()), 0, 0))
+            .unwrap();
+        assert!(is_error && text.contains("no space"), "{text}");
+        let local = s.begin_local_job("Adding big.mov");
+        assert!(s.jobs_json().contains("Adding big.mov"));
+        s.end_local_job(local);
+        assert_eq!(s.jobs_json(), "[]");
     }
 
     #[test]

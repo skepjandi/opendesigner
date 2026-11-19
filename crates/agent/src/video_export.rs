@@ -2,13 +2,39 @@
 //! in `<project>/exports/` (`docs/wiki/video-editing.md`). Every frame is drawn by `render`;
 //! `ffmpeg` only compresses them (see `od_media`).
 
-use od_core::{NodeId, Workspace};
+use od_core::{Document, NodeId, Workspace};
 use od_media::{AudioPiece, EncodeSettings, Ffmpeg, FootageDecoder, VideoWriter};
 use od_render::video::{FootageSource, VideoRenderer};
 use od_store::video::{VideoFacts, VideoPreset, VideoViolation};
 
-use crate::export::exports_dir;
 use crate::tools::ToolError;
+
+/// What a video export reads from the project, copied out so the editor is not held while a
+/// video of minutes is drawn and encoded (the workspace lock is taken only to make the copy).
+pub struct Source {
+    pub doc: Document,
+    dir: Option<std::path::PathBuf>,
+}
+
+impl Source {
+    pub fn of(ws: &Workspace) -> Source {
+        Source {
+            doc: ws.session.document().clone(),
+            dir: ws.dir().map(std::path::Path::to_path_buf),
+        }
+    }
+
+    pub fn dir(&self) -> Option<&std::path::Path> {
+        self.dir.as_deref()
+    }
+}
+
+fn exports_dir(src: &Source) -> Result<std::path::PathBuf, ToolError> {
+    match src.dir() {
+        Some(d) => Ok(d.join("exports")),
+        None => fail("the project has no folder on disk, so there is nowhere to export to"),
+    }
+}
 
 fn fail<T>(msg: impl Into<String>) -> Result<T, ToolError> {
     Err(ToolError(msg.into()))
@@ -37,14 +63,13 @@ pub(crate) fn video_file_name(file: &str) -> Result<&str, ToolError> {
 
 /// The document as it reads in `locale`, or as it is.
 fn document_in<'a>(
-    ws: &'a Workspace,
+    ws: &'a Source,
     locale: Option<&str>,
 ) -> Result<std::borrow::Cow<'a, od_core::Document>, ToolError> {
     match locale {
-        None => Ok(std::borrow::Cow::Borrowed(ws.session.document())),
+        None => Ok(std::borrow::Cow::Borrowed(&ws.doc)),
         Some(l) => ws
-            .session
-            .document()
+            .doc
             .localized(l)
             .map(std::borrow::Cow::Owned)
             .ok_or_else(|| ToolError(format!("the project has no translations for {l:?}"))),
@@ -66,7 +91,7 @@ fn has_footage(v: &od_core::Video) -> bool {
 
 /// The picture at `time_ms`, as a PNG, with anything that could not be drawn.
 pub fn video_frame_png(
-    ws: &Workspace,
+    ws: &Source,
     video: &NodeId,
     time_ms: u64,
     locale: Option<&str>,
@@ -135,7 +160,7 @@ pub struct VideoOutcome {
 /// Everything about an export that can be known before ffmpeg is needed: the file name, that the
 /// video has clips, and that it meets the preset. Returns the preset.
 pub fn check_export(
-    ws: &Workspace,
+    ws: &Source,
     video: &NodeId,
     file: &str,
     locale: Option<&str>,
@@ -185,7 +210,7 @@ pub fn check_export(
 /// called after each frame and returns `false` to stop; stopping leaves no file. Nothing is
 /// written unless the whole video encodes (and meets `preset_id`, when one is given).
 pub fn export_video(
-    ws: &Workspace,
+    ws: &Source,
     video: &NodeId,
     file: &str,
     locale: Option<&str>,

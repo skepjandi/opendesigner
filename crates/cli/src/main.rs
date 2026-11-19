@@ -456,10 +456,11 @@ fn run(cli: Cli) -> Result<(), CliError> {
         } => {
             let ws = Workspace::open(&dir)?;
             let id = NodeId::parse(&video)?;
+            let src = od_agent::video_export::Source::of(&ws);
             let ffmpeg =
                 od_media::Ffmpeg::locate().map_err(|e| CliError::Invalid(e.to_string()))?;
             let out = od_agent::video_export::export_video(
-                &ws,
+                &src,
                 &id,
                 &file,
                 locale.as_deref(),

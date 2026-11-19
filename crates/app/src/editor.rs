@@ -30,6 +30,7 @@ pub mod qobject {
         #[qproperty(QString, overflows)]
         #[qproperty(QString, memory)]
         #[qproperty(QString, videos)]
+        #[qproperty(QString, jobs)]
         #[qproperty(QString, tokens)]
         #[qproperty(QString, languages)]
         #[qproperty(QString, language)]
@@ -100,6 +101,15 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "importImage"]
         fn import_image(self: Pin<&mut Self>, url: &QString) -> QString;
+        #[qinvokable]
+        #[cxx_name = "deviceAccess"]
+        fn device_access(self: &Self) -> bool;
+        #[qinvokable]
+        #[cxx_name = "setDeviceAccess"]
+        fn set_device_access(self: Pin<&mut Self>, on: bool);
+        #[qinvokable]
+        #[cxx_name = "cancelJob"]
+        fn cancel_job(self: &Self, id: &QString);
         #[qinvokable]
         #[cxx_name = "videoPreview"]
         fn video_preview(self: &Self, video: &QString, time_ms: f64, max_side: i32) -> QString;
@@ -280,6 +290,7 @@ pub struct EditorRust {
     overflows: QString,
     memory: QString,
     videos: QString,
+    jobs: QString,
     tokens: QString,
     languages: QString,
     language: QString,
@@ -390,6 +401,7 @@ impl qobject::Editor {
         self.as_mut().set_overflows(q(&snap.overflows));
         self.as_mut().set_memory(q(&snap.memory));
         self.as_mut().set_videos(q(&snap.videos));
+        self.as_mut().set_jobs(q(&snap.jobs));
         self.as_mut().set_tokens(q(&snap.tokens));
         self.as_mut().set_languages(q(&snap.languages));
         self.as_mut().set_language(q(&snap.language));
@@ -514,6 +526,32 @@ impl qobject::Editor {
             .unwrap_or_default())
     }
 
+    pub fn device_access(&self) -> bool {
+        EditorState::device_access()
+    }
+
+    pub fn set_device_access(mut self: Pin<&mut Self>, on: bool) {
+        if let Err(e) = EditorState::set_device_access(on) {
+            self.as_mut().show(&e, true);
+        }
+    }
+
+    pub fn cancel_job(&self, id: &QString) {
+        if let Ok(id) = id.to_string().parse::<u64>() {
+            self.state.cancel_job(id);
+        }
+    }
+
+    /// Called on the Qt thread with a long job's progress.
+    fn on_job(mut self: Pin<&mut Self>, update: od_agent::mcp::JobUpdate) {
+        let ended = self.as_mut().rust_mut().state.job_update(update);
+        let jobs = q(&self.state.jobs_json());
+        self.as_mut().set_jobs(jobs);
+        if let Some((text, is_error)) = ended {
+            self.as_mut().show(&text, is_error);
+        }
+    }
+
     /// A picture of a video at a moment, or an empty string (the error is shown).
     pub fn video_preview(&self, video: &QString, time_ms: f64, max_side: i32) -> QString {
         match self.state.video_preview(
@@ -528,6 +566,39 @@ impl qobject::Editor {
 
     pub fn import_to_memory(mut self: Pin<&mut Self>, url: &QString) -> QString {
         let path = path_from_url(&url.to_string());
+        if let Some(project) = self
+            .state
+            .footage_import_target(std::path::Path::new(&path))
+        {
+            // a video can be gigabytes: copy it on another thread with a spinner
+            let name = std::path::Path::new(&path)
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let job = self
+                .as_mut()
+                .rust_mut()
+                .state
+                .begin_local_job(&format!("Adding {name} to the agent's memory"));
+            let jobs = q(&self.state.jobs_json());
+            self.as_mut().set_jobs(jobs);
+            let qt = self.qt_thread();
+            std::thread::spawn(move || {
+                let result = od_core::media::import_footage(&project, std::path::Path::new(&path))
+                    .map_err(|e| e.to_string());
+                let _ = qt.queue(move |mut editor| {
+                    editor.as_mut().rust_mut().state.end_local_job(job);
+                    match result {
+                        Ok(reference) => editor
+                            .as_mut()
+                            .show(&format!("Added {reference} to the agent's memory"), false),
+                        Err(e) => editor.as_mut().show(&e, true),
+                    }
+                    editor.refresh();
+                });
+            });
+            return q("");
+        }
         let added = self
             .as_mut()
             .act(|s| s.import_to_memory(std::path::Path::new(&path)));
@@ -741,9 +812,15 @@ impl qobject::Editor {
             let (who, ids) = (e.actor, e.touched);
             let _ = qt.queue(move |editor| editor.on_agent_change(&who, ids));
         });
+        let qt_jobs = self.qt_thread();
+        let on_job: od_agent::mcp::JobHook = Arc::new(move |u| {
+            let _ = qt_jobs.queue(move |editor| editor.on_job(u));
+        });
         let token_file = od_agent::token::token_path();
         let started = match token_file {
-            Ok(path) => self.as_mut().act(|s| s.start_mcp(&path, hook)),
+            Ok(path) => self
+                .as_mut()
+                .act(|s| s.start_mcp_with_jobs(&path, hook, on_job)),
             Err(e) => {
                 self.as_mut().show(&e.to_string(), true);
                 None

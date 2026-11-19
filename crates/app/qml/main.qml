@@ -561,6 +561,54 @@ ApplicationWindow {
         }
     }
 
+    // ---------- work in progress ----------
+    // Anything that takes a while (a video export, copying a large video, starting an agent)
+    // shows here with a bar, or a spinner when it cannot say how far along it is.
+    JsonModel { id: jobsModel }
+    readonly property var jobs: backend.jobs ? JSON.parse(backend.jobs) : []
+    onJobsChanged: jobsModel.sync(jobs)
+    Column {
+        id: jobStrip
+        anchors.left: parent.left
+        anchors.bottom: parent.bottom
+        anchors.margins: 16
+        width: Math.min(380, parent.width - 32)
+        spacing: 6
+        z: 5
+        Repeater {
+            model: jobsModel
+            delegate: Rectangle {
+                required property string json
+                readonly property var job: JSON.parse(json)
+                width: jobStrip.width
+                height: 54
+                radius: Theme.radius
+                color: Theme.panelRaised
+                border.width: 1
+                border.color: Theme.border
+                ColumnLayout {
+                    anchors.fill: parent
+                    anchors.margins: 8
+                    spacing: 4
+                    RowLayout {
+                        Layout.fillWidth: true
+                        BusyIndicator { running: job.total === 0; visible: job.total === 0; implicitWidth: 18; implicitHeight: 18 }
+                        Label { text: job.label; color: Theme.text; font.pixelSize: 12; elide: Text.ElideRight; Layout.fillWidth: true }
+                        Label { visible: job.total > 0; text: Math.round(100 * job.done / job.total) + "%"; color: Theme.muted; font.pixelSize: 11 }
+                        Btn { visible: job.cancellable; text: "Stop"; implicitHeight: 22; onClicked: backend.cancelJob(job.id) }
+                    }
+                    ProgressBar {
+                        Layout.fillWidth: true
+                        indeterminate: job.total === 0
+                        from: 0
+                        to: Math.max(1, job.total)
+                        value: job.done
+                    }
+                }
+            }
+        }
+    }
+
     // ---------- keyboard shortcuts ----------
     Modal {
         id: shortcutsDialog

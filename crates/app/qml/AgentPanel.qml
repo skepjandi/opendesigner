@@ -509,6 +509,25 @@ Rectangle {
 
                     Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: Theme.border }
 
+                    CheckBox {
+                        id: deviceBox
+                        Layout.fillWidth: true
+                        checked: root.editor.deviceAccess()
+                        text: "Let the agent find pictures and videos on this computer"
+                        font.pixelSize: 12
+                        onToggled: root.editor.setDeviceAccess(checked)
+                        contentItem: Text { text: parent.text; font: parent.font; color: Theme.text; leftPadding: parent.indicator.width + 6; verticalAlignment: Text.AlignVCenter; wrapMode: Text.WordWrap }
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        wrapMode: Text.WordWrap
+                        color: Theme.muted
+                        font.pixelSize: 11
+                        text: "It can search your home folder for pictures and videos by name and copy the ones it needs into this project. It cannot change or delete anything, and it cannot read other kinds of files. Turn this off to limit it to what you add yourself."
+                    }
+
+                    Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: Theme.border }
+
                     Label { text: "Teach your agents"; color: Theme.text; font.pixelSize: Theme.fontSize; font.bold: true }
                     Label {
                         Layout.fillWidth: true

@@ -106,6 +106,9 @@ Item {
             return true
         },
         function () {
+            return check(Array.isArray(JSON.parse(editor.jobs)), "the progress strip's data is a list")
+        },
+        function () {
             return check(editor.skillOfferPending(), "an agent is installed and the skill is not, so it is offered") &&
                    check(JSON.parse(editor.answerSkillOffer(false)).length === 0, "not asking again installs nothing") &&
                    check(!editor.skillOfferPending(), "the offer is made once")

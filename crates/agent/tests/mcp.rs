@@ -161,6 +161,8 @@ fn tools_list_describes_every_tool_with_a_closed_schema() {
         "list_media",
         "list_locales",
         "list_videos",
+        "find_files",
+        "import_file",
         "list_video_presets",
         "render_video_frame",
         "export_video",
@@ -918,5 +920,117 @@ fn footage_is_listed_cut_into_a_video_with_an_overlay_and_exported_with_its_soun
             .path()
             .join("p.od/exports/.cut.mp4.picture.mp4")
             .exists()
+    );
+}
+
+#[test]
+fn the_agent_can_copy_a_picture_from_anywhere_into_the_project_but_only_real_media() {
+    let f = fixture();
+    let outside = tempfile::tempdir().unwrap();
+    let png = outside.path().join("Logo Final.png");
+    let bytes = od_render::encode_png(&od_render::Pixmap::new(4, 4).unwrap(), false).unwrap();
+    std::fs::write(&png, &bytes).unwrap();
+
+    let out = f.ok("import_file", json!({"path": png.display().to_string()}));
+    assert_eq!(out["reference"], "media/Logo-Final.png");
+    assert!(png.exists(), "the original is untouched");
+    assert_eq!(
+        f.ok("list_media", json!({}))[0]["path"],
+        "media/Logo-Final.png"
+    );
+
+    let text = outside.path().join("notes.png");
+    std::fs::write(&text, b"not a picture").unwrap();
+    let (err, why) = f.tool("import_file", json!({"path": text.display().to_string()}));
+    assert!(err, "{why}");
+    let (err, _) = f.tool("import_file", json!({"path": "relative/x.png"}));
+    assert!(err);
+    let (err, _) = f.tool(
+        "import_file",
+        json!({"path": outside.path().display().to_string()}),
+    );
+    assert!(err, "a folder is not a file");
+
+    // searching stays inside the home folder
+    let (err, why) = f.tool(
+        "find_files",
+        json!({"folder": outside.path().display().to_string()}),
+    );
+    assert!(err && why.contains("home folder"), "{why}");
+    let (err, _) = f.tool("find_files", json!({"kind": "audio"}));
+    assert!(err);
+}
+
+#[test]
+fn a_long_export_does_not_hold_the_editor_reports_progress_and_can_be_stopped() {
+    let Ok(ff) = od_media::Ffmpeg::locate() else {
+        eprintln!("skipped: no ffmpeg on this machine");
+        return;
+    };
+    if ff.h264_encoder().is_err() {
+        eprintln!("skipped: no H.264 encoder");
+        return;
+    }
+    let f = fixture();
+    let (video, ..) = make_video(&f);
+    let seen: Arc<Mutex<Vec<od_agent::mcp::JobUpdate>>> = Arc::default();
+    let jobs = Arc::new(od_agent::mcp::Jobs::default());
+    let (log, to_cancel, ws_probe) = (seen.clone(), jobs.clone(), f.ws.clone());
+    let locked_during = Arc::new(Mutex::new(Vec::new()));
+    let probe = locked_during.clone();
+    let handler = Handler::new(f.ws.clone()).with_job_hook(
+        Arc::new(move |u: od_agent::mcp::JobUpdate| {
+            // the editor's state must be free while the job runs
+            probe.lock().unwrap().push(ws_probe.try_lock().is_ok());
+            if u.state == od_agent::mcp::JobState::Running && u.done >= 5 && u.id == 2 {
+                to_cancel.cancel(u.id);
+            }
+            log.lock().unwrap().push(u);
+        }),
+        jobs,
+    );
+    let session = init(&handler, "t");
+    let call = |file: &str| {
+        let out = handler.handle(
+            Some(&session),
+            json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{
+                "name":"export_video","arguments":{"video":video,"file":file}}}),
+        );
+        out.body.unwrap()["result"].clone()
+    };
+    let ok = call("one.mp4");
+    assert_eq!(ok["isError"], false, "{ok}");
+    {
+        let seen = seen.lock().unwrap();
+        assert_eq!(
+            seen.first().unwrap().state,
+            od_agent::mcp::JobState::Running
+        );
+        assert_eq!(
+            seen.last().unwrap().state,
+            od_agent::mcp::JobState::Finished
+        );
+        assert!(
+            seen.iter()
+                .any(|u| u.total == 35 && u.done > 0 && u.done <= 35),
+            "{seen:?}"
+        );
+        assert!(seen.iter().all(|u| u.label == "Exporting one.mp4"));
+    }
+    assert!(
+        locked_during.lock().unwrap().iter().all(|free| *free),
+        "the editor was held"
+    );
+    assert!(f._tmp.path().join("p.od/exports/one.mp4").exists());
+
+    let stopped = call("two.mp4");
+    assert_eq!(stopped["isError"], true);
+    assert_eq!(
+        seen.lock().unwrap().last().unwrap().state,
+        od_agent::mcp::JobState::Cancelled
+    );
+    assert!(
+        !f._tmp.path().join("p.od/exports/two.mp4").exists(),
+        "a stopped export leaves nothing"
     );
 }

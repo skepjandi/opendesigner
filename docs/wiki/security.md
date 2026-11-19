@@ -59,6 +59,10 @@ Projects, SVGs, images, fonts and video are untrusted inputs. Use maintained dec
 
 Video export runs the `ffmpeg` program (found in `OPENDESIGNER_FFMPEG`, next to the app, or on `PATH`; never a path from a project file or an agent) as a child process with fixed arguments, raw frames on stdin and one output path inside the project's `exports/`, a plain `.mp4` name checked like the image export names. The agent chooses the video, the file name and the preset, nothing on the command line. Frames are drawn in this process; the child never reads project files.
 
+## Device access
+
+The user chose to let agents reach pictures and videos anywhere on the computer, so that "use the logo in my Pictures folder" works without hunting for a file dialog. This replaces the earlier rule that no tool reads outside the project (invariant 5). What stays: it is read-only and narrow. `find_files` lists names, sizes and dates of PNG, JPEG, WebP, MP4, MOV and M4V files under the home folder (hidden folders, caches and package folders skipped, symlinks not followed, 200 results); `import_file` copies one file into the project's `media/` after the same magic-byte check the user's imports get (so a text file renamed `.png` is refused), never overwriting and never touching the original. No tool returns file contents, lists other file types, or writes outside `media/` and `exports/`. A switch in the Connect tab (a marker file `device-access-off` in the config folder) turns it off; it is on by default because the user asked. Residual risk: an agent can learn the names of the user's pictures and copy them into a project, from where an export could carry them out; a prompt-injected agent could do the same. Turn the switch off when running an agent you do not trust.
+
 ## Network
 
 Allowed destinations: the user's configured model endpoint or agent, sites the user chose to fetch an asset from (a plain `GET`, no cookies), and the update channel if enabled. No telemetry. Documented in [AGENTS.md invariant 1](../../AGENTS.md).
