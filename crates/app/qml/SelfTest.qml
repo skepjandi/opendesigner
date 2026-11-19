@@ -7,6 +7,7 @@ Item {
     id: st
     required property var editor
     required property var canvas
+    required property var dock
     required property var grabTarget
 
     readonly property string folder: {
@@ -178,6 +179,45 @@ Item {
             const names = JSON.parse(editor.layers).map(l => l.name)
             return check(kinds.length >= 3 && id !== "", "a device frame was not added: " + editor.message) &&
                    check(names.indexOf("Screen") >= 0 && names.indexOf("Body") >= 0, "the device should add a body and a screen")
+        },
+        function () {
+            // the panels can be rearranged and every change leaves a working window
+            editor.layoutFloat("video", 120, 90, 420, 520)
+            return check(dock.windowIds.length === 1, "floating a panel should give it a window") &&
+                   check(dock.groupOf("video") !== dock.groupOf("notes"), "the floated panel left its tabs")
+        },
+        function () {
+            editor.layoutMove("chat", dock.groupOf("canvas"), "right")
+            editor.layoutDock("history", "bottom", 0)
+            return check(dock.groupOf("chat") !== dock.groupOf("notes"), "chat should have its own group next to the canvas") &&
+                   check(dock.groupOf("history") !== dock.groupOf("notes"), "history should be docked at the bottom") &&
+                   check(JSON.parse(editor.layout).main.kind === "split", "the main window is a split")
+        },
+        function () {
+            editor.layoutHide("memory")
+            const hidden = dock.hidden.indexOf("memory") >= 0
+            editor.layoutShow("memory")
+            return check(hidden, "a hidden panel should be listed as hidden") &&
+                   check(dock.hidden.length === 0 && dock.groupOf("memory") > 0, "a shown panel should come back")
+        },
+        function () {
+            const w = editor.layoutReveal("video")
+            return check(w > 0 && w === dock.windowIds[0], "revealing a floated panel names its window") &&
+                   check(canvas !== null && canvas.zoom > 0, "the canvas should survive the rearranging") &&
+                   check(editor.layoutReveal("notes") === 0, "a docked panel is in the main window")
+        },
+        function () {
+            editor.layoutDockWindow(dock.windowIds[0])
+            return check(dock.windowIds.length === 0, "closing a window should put its panel back") &&
+                   check(dock.groupOf("video") > 0, "the panel should be docked again")
+        },
+        function () {
+            editor.layoutMove("layers", dock.groupOf("layers"), "left")
+            const refused = editor.messageIsError
+            editor.layoutReset()
+            return check(refused, "splitting a panel from itself should be refused") &&
+                   check(JSON.parse(editor.layout).floating.length === 0 && dock.groupOf("chat") === dock.groupOf("notes"), "the layout should reset") &&
+                   check(canvas !== null, "the canvas should be back after a reset")
         },
         function () {
             if (agentCommand === "") return true // the chat needs an agent; the test passes one

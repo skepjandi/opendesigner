@@ -8,6 +8,16 @@ All notable changes to OpenDesigner are documented here.
 
 ## 2026-11-19
 
+### feat(app): a fully rearrangeable layout: tabs, splits, windows of their own, hidden panels
+
+**Area:** `feat(app)`
+
+**Why:** The window had one fixed arrangement. **Change:** Layers, canvas, inspector, notes, history, memory, video, connect and chat are separate panels (the agent panel's tabs are now panels of their own) that can sit side by side, stacked, as tabs, in a floating window, or hidden. Drag a tab onto another panel's middle (join its tabs) or edge (split next to it), or off the window (its own window); right-click a tab or use `⋯` for the same by menu; drag the line between panels to resize; toolbar **Layout** shows/hides panels and resets. Closing a floating window puts its panels back. The arrangement is saved in the config folder and restored. The rules are in `crates/app/src/layout.rs` (every operation checked; a refused one changes nothing).
+
+**Verified:** 10 unit tests of the model (joining tabs, edge splits and merging, refusals, floating, the main window keeping a panel, hide/show/reveal, weights, save/load with a bad file, 600 random operations all leaving it valid) and a window session that floats, splits, docks, hides, reveals, closes and resets panels with no QML warning. **Not verified:** the dragging itself (tabs, divider, dropping outside to float) and the floating windows by hand or by eye; keyboard shortcuts inside floating windows (they have none); behavior on a second monitor.
+
+**PR:** n/a
+
 ### feat(agent): every agent gets the quality bar, playbooks, a design review tool and optional formats
 
 **Area:** `feat(mcp)`, `feat(app)`, `feat(skill)`
