@@ -8,7 +8,7 @@
 
 **Project status: design.** No application code exists yet. Every page describes the intended design and carries a `Status: Design` banner until the code lands; claims not yet checked are labelled `[INFERENCE]`.
 
-OpenDesigner is a native desktop editor: a Rust core under a Qt 6 (C++/QML) shell. It is a vector design canvas plus a video timeline for producing App Store, Google Play and web assets with an AI agent. The GUI is how you guide the agent: your selection, pinned notes and hand edits reach it, and every agent edit is outlined and reversible. Installing the app installs an Agent Skill and a local MCP endpoint for the agents on your machine. No account, no analytics, no server of ours.
+OpenDesigner is a native desktop editor: a Rust core under a Qt 6 Quick (QML) shell. It is a vector design canvas plus a video timeline for producing App Store, Google Play and web assets with an AI agent. The GUI is how you guide the agent: your selection, pinned notes and hand edits reach it, and every agent edit is outlined and reversible. Installing the app installs an Agent Skill and a local MCP endpoint for the agents on your machine. No account, no analytics, no server of ours.
 
 ## Pages
 
@@ -17,7 +17,7 @@ OpenDesigner is a native desktop editor: a Rust core under a Qt 6 (C++/QML) shel
 | [Architecture](./architecture.md) | Crates, trust zones, data flow, the "core is UI-agnostic" rule |
 | [Document Format](./document-format.md) | Project folder, node model, operations, history and checkpoints |
 | [Agent Integration](./agent-integration.md) | The skill installer, the local MCP server, selection and annotation context, in-app chat |
-| [Qt Desktop](./qt-desktop.md) | Why Qt, the Rust/C++/QML layers and bridge, Qt licensing (LGPL-only rule), window layout, canvas rendering, theme and brand tokens, platform requirements |
+| [Qt Desktop](./qt-desktop.md) | Why Qt, the QML / `Editor` object / `EditorState` layers, Qt licensing (LGPL-only rule), window layout, canvas rendering, theme and brand tokens, platform requirements |
 | [Store Assets](./store-assets.md) | What GitNotēs and OpenMedia do today, store specs, the asset studio that replaces it |
 | [Video Editing](./video-editing.md) | Timeline model, preview, FFmpeg, what we take from OpenCut and Kino |
 | [Security](./security.md) | Assets, trust boundaries, the MCP threat model, skill installer rules |

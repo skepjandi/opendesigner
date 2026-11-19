@@ -8,6 +8,18 @@ All notable changes to OpenDesigner are documented here.
 
 ## 2026-11-19
 
+### build(app): a macOS app bundle script with a licensing guard
+
+**Area:** `build(app)`, `docs(repo)`
+
+**Problem:** The editor could only be started with `cargo run`; there was no installable app, and the "no GPL-only Qt module" rule (invariant 12) was a convention, not a check.
+
+**Change:** `scripts/package-macos.sh` produces `dist/OpenDesigner.app`: release build, Info.plist, icon from the logo, license notices (`packaging/THIRD_PARTY.txt`, the font license, the project license), `macdeployqt` with the QML folder, a licensing step, ad-hoc signing, and a smoke test that runs the bundled app's scripted session offscreen. The licensing step exists because the first bundle contained two GPL-only Qt parts (the Qt Quick Timeline and Qt Virtual Keyboard plug-ins, copied by `macdeployqt` though the app never imports them): the script now deletes anything matching a banned module and fails if any remains. It also removes the Homebrew rpath so Qt cannot load twice. Also removes leftover CMake/C++/`bridge` wording from AGENTS.md, CONTRIBUTING.md, README and the wiki index.
+
+**Verified:** the script ran to the end on macOS arm64 with Qt 6.12 from Homebrew and the bundle printed `SELFTEST OK`; the frameworks list contains no banned module. **Not verified:** the bundle on another Mac (no other machine), a Developer ID signature or notarization (not done), Windows and Linux packaging (none), drag-to-Applications install and first-run behavior from Finder.
+
+**PR:** n/a
+
 ### feat(core): per-language text and exports
 
 **Area:** `feat(core)`, `feat(render)`, `feat(mcp)`, `feat(cli)`, `feat(ui)`, `feat(skill)`

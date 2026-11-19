@@ -43,6 +43,10 @@ cargo run -p opendesigner-cli -- export demo.od --frame n_3 --preset apple-iphon
 
 Run the editor offscreen, the way the test does: `QT_QPA_PLATFORM=offscreen target/debug/opendesigner-app --selftest=/some/empty/folder` prints `SELFTEST OK` and leaves `window.png` (a grab of the window) next to the project it built. Use a throwaway `HOME` and `OPENDESIGNER_CONFIG_DIR` so the session does not touch your real agent folders or token.
 
+### Packaging (macOS)
+
+`QMAKE="$(brew --prefix qt)/bin/qmake" scripts/package-macos.sh` builds the release binary, assembles `dist/OpenDesigner.app` (Info.plist, an icon made from `assets/logo.svg`, `THIRD_PARTY.txt`, the font and project licenses), runs `macdeployqt` with the QML folder so only the Qt modules the app imports are bundled, **fails if any GPL-only Qt module is in the bundle** (the list in the script mirrors [Qt Desktop](./qt-desktop.md#licensing)), signs it ad hoc, and starts the bundled binary offscreen to run the scripted session (`SELFTEST OK`). The build takes about 5 minutes the first time. The bundle is signed ad hoc, so it runs on the machine that built it; distributing it needs a Developer ID signature and notarization, which the script does not do. There are no Windows or Linux packaging scripts.
+
 ## Testing
 
 - Rust: unit tests beside the code (`#[cfg(test)]`); integration tests in each crate's `tests/`.
