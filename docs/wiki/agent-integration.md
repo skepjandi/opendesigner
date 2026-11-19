@@ -1,6 +1,6 @@
 # Agent Integration
 
-> **Status: Partially implemented.** The MCP server (`crates/agent`) and the guidance tools are built and tested; the skill generator/installer, the in-process Qt integration and the in-app chat are design only. Per-agent skill directories other than `~/.agents/skills/` and `~/.claude/skills/` (both present on the maintainer's machine and the first from the Agent Skills guidance) are `[INFERENCE]` until the Phase 0 spike checks each agent.
+> **Status: Partially implemented.** The MCP server and the skill generator/installer (`crates/agent`, `opendesigner skill …`) are built and tested; the first-run prompt in the Qt app, the in-process Qt integration and the in-app chat are design only. Skill locations for the supported agents were verified against each agent's own docs on 2026-11-19 (see the target table).
 
 The point of OpenDesigner is that the user guides an agent *with the GUI*. Three mechanisms carry that, and the app installs the first two on first run.
 
@@ -43,13 +43,24 @@ It never edits an agent's config, credentials or history, never overwrites a ski
 
 ### Target table
 
-| Target | User-level skills directory | Status |
-|--------|----------------------------|--------|
-| Cross-client convention | `~/.agents/skills/` | Documented convention in the Agent Skills client guide; present on the maintainer's machine |
-| Claude Code | `~/.claude/skills/` | Present on the maintainer's machine |
-| Codex CLI | `~/.codex/` exists; skills location `[INFERENCE]`, may read `~/.agents/skills/` | Verify in spike |
-| Gemini CLI, opencode, Cursor, others | `[INFERENCE]` | Verify in spike; add rows as verified |
-| Project-level | `<project>/.agents/skills/` | Optional: the project can carry its own skill so a cloned repo teaches the agent. Clients may gate project skills on trust |
+| Target id | Directory (under the user's home) | Read by | Verified against |
+|-----------|-----------------------------------|---------|------------------|
+| `agents` | `~/.agents/skills/` | Codex CLI, Gemini CLI, opencode | Codex docs list `$HOME/.agents/skills` as the user location; Gemini CLI docs list `~/.agents/skills/` as an alias of `~/.gemini/skills/`; opencode reads `~/.agents/skills` for compatibility (all read 2026-11-19) |
+| `claude-code` | `~/.claude/skills/` | Claude Code | Claude Code docs: personal skills at `~/.claude/skills/<skill-name>/SKILL.md` (read 2026-11-19). Claude Code does not list `~/.agents/skills`, so it needs its own row |
+| Cursor, VS Code, others | not supported | | Not verified. VS Code reads project-level `.agents/skills/` per the Agent Skills quickstart; a project-level install is not built |
+
+The installer writes one directory per target, so an install for Codex, Gemini CLI and opencode is a single `~/.agents/skills/opendesigner/`. Gemini CLI's docs say unpaid-tier and Google One users moved to Antigravity CLI on 2026-06-18; where Antigravity looks for skills was not checked.
+
+### Implemented
+
+`crates/agent/src/skill.rs` and `opendesigner skill status|install|uninstall`:
+
+- **Generated, not hand-written:** `SKILL.md` (Agent Skills frontmatter: `name`, `description` under 1024 characters, `license`, `compatibility`, `metadata.version`), `references/tools.md` (from the live tool definitions), `references/store-specs.md` (from the presets, including which are not yet checked against their source) and `references/style-guide.md`. Tests fail if a tool or preset is missing from the references.
+- **Previewed:** `install` and `uninstall` print every path and write nothing without `--yes`. Targets default to agents it detects (by config folder).
+- **Reversible and conservative:** a manifest (`.opendesigner-install.json`, files and SHA-256) lives inside the skill folder. Updates rewrite only files that still match it; a file the user edited is kept and reported. Uninstall removes exactly the recorded, unedited files. A folder named `opendesigner` that has no manifest is refused unless `--overwrite-foreign`; a symlinked skill folder or file is never written through.
+- **Does not connect the agent:** it never edits an agent's config. `opendesigner serve-mcp` prints the one-line connect command instead.
+
+Not built: the first-run offer inside the app, project-level installs, an update check when the app updates.
 
 Each row is data in `agent`'s target table, not code, so adding an agent is a one-row change with a test that the installer writes only inside that row's directory.
 
