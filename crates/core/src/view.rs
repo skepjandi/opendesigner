@@ -170,8 +170,13 @@ pub fn locales(doc: &Document) -> Vec<LocaleRow> {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ClipRow {
     pub id: String,
+    /// The design frame shown (empty for footage).
+    /// The design frame shown (empty for footage).
     pub frame: String,
     pub frame_name: String,
+    /// The footage shown (`media/<name>`), or empty.
+    pub footage: String,
+    pub footage_in_ms: u64,
     pub start_ms: u64,
     pub duration_ms: u32,
     pub transition: crate::video::Transition,
@@ -191,6 +196,7 @@ pub struct VideoRow {
     pub duration_ms: u64,
     pub frame_count: u64,
     pub clips: Vec<ClipRow>,
+    pub overlays: Vec<crate::video::Overlay>,
 }
 
 /// Every video with its clips placed on the timeline.
@@ -213,11 +219,23 @@ pub fn videos(doc: &Document) -> Vec<VideoRow> {
                     .zip(&placed)
                     .map(|(c, p)| ClipRow {
                         id: c.id.to_string(),
-                        frame: c.frame.to_string(),
-                        frame_name: doc
-                            .node(&c.frame)
+                        frame: c
+                            .frame
+                            .as_ref()
+                            .map(ToString::to_string)
+                            .unwrap_or_default(),
+                        frame_name: c
+                            .frame
+                            .as_ref()
+                            .and_then(|f| doc.node(f))
                             .map(|n| n.name.clone())
                             .unwrap_or_default(),
+                        footage: c
+                            .footage
+                            .as_ref()
+                            .map(|f| f.file.clone())
+                            .unwrap_or_default(),
+                        footage_in_ms: c.footage.as_ref().map_or(0, |f| f.in_ms),
                         start_ms: p.start_ms,
                         duration_ms: c.duration_ms,
                         transition: c.transition,
@@ -225,6 +243,7 @@ pub fn videos(doc: &Document) -> Vec<VideoRow> {
                         motion: c.motion,
                     })
                     .collect(),
+                overlays: v.overlays.clone(),
             }
         })
         .collect()

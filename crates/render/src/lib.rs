@@ -40,6 +40,8 @@ pub enum RenderError {
     Document(#[from] OpError),
     #[error("PNG encoding failed: {0}")]
     Encode(String),
+    #[error("footage could not be read: {0}")]
+    Footage(String),
     #[error(
         "{width} px wide cannot be cut into {count} equal slices (use a count that divides the width)"
     )]

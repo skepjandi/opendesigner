@@ -6,13 +6,23 @@
 
 use std::path::Path as FsPath;
 
-use od_core::{Clip, Document, NodeId, TransitionKind, Video};
+use od_core::{Document, NodeId, Overlay, TransitionKind, Video};
 use tiny_skia::{FilterQuality, Pixmap, PixmapPaint, Transform};
 
 use crate::{RenderError, Warning, render_frame};
 
 /// Frames kept drawn: a transition shows two clips and a second transition may start under it.
 const KEPT: usize = 3;
+
+/// Where footage frames come from. The editor draws design frames itself but leaves decoding
+/// video to the program that can (`od_media`); the renderer asks for one picture at a time.
+pub trait FootageSource {
+    /// The RGBA pixels (`width * height * 4` bytes) of the file `file` (`media/<name>`) at
+    /// `at_ms` into it, scaled to cover `width` x `height` and cropped in the middle. Past the end
+    /// it gives the last picture.
+    fn frame(&mut self, file: &str, at_ms: u64, width: u32, height: u32)
+    -> Result<Vec<u8>, String>;
+}
 
 struct Drawn {
     frame: NodeId,
@@ -30,6 +40,7 @@ pub struct VideoRenderer<'a> {
     height: u32,
     drawn: Vec<Drawn>,
     warnings: Vec<Warning>,
+    footage: Option<&'a mut dyn FootageSource>,
 }
 
 impl<'a> VideoRenderer<'a> {
@@ -46,7 +57,14 @@ impl<'a> VideoRenderer<'a> {
             height: video.height,
             drawn: Vec::new(),
             warnings: Vec::new(),
+            footage: None,
         }
+    }
+
+    /// Lets clips of footage be drawn.
+    pub fn with_footage(mut self, source: &'a mut dyn FootageSource) -> VideoRenderer<'a> {
+        self.footage = Some(source);
+        self
     }
 
     /// Like [`VideoRenderer::new`] but drawing pictures of `width` x `height`, for previews.
@@ -109,7 +127,53 @@ impl<'a> VideoRenderer<'a> {
             }
             self.draw_clip(&mut canvas, p.index, time, dx, opacity)?;
         }
+        let overlays: Vec<Overlay> = self.video.overlays.clone();
+        for o in overlays
+            .iter()
+            .filter(|o| o.start_ms <= time && time < o.start_ms + u64::from(o.duration_ms))
+        {
+            let into = (time - o.start_ms) as f32;
+            let left = (u64::from(o.duration_ms) - (time - o.start_ms)) as f32;
+            let fade = o.fade_ms as f32;
+            let opacity = if fade > 0.0 {
+                (into / fade).min(left / fade).clamp(0.0, 1.0)
+            } else {
+                1.0
+            };
+            self.draw_overlay(&mut canvas, &o.frame, opacity)?;
+        }
         Ok(canvas)
+    }
+
+    /// Draws a design frame over everything, scaled to cover and centered.
+    fn draw_overlay(
+        &mut self,
+        canvas: &mut Pixmap,
+        frame: &NodeId,
+        opacity: f32,
+    ) -> Result<(), RenderError> {
+        let (w, h) = (self.width as f32, self.height as f32);
+        let node = self
+            .doc
+            .node(frame)
+            .ok_or_else(|| RenderError::NoSuchNode(frame.to_string()))?;
+        let cover = (w / node.width as f32).max(h / node.height as f32);
+        let drawn = self.drawn_frame(frame, cover)?;
+        let (pw, ph) = (drawn.width() as f32, drawn.height() as f32);
+        let paint = PixmapPaint {
+            opacity,
+            quality: FilterQuality::Nearest,
+            ..PixmapPaint::default()
+        };
+        canvas.draw_pixmap(
+            ((w - pw) / 2.0).round() as i32,
+            ((h - ph) / 2.0).round() as i32,
+            drawn.as_ref(),
+            &paint,
+            Transform::identity(),
+            None,
+        );
+        Ok(())
     }
 
     /// Draws clip `index` as it looks at `time`, shifted `dx` pixels, onto `canvas`.
@@ -128,11 +192,45 @@ impl<'a> VideoRenderer<'a> {
         let zoom = lerp(clip.motion.scale_from, clip.motion.scale_to, t.min(1.0)) as f32;
         let (w, h) = (self.width as f32, self.height as f32);
         let widest = clip.motion.scale_from.max(clip.motion.scale_to) as f32;
-        let (frame_w, frame_h) = self.frame_size(&clip)?;
-        let cover = (w / frame_w).max(h / frame_h);
-        let scale = cover * widest;
-        let drawn = self.drawn_frame(&clip.frame, scale)?;
-        // The pixmap is drawn at `widest` times the cover scale; shrink it to this moment's zoom.
+        // The picture is made at `widest` times the size that covers the video; shrink it to this
+        // moment's zoom.
+        let drawn: std::borrow::Cow<'_, Pixmap> = match (&clip.frame, &clip.footage) {
+            (Some(frame), _) => {
+                let node = self
+                    .doc
+                    .node(frame)
+                    .ok_or_else(|| RenderError::NoSuchNode(frame.to_string()))?;
+                let cover = (w / node.width as f32).max(h / node.height as f32);
+                std::borrow::Cow::Borrowed(self.drawn_frame(frame, cover * widest)?)
+            }
+            (None, Some(f)) => {
+                let at = f.in_ms + (time.saturating_sub(p.start_ms));
+                let (pw, ph) = (
+                    (w * widest).round().max(2.0) as u32,
+                    (h * widest).round().max(2.0) as u32,
+                );
+                let source = self.footage.as_deref_mut().ok_or_else(|| {
+                    RenderError::Footage("this renderer has no footage source".into())
+                })?;
+                let rgba = source
+                    .frame(&f.file, at, pw, ph)
+                    .map_err(RenderError::Footage)?;
+                let mut pixmap = Pixmap::new(pw, ph).ok_or(RenderError::TooLarge {
+                    width: u64::from(pw),
+                    height: u64::from(ph),
+                })?;
+                if rgba.len() != pixmap.data().len() {
+                    return Err(RenderError::Footage(format!(
+                        "{} gave {} bytes for a {pw}x{ph} picture",
+                        f.file,
+                        rgba.len()
+                    )));
+                }
+                pixmap.data_mut().copy_from_slice(&rgba);
+                std::borrow::Cow::Owned(pixmap)
+            }
+            (None, None) => return Ok(()),
+        };
         let k = zoom / widest;
         let (pw, ph) = (drawn.width() as f32 * k, drawn.height() as f32 * k);
         let transform = Transform::from_row(k, 0.0, 0.0, k, dx + (w - pw) / 2.0, (h - ph) / 2.0);
@@ -146,16 +244,8 @@ impl<'a> VideoRenderer<'a> {
             quality,
             ..PixmapPaint::default()
         };
-        canvas.draw_pixmap(0, 0, drawn.as_ref(), &paint, transform, None);
+        canvas.draw_pixmap(0, 0, drawn.as_ref().as_ref(), &paint, transform, None);
         Ok(())
-    }
-
-    fn frame_size(&self, clip: &Clip) -> Result<(f32, f32), RenderError> {
-        let node = self
-            .doc
-            .node(&clip.frame)
-            .ok_or_else(|| RenderError::NoSuchNode(clip.frame.to_string()))?;
-        Ok((node.width as f32, node.height as f32))
     }
 
     /// The design frame drawn at `scale`, from the kept pictures or freshly.
@@ -250,7 +340,8 @@ mod tests {
                 None,
                 &[Operation::AddClip {
                     video: v.clone(),
-                    frame: frame.clone(),
+                    frame: Some(frame.clone()),
+                    footage: None,
                     duration_ms: 2000,
                     index: None,
                     transition: None,
@@ -384,7 +475,8 @@ mod tests {
             None,
             &[Operation::AddClip {
                 video: v.clone(),
-                frame,
+                frame: Some(frame),
+                footage: None,
                 duration_ms: 2000,
                 index: None,
                 transition: None,
@@ -434,7 +526,8 @@ mod tests {
             None,
             &[Operation::AddClip {
                 video: v.clone(),
-                frame: tall,
+                frame: Some(tall),
+                footage: None,
                 duration_ms: 1000,
                 index: None,
                 transition: None,
@@ -472,5 +565,125 @@ mod tests {
             .unwrap();
         }
         assert_eq!(px(&at(&s, &v, 0), 3, 3), [0, 0, 0]);
+    }
+
+    /// Footage that is one solid color per second of the file, to see which moment was asked for.
+    struct Fake(Vec<(String, u64)>);
+    impl FootageSource for Fake {
+        fn frame(&mut self, file: &str, at_ms: u64, w: u32, h: u32) -> Result<Vec<u8>, String> {
+            self.0.push((file.to_string(), at_ms));
+            let shade = ((at_ms / 1000) * 40).min(255) as u8;
+            Ok((0..w * h)
+                .flat_map(|_| [shade, shade, shade, 255])
+                .collect())
+        }
+    }
+
+    fn footage_video() -> (Session, NodeId, NodeId) {
+        let (mut s, v, red, _) = two_clips();
+        let ids: Vec<_> = s
+            .document()
+            .video(&v)
+            .unwrap()
+            .clips
+            .iter()
+            .map(|c| c.id.clone())
+            .collect();
+        for id in ids {
+            s.apply(
+                Actor::User,
+                None,
+                &[Operation::RemoveClip {
+                    video: v.clone(),
+                    clip: id,
+                }],
+            )
+            .unwrap();
+        }
+        s.apply(
+            Actor::User,
+            None,
+            &[Operation::AddClip {
+                video: v.clone(),
+                frame: None,
+                footage: Some(od_core::Footage {
+                    file: "media/talk.mp4".into(),
+                    in_ms: 3000,
+                }),
+                duration_ms: 4000,
+                index: None,
+                transition: None,
+                motion: None,
+            }],
+        )
+        .unwrap();
+        (s, v, red)
+    }
+
+    #[test]
+    fn footage_plays_from_its_in_point_and_needs_a_source() {
+        let (s, v, _) = footage_video();
+        let doc = s.document();
+        let video = doc.video(&v).unwrap();
+        let mut fake = Fake(Vec::new());
+        let mut r = VideoRenderer::new(doc, video, None).with_footage(&mut fake);
+        // 1 s into the clip is 4 s into the file: shade 160
+        assert_eq!(px(&r.frame_at(1000).unwrap(), 5, 5), [160, 160, 160]);
+        assert_eq!(px(&r.frame_at(0).unwrap(), 5, 5), [120, 120, 120]);
+        drop(r);
+        assert_eq!(
+            fake.0,
+            [
+                ("media/talk.mp4".to_string(), 4000),
+                ("media/talk.mp4".to_string(), 3000)
+            ]
+        );
+        let err = VideoRenderer::new(doc, video, None)
+            .frame_at(0)
+            .unwrap_err();
+        assert!(err.to_string().contains("no footage source"), "{err}");
+    }
+
+    #[test]
+    fn an_overlay_fades_in_and_out_over_the_footage_and_is_absent_outside_its_time() {
+        let (mut s, v, red) = footage_video();
+        // red, 100x200, drawn over the 100x200 video from 1 s to 3 s with 500 ms fades
+        s.apply(
+            Actor::User,
+            None,
+            &[Operation::AddOverlay {
+                video: v.clone(),
+                frame: red,
+                start_ms: 1000,
+                duration_ms: 2000,
+                fade_ms: Some(500),
+            }],
+        )
+        .unwrap();
+        let doc = s.document();
+        let video = doc.video(&v).unwrap();
+        let mut fake = Fake(Vec::new());
+        let mut r = VideoRenderer::new(doc, video, None).with_footage(&mut fake);
+        let under = 160; // the footage's shade 4.25 s into the file
+        assert_eq!(
+            px(&r.frame_at(500).unwrap(), 5, 5),
+            [120, 120, 120],
+            "before the overlay"
+        );
+        let half = px(&r.frame_at(1250).unwrap(), 5, 5);
+        assert!(
+            half[0] > 160 && half[0] < 255 && half[2] < 160,
+            "half faded in over {under}: {half:?}"
+        );
+        assert_eq!(
+            px(&r.frame_at(2000).unwrap(), 5, 5),
+            [255, 0, 0],
+            "fully shown"
+        );
+        assert_eq!(
+            px(&r.frame_at(3500).unwrap(), 5, 5),
+            [240, 240, 240],
+            "after the overlay"
+        );
     }
 }

@@ -287,6 +287,17 @@ the time each clip starts. Build one with operations:
           "transition": {"kind": "slide_left", "duration_ms": 500}}]}
 ```
 
+Footage: `list_footage` shows the videos the user imported (length, size, whether they have
+sound). A clip can play one instead of showing a frame: `{"op": "add_clip", "video": "v_20",
+"footage": {"file": "media/demo.mp4", "in_ms": 12000}, "duration_ms": 5000}` plays 5 seconds from
+12 s into the file, with its sound. Cut by adding several clips of the same file with different
+`in_ms` (a cut removes the part between them); use `transition` to blend them. `export_video`
+checks every clip lies inside its file. To add titles, lower thirds or call-outs over footage, make
+a design frame with no fill (it is transparent) holding only the text and shapes, then
+`{"op": "add_overlay", "video": "v_20", "frame": "n_30", "start_ms": 1000, "duration_ms": 3000,
+"fade_ms": 400}`; overlays sit above every clip and fade in and out. Overlays are static pictures:
+for motion, use several overlays or `set_overlay` over time. Match the video's size and shape.
+
 The ids of a created video and clips come back in `created` (`v_...`, `c_...`). Width and height
 are even numbers; a frame of another shape is scaled to cover the video and cropped in the middle,
 so use frames of the video's shape. A transition (`cut`, `fade`, `slide_left`, `slide_right`)

@@ -29,6 +29,7 @@ pub mod qobject {
         #[qproperty(QString, unrendered)]
         #[qproperty(QString, overflows)]
         #[qproperty(QString, memory)]
+        #[qproperty(QString, videos)]
         #[qproperty(QString, tokens)]
         #[qproperty(QString, languages)]
         #[qproperty(QString, language)]
@@ -99,6 +100,9 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "importImage"]
         fn import_image(self: Pin<&mut Self>, url: &QString) -> QString;
+        #[qinvokable]
+        #[cxx_name = "videoPreview"]
+        fn video_preview(self: &Self, video: &QString, time_ms: f64, max_side: i32) -> QString;
         #[qinvokable]
         #[cxx_name = "importToMemory"]
         fn import_to_memory(self: Pin<&mut Self>, url: &QString) -> QString;
@@ -275,6 +279,7 @@ pub struct EditorRust {
     unrendered: QString,
     overflows: QString,
     memory: QString,
+    videos: QString,
     tokens: QString,
     languages: QString,
     language: QString,
@@ -384,6 +389,7 @@ impl qobject::Editor {
         self.as_mut().set_unrendered(q(&snap.unrendered));
         self.as_mut().set_overflows(q(&snap.overflows));
         self.as_mut().set_memory(q(&snap.memory));
+        self.as_mut().set_videos(q(&snap.videos));
         self.as_mut().set_tokens(q(&snap.tokens));
         self.as_mut().set_languages(q(&snap.languages));
         self.as_mut().set_language(q(&snap.language));
@@ -506,6 +512,18 @@ impl qobject::Editor {
             .as_mut()
             .act(|s| s.create_node(&kind, x, y, w, h))
             .unwrap_or_default())
+    }
+
+    /// A picture of a video at a moment, or an empty string (the error is shown).
+    pub fn video_preview(&self, video: &QString, time_ms: f64, max_side: i32) -> QString {
+        match self.state.video_preview(
+            &video.to_string(),
+            time_ms.max(0.0) as u64,
+            u32::try_from(max_side).unwrap_or(512),
+        ) {
+            Ok(url) => q(&url),
+            Err(_) => q(""),
+        }
     }
 
     pub fn import_to_memory(mut self: Pin<&mut Self>, url: &QString) -> QString {

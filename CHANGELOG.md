@@ -8,6 +8,16 @@ All notable changes to OpenDesigner are documented here.
 
 ## 2026-11-19
 
+### feat(video): footage clips with sound, overlays, and a Video tab
+
+**Area:** `feat(core)`, `feat(render)`, `feat(media)`, `feat(mcp)`, `feat(app)`
+
+**Change:** The user imports video files into the agent's memory; the agent cuts them into a video (`add_clip` with `footage`), lays titles and call-outs over it (`add_overlay`: a transparent design frame that fades in and out) and exports an MP4 with the footage's sound mixed under the picture. New tool `list_footage`; `export_video` refuses a clip that runs past its file. The editor has a Video tab: preview, play, scrub and the clip list. The skill teaches the flow.
+
+**Verified (macOS, Homebrew ffmpeg 9.0.1):** core tests (source rules, overlays, undo, history-only ops refused, footage naming/symlinks/sniffing), render tests with a fake footage source (in point, fades, timing), media tests (log parsing, paths), an MCP end-to-end with real ffmpeg that makes a 3 s test video with a tone, imports it, cuts two clips and an overlay and exports 200x400 10 fps: audio present, ~2 s, length error for a clip past the end; app tests (import to memory as footage, preview). **Not verified:** real screen recordings or phone footage (codecs, variable frame rate, rotation metadata, long files and speed), more than a few clips, the Video tab by hand, Windows/Linux. **Not built:** animated overlays, volume/music, speed, captions from speech, notes pinned to a time range, clip selection on a timeline.
+
+**PR:** n/a
+
 ### feat(app): the agent's memory tab; the skill learns from public agent skills
 
 **Area:** `feat(app)`, `feat(skill)`

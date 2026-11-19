@@ -3,8 +3,8 @@
 //! `ffmpeg` only compresses them (see `od_media`).
 
 use od_core::{NodeId, Workspace};
-use od_media::{EncodeSettings, Ffmpeg, VideoWriter};
-use od_render::video::VideoRenderer;
+use od_media::{AudioPiece, EncodeSettings, Ffmpeg, FootageDecoder, VideoWriter};
+use od_render::video::{FootageSource, VideoRenderer};
 use od_store::video::{VideoFacts, VideoPreset, VideoViolation};
 
 use crate::export::exports_dir;
@@ -51,6 +51,19 @@ fn document_in<'a>(
     }
 }
 
+/// Lets the renderer ask `ffmpeg` for footage pictures.
+struct Decoder(FootageDecoder);
+
+impl FootageSource for Decoder {
+    fn frame(&mut self, file: &str, at_ms: u64, w: u32, h: u32) -> Result<Vec<u8>, String> {
+        self.0.frame(file, at_ms, w, h).map_err(|e| e.to_string())
+    }
+}
+
+fn has_footage(v: &od_core::Video) -> bool {
+    v.clips.iter().any(|c| c.footage.is_some())
+}
+
 /// The picture at `time_ms`, as a PNG, with anything that could not be drawn.
 pub fn video_frame_png(
     ws: &Workspace,
@@ -68,7 +81,23 @@ pub fn video_frame_png(
         (f64::from(v.width) * shrink).round() as u32,
         (f64::from(v.height) * shrink).round() as u32,
     );
+    let mut source = if has_footage(v) {
+        let dir = ws
+            .dir()
+            .ok_or_else(|| ToolError("the project has no folder, so no footage".into()))?;
+        let ffmpeg = Ffmpeg::locate().map_err(|e| ToolError(e.to_string()))?;
+        Some(Decoder(FootageDecoder::new(
+            ffmpeg,
+            dir.to_path_buf(),
+            v.fps,
+        )))
+    } else {
+        None
+    };
     let mut renderer = VideoRenderer::new(&doc, v, ws.dir()).with_size(w, h);
+    if let Some(s) = source.as_mut() {
+        renderer = renderer.with_footage(s);
+    }
     let pixmap = renderer.frame_at(time_ms)?;
     let png = od_render::encode_png(&pixmap, false)?;
     let warnings = renderer
@@ -98,6 +127,8 @@ pub struct VideoOutcome {
     pub ffmpeg: String,
     /// The ffmpeg found is a GPL build (the user's own; the app does not ship it).
     pub ffmpeg_gpl: bool,
+    /// How many footage sounds were mixed in.
+    pub audio_pieces: usize,
     pub warnings: Vec<String>,
 }
 
@@ -169,15 +200,66 @@ pub fn export_video(
     let v = doc
         .video(video)
         .ok_or_else(|| ToolError(format!("video {video} does not exist")))?;
+    // Footage: each clip must lie inside its file; the files' sound goes under the picture.
+    let project = ws.dir().map(std::path::Path::to_path_buf);
+    let mut audio: Vec<AudioPiece> = Vec::new();
+    let mut lengths: std::collections::HashMap<String, od_media::FileInfo> = Default::default();
+    for (clip, placed) in v.clips.iter().zip(v.placed()) {
+        let Some(f) = &clip.footage else { continue };
+        let project = project
+            .as_deref()
+            .ok_or_else(|| ToolError("the project has no folder, so no footage".into()))?;
+        let path =
+            od_media::footage_path(project, &f.file).map_err(|e| ToolError(e.to_string()))?;
+        if !lengths.contains_key(&f.file) {
+            let info = ffmpeg
+                .probe_file(&path)
+                .map_err(|e| ToolError(e.to_string()))?;
+            lengths.insert(f.file.clone(), info);
+        }
+        let info = &lengths[&f.file];
+        let needs = f.in_ms + u64::from(clip.duration_ms);
+        if needs > info.duration_ms + 100 {
+            return fail(format!(
+                "clip {} plays {} to {} ms of {}, which is only {} ms long; shorten the clip or move its in point",
+                clip.id, f.in_ms, needs, f.file, info.duration_ms
+            ));
+        }
+        if info.has_audio {
+            audio.push(AudioPiece {
+                file: path,
+                in_ms: f.in_ms,
+                start_ms: placed.start_ms,
+                duration_ms: u64::from(clip.duration_ms),
+            });
+        }
+    }
     std::fs::create_dir_all(&dir).map_err(|e| ToolError(format!("{}: {e}", dir.display())))?;
+    let final_path = dir.join(file);
+    let picture_path = if audio.is_empty() {
+        final_path.clone()
+    } else {
+        dir.join(format!(".{file}.picture.mp4"))
+    };
     let settings = EncodeSettings {
         width: v.width,
         height: v.height,
         fps: v.fps,
-        output: dir.join(file),
+        output: picture_path.clone(),
+    };
+    let mut source = match &project {
+        Some(p) if has_footage(v) => Some(Decoder(FootageDecoder::new(
+            ffmpeg.clone(),
+            p.clone(),
+            v.fps,
+        ))),
+        _ => None,
     };
     let mut writer = VideoWriter::start(ffmpeg, &settings).map_err(|e| ToolError(e.to_string()))?;
     let mut renderer = VideoRenderer::new(&doc, v, ws.dir());
+    if let Some(s) = source.as_mut() {
+        renderer = renderer.with_footage(s);
+    }
     let total = v.frame_count();
     for n in 0..total {
         let time_ms = n * 1000 / u64::from(v.fps);
@@ -199,7 +281,15 @@ pub fn export_video(
         }
     }
     let encoder = writer.encoder.to_string();
-    let bytes = writer.finish().map_err(|e| ToolError(e.to_string()))?;
+    let mut bytes = writer.finish().map_err(|e| ToolError(e.to_string()))?;
+    if !audio.is_empty() {
+        let mixed = od_media::add_audio(ffmpeg, &picture_path, &audio, &final_path);
+        let _ = std::fs::remove_file(&picture_path);
+        mixed.map_err(|e| ToolError(e.to_string()))?;
+        bytes = std::fs::metadata(&final_path)
+            .map(|m| m.len())
+            .map_err(|e| ToolError(e.to_string()))?;
+    }
     if let Some(p) = preset {
         let broken = p.validate(&VideoFacts {
             width: v.width,
@@ -227,6 +317,7 @@ pub fn export_video(
         encoder,
         ffmpeg: ffmpeg.version.clone(),
         ffmpeg_gpl: ffmpeg.gpl,
+        audio_pieces: audio.len(),
         warnings: renderer
             .warnings()
             .iter()

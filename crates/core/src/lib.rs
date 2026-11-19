@@ -23,5 +23,8 @@ pub use history::{Actor, Checkpoint, Session, Transaction, TransactionKind, TxRe
 pub use model::{Document, ImageFit, Node, NodeId, NodeKind, Page, Stroke, TextAlign};
 pub use ops::{AppliedOp, NewNode, Operation, Property};
 pub use paint::{Paint, Rgba};
-pub use video::{Clip, ClipProperty, Motion, Transition, TransitionKind, Video, VideoProperty};
+pub use video::{
+    Clip, ClipProperty, ClipSource, Footage, Motion, Overlay, OverlayProperty, Transition,
+    TransitionKind, Video, VideoProperty,
+};
 pub use workspace::{Guidance, Workspace};

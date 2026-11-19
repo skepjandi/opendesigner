@@ -53,7 +53,8 @@ fn add_clip(s: &mut Session, video: &NodeId, frame: &NodeId, ms: u32) -> NodeId 
             None,
             &[Operation::AddClip {
                 video: video.clone(),
-                frame: frame.clone(),
+                frame: Some(frame.clone()),
+                footage: None,
                 duration_ms: ms,
                 index: None,
                 transition: None,
@@ -263,7 +264,8 @@ fn clips_show_frames_only() {
             None,
             &[Operation::AddClip {
                 video: v.clone(),
-                frame: bad,
+                frame: Some(bad),
+                footage: None,
                 duration_ms: 1000,
                 index: None,
                 transition: None,
@@ -303,7 +305,8 @@ fn sizes_frame_rates_and_lengths_are_bounded_and_history_only_ops_are_refused() 
             None,
             &[Operation::AddClip {
                 video: v.clone(),
-                frame: a.clone(),
+                frame: Some(a.clone()),
+                footage: None,
                 duration_ms: MAX_CLIP_MS,
                 index: None,
                 transition: None,
@@ -403,4 +406,149 @@ fn a_project_with_a_clip_on_a_missing_frame_does_not_load() {
         .replace(a.as_str(), "n_77");
     std::fs::write(&path, broken).unwrap();
     assert!(project::load(&dir).is_err());
+}
+
+use od_core::{Footage, OverlayProperty};
+
+fn footage(file: &str, in_ms: u64) -> Footage {
+    Footage {
+        file: file.into(),
+        in_ms,
+    }
+}
+
+#[test]
+fn a_clip_shows_a_frame_or_footage_and_footage_names_a_plain_media_file() {
+    let (mut s, v, a, _) = fixture();
+    let add = |frame: Option<NodeId>, footage: Option<Footage>| Operation::AddClip {
+        video: v.clone(),
+        frame,
+        footage,
+        duration_ms: 2000,
+        index: None,
+        transition: None,
+        motion: None,
+    };
+    for (frame, f) in [
+        (Some(a.clone()), Some(footage("media/x.mp4", 0))),
+        (None, None),
+        (None, Some(footage("x.mp4", 0))),
+        (None, Some(footage("media/../x.mp4", 0))),
+        (None, Some(footage("media/x.png", 0))),
+        (
+            None,
+            Some(footage("media/x.mp4", od_core::video::MAX_IN_MS + 1)),
+        ),
+    ] {
+        assert!(
+            s.apply(Actor::User, None, &[add(frame.clone(), f.clone())])
+                .is_err(),
+            "{frame:?} {f:?}"
+        );
+    }
+    let r = s
+        .apply(
+            Actor::User,
+            None,
+            &[add(None, Some(footage("media/talk.mp4", 5000)))],
+        )
+        .unwrap();
+    let clip = r.created[0].clone();
+    // changing what the clip shows is one undoable step
+    s.apply(
+        Actor::User,
+        None,
+        &[Operation::SetClip {
+            video: v.clone(),
+            clip: clip.clone(),
+            prop: ClipProperty::Source(od_core::ClipSource {
+                frame: Some(a.clone()),
+                footage: None,
+            }),
+        }],
+    )
+    .unwrap();
+    let c = &s.document().video(&v).unwrap().clips[0];
+    assert_eq!((c.frame.as_ref(), c.footage.as_ref()), (Some(&a), None));
+    s.undo(Actor::User).unwrap();
+    let c = &s.document().video(&v).unwrap().clips[0];
+    assert_eq!(c.footage, Some(footage("media/talk.mp4", 5000)));
+    assert!(c.frame.is_none());
+}
+
+#[test]
+fn overlays_fade_in_and_out_hold_a_frame_and_undo_cleanly() {
+    let (mut s, v, a, b) = fixture();
+    add_clip(&mut s, &v, &a, 4000);
+    let before = s.document().videos.clone();
+    let r = s
+        .apply(
+            Actor::User,
+            None,
+            &[Operation::AddOverlay {
+                video: v.clone(),
+                frame: b.clone(),
+                start_ms: 1000,
+                duration_ms: 2000,
+                fade_ms: Some(400),
+            }],
+        )
+        .unwrap();
+    let o = r.created[0].clone();
+    assert!(o.as_str().starts_with("o_"));
+    let set = |prop| Operation::SetOverlay {
+        video: v.clone(),
+        overlay: o.clone(),
+        prop,
+    };
+    assert!(
+        s.apply(Actor::User, None, &[set(OverlayProperty::FadeMs(1001))])
+            .is_err(),
+        "more than half each way"
+    );
+    assert!(
+        s.apply(Actor::User, None, &[set(OverlayProperty::DurationMs(50))])
+            .is_err()
+    );
+    s.apply(Actor::User, None, &[set(OverlayProperty::StartMs(500))])
+        .unwrap();
+    assert_eq!(s.document().video(&v).unwrap().overlays[0].start_ms, 500);
+
+    let err = s
+        .apply(Actor::User, None, &[Operation::Delete { id: b.clone() }])
+        .unwrap_err();
+    assert!(matches!(err, OpError::FrameInUse { .. }), "{err:?}");
+
+    s.apply(
+        Actor::User,
+        None,
+        &[Operation::RemoveOverlay {
+            video: v.clone(),
+            overlay: o.clone(),
+        }],
+    )
+    .unwrap();
+    assert!(s.document().video(&v).unwrap().overlays.is_empty());
+    for _ in 0..4 {
+        s.undo(Actor::User).unwrap();
+    }
+    assert_eq!(s.document().videos[0].overlays, before[0].overlays);
+    assert!(matches!(
+        s.apply(
+            Actor::User,
+            None,
+            &[Operation::RestoreOverlay {
+                video: v.clone(),
+                index: 0,
+                overlay: od_core::Overlay {
+                    id: o,
+                    frame: b,
+                    start_ms: 0,
+                    duration_ms: 1000,
+                    fade_ms: 0
+                }
+            }]
+        ),
+        Err(OpError::InternalOnly(_))
+    ));
 }
