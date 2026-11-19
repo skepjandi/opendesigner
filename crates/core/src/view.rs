@@ -197,6 +197,81 @@ pub struct VideoRow {
     pub frame_count: u64,
     pub clips: Vec<ClipRow>,
     pub overlays: Vec<crate::video::Overlay>,
+    /// What happens, in order, in words: the clips with their motion and how each one arrives,
+    /// then the overlays by start time.
+    pub story: Vec<String>,
+}
+
+fn secs(ms: u64) -> String {
+    format!("{:.1} s", ms as f64 / 1000.0)
+}
+
+fn kind_name<T: serde::Serialize>(v: &T) -> String {
+    serde_json::to_value(v)
+        .ok()
+        .and_then(|j| j.as_str().map(str::to_string))
+        .unwrap_or_default()
+}
+
+/// The video as a list of sentences: what is on screen when, and what leads into what.
+fn story_of(doc: &Document, v: &crate::video::Video) -> Vec<String> {
+    let placed = v.placed();
+    let mut out = Vec::new();
+    for (clip, p) in v.clips.iter().zip(&placed) {
+        let what = match (&clip.frame, &clip.footage) {
+            (Some(f), _) => format!(
+                "frame {}",
+                doc.node(f)
+                    .map_or_else(|| f.to_string(), |n| n.name.clone())
+            ),
+            (None, Some(f)) => format!("footage {} from {}", f.file, secs(f.in_ms)),
+            (None, None) => "nothing".to_string(),
+        };
+        let arrive = if p.index > 0 && p.overlap_ms > 0 {
+            format!(
+                "{} {} over {} ({}), then ",
+                secs(p.start_ms),
+                kind_name(&clip.transition.kind),
+                secs(u64::from(p.overlap_ms)),
+                kind_name(&clip.transition.ease)
+            )
+        } else if p.index > 0 {
+            format!("{} cut to ", secs(p.start_ms))
+        } else {
+            format!("{} starts with ", secs(p.start_ms))
+        };
+        let zoom = if (clip.motion.scale_from - clip.motion.scale_to).abs() > f64::EPSILON {
+            format!(
+                ", zooming {:.2} to {:.2} ({})",
+                clip.motion.scale_from,
+                clip.motion.scale_to,
+                kind_name(&clip.motion.ease)
+            )
+        } else {
+            String::new()
+        };
+        out.push(format!(
+            "{arrive}{what} for {}{zoom} (until {})",
+            secs(u64::from(clip.duration_ms)),
+            secs(p.end_ms)
+        ));
+    }
+    let mut overlays: Vec<&crate::video::Overlay> = v.overlays.iter().collect();
+    overlays.sort_by_key(|o| o.start_ms);
+    for o in overlays {
+        let name = doc
+            .node(&o.frame)
+            .map_or_else(|| o.frame.to_string(), |n| n.name.clone());
+        out.push(format!(
+            "{} overlay {name}: in {} ({}), out {}, until {}",
+            secs(o.start_ms),
+            kind_name(&o.enter),
+            secs(u64::from(o.fade_ms)),
+            kind_name(&o.exit),
+            secs(o.start_ms + u64::from(o.duration_ms))
+        ));
+    }
+    out
 }
 
 /// Every video with its clips placed on the timeline.
@@ -244,6 +319,7 @@ pub fn videos(doc: &Document) -> Vec<VideoRow> {
                     })
                     .collect(),
                 overlays: v.overlays.clone(),
+                story: story_of(doc, v),
             }
         })
         .collect()

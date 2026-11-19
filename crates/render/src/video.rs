@@ -6,7 +6,7 @@
 
 use std::path::Path as FsPath;
 
-use od_core::{Document, NodeId, Overlay, TransitionKind, Video};
+use od_core::{Document, Entrance, NodeId, Overlay, TransitionKind, Video};
 use tiny_skia::{FilterQuality, Pixmap, PixmapPaint, Transform};
 
 use crate::{RenderError, Warning, render_frame};
@@ -157,52 +157,73 @@ impl<'a> VideoRenderer<'a> {
                 (n > 0 && into < u64::from(p.overlap_ms)).then(|| into as f32 / p.overlap_ms as f32)
             })
             .collect();
-        let width = w as f32;
+        let (width, height) = (w as f32, h as f32);
         for (n, p) in active.iter().enumerate() {
-            let kind_of = |i: usize| self.video.clips[active[i].index].transition.kind;
-            let (mut dx, mut opacity) = (0.0, 1.0);
+            let tr = |i: usize| self.video.clips[active[i].index].transition;
+            let mut pose = Pose::STILL;
             if let Some(t) = arriving[n] {
-                match kind_of(n) {
-                    TransitionKind::Fade => opacity = t,
-                    TransitionKind::SlideLeft => dx = (1.0 - t) * width,
-                    TransitionKind::SlideRight => dx = -(1.0 - t) * width,
+                let tr = tr(n);
+                let e = tr.ease.apply(f64::from(t)) as f32;
+                match tr.kind {
+                    TransitionKind::Fade => pose.opacity = e,
+                    TransitionKind::SlideLeft => pose.dx = (1.0 - e) * width,
+                    TransitionKind::SlideRight => pose.dx = -(1.0 - e) * width,
+                    TransitionKind::SlideUp => pose.dy = (1.0 - e) * height,
+                    TransitionKind::SlideDown => pose.dy = -(1.0 - e) * height,
+                    TransitionKind::Dip => pose.opacity = (2.0 * e - 1.0).clamp(0.0, 1.0),
+                    TransitionKind::ZoomIn => {
+                        pose.opacity = e;
+                        pose.scale = 1.2 - 0.2 * e;
+                    }
                     TransitionKind::Cut => {}
                 }
             }
-            // The clip arriving after this one pushes it out the other way.
+            // The clip arriving after this one pushes it out, or fades it to black.
             if let Some(t) = arriving.get(n + 1).copied().flatten() {
-                match kind_of(n + 1) {
-                    TransitionKind::SlideLeft => dx -= t * width,
-                    TransitionKind::SlideRight => dx += t * width,
+                let next = tr(n + 1);
+                let e = next.ease.apply(f64::from(t)) as f32;
+                match next.kind {
+                    TransitionKind::SlideLeft => pose.dx -= e * width,
+                    TransitionKind::SlideRight => pose.dx += e * width,
+                    TransitionKind::SlideUp => pose.dy -= e * height,
+                    TransitionKind::SlideDown => pose.dy += e * height,
+                    TransitionKind::Dip => pose.opacity *= (1.0 - 2.0 * e).clamp(0.0, 1.0),
                     _ => {}
                 }
             }
-            self.draw_clip(&mut canvas, p.index, time, dx, opacity)?;
+            pose.opacity = pose.opacity.clamp(0.0, 1.0);
+            self.draw_clip(&mut canvas, p.index, time, pose)?;
         }
         let overlays: Vec<Overlay> = self.video.overlays.clone();
         for o in overlays
             .iter()
             .filter(|o| o.start_ms <= time && time < o.start_ms + u64::from(o.duration_ms))
         {
-            let into = (time - o.start_ms) as f32;
-            let left = (u64::from(o.duration_ms) - (time - o.start_ms)) as f32;
-            let fade = o.fade_ms as f32;
-            let opacity = if fade > 0.0 {
-                (into / fade).min(left / fade).clamp(0.0, 1.0)
-            } else {
-                1.0
+            let into = (time - o.start_ms) as f64;
+            let left = (u64::from(o.duration_ms) - (time - o.start_ms)) as f64;
+            let fade = f64::from(o.fade_ms);
+            let progress = |elapsed: f64| {
+                if fade > 0.0 && elapsed < fade {
+                    o.ease.apply(elapsed / fade) as f32
+                } else {
+                    1.0
+                }
             };
-            self.draw_overlay(&mut canvas, &o.frame, opacity)?;
+            let mut pose = Pose::STILL;
+            pose.then(entrance_pose(o.enter, progress(into), width, height, true));
+            pose.then(entrance_pose(o.exit, progress(left), width, height, false));
+            pose.opacity = pose.opacity.clamp(0.0, 1.0);
+            self.draw_overlay(&mut canvas, &o.frame, pose)?;
         }
         Ok(canvas)
     }
 
-    /// Draws a design frame over everything, scaled to cover and centered.
+    /// Draws a design frame over everything, scaled to cover and centered, then posed.
     fn draw_overlay(
         &mut self,
         canvas: &mut Pixmap,
         frame: &NodeId,
-        opacity: f32,
+        pose: Pose,
     ) -> Result<(), RenderError> {
         let (w, h) = (self.width as f32, self.height as f32);
         let node = self
@@ -212,19 +233,26 @@ impl<'a> VideoRenderer<'a> {
         let cover = (w / node.width as f32).max(h / node.height as f32);
         let drawn = self.drawn_frame(frame, cover)?;
         let (pw, ph) = (drawn.width() as f32, drawn.height() as f32);
+        let moved = pose.dx != 0.0 || pose.dy != 0.0 || (pose.scale - 1.0).abs() > 1e-4;
         let paint = PixmapPaint {
-            opacity,
-            quality: FilterQuality::Nearest,
+            opacity: pose.opacity,
+            quality: if moved {
+                FilterQuality::Bicubic
+            } else {
+                FilterQuality::Nearest
+            },
             ..PixmapPaint::default()
         };
-        canvas.draw_pixmap(
-            ((w - pw) / 2.0).round() as i32,
-            ((h - ph) / 2.0).round() as i32,
-            drawn.as_ref(),
-            &paint,
-            Transform::identity(),
-            None,
+        let s = pose.scale;
+        let transform = Transform::from_row(
+            s,
+            0.0,
+            0.0,
+            s,
+            ((w - pw * s) / 2.0 + pose.dx).round(),
+            ((h - ph * s) / 2.0 + pose.dy).round(),
         );
+        canvas.draw_pixmap(0, 0, drawn.as_ref(), &paint, transform, None);
         Ok(())
     }
 
@@ -234,14 +262,17 @@ impl<'a> VideoRenderer<'a> {
         canvas: &mut Pixmap,
         index: usize,
         time: u64,
-        dx: f32,
-        opacity: f32,
+        pose: Pose,
     ) -> Result<(), RenderError> {
         let placed = self.video.placed();
         let p = placed[index];
         let clip = self.video.clips[index].clone();
         let t = (time.saturating_sub(p.start_ms)) as f32 / (p.end_ms - p.start_ms) as f32;
-        let zoom = lerp(clip.motion.scale_from, clip.motion.scale_to, t.min(1.0)) as f32;
+        let zoom = lerp(
+            clip.motion.scale_from,
+            clip.motion.scale_to,
+            clip.motion.ease.apply(f64::from(t.min(1.0))) as f32,
+        ) as f32;
         let (w, h) = (self.width as f32, self.height as f32);
         let widest = clip.motion.scale_from.max(clip.motion.scale_to) as f32;
         // The picture is made at `widest` times the size that covers the video; shrink it to this
@@ -283,16 +314,24 @@ impl<'a> VideoRenderer<'a> {
             }
             (None, None) => return Ok(()),
         };
-        let k = zoom / widest;
+        let k = zoom / widest * pose.scale;
         let (pw, ph) = (drawn.width() as f32 * k, drawn.height() as f32 * k);
-        let transform = Transform::from_row(k, 0.0, 0.0, k, dx + (w - pw) / 2.0, (h - ph) / 2.0);
-        let quality = if (k - 1.0).abs() < 1e-4 && dx.fract() == 0.0 {
+        let transform = Transform::from_row(
+            k,
+            0.0,
+            0.0,
+            k,
+            pose.dx + (w - pw) / 2.0,
+            pose.dy + (h - ph) / 2.0,
+        );
+        let quality = if (k - 1.0).abs() < 1e-4 && pose.dx.fract() == 0.0 && pose.dy.fract() == 0.0
+        {
             FilterQuality::Nearest
         } else {
             FilterQuality::Bicubic
         };
         let paint = PixmapPaint {
-            opacity,
+            opacity: pose.opacity,
             quality,
             ..PixmapPaint::default()
         };
@@ -336,7 +375,75 @@ impl<'a> VideoRenderer<'a> {
 }
 
 fn lerp(from: f64, to: f64, t: f32) -> f64 {
-    from + (to - from) * f64::from(t.clamp(0.0, 1.0))
+    from + (to - from) * f64::from(t)
+}
+
+/// Where and how big a picture is drawn, and how opaque.
+#[derive(Clone, Copy)]
+struct Pose {
+    dx: f32,
+    dy: f32,
+    scale: f32,
+    opacity: f32,
+}
+
+impl Pose {
+    const STILL: Pose = Pose {
+        dx: 0.0,
+        dy: 0.0,
+        scale: 1.0,
+        opacity: 1.0,
+    };
+
+    /// Combines another pose with this one (offsets add, scales and opacities multiply).
+    fn then(&mut self, other: Pose) {
+        self.dx += other.dx;
+        self.dy += other.dy;
+        self.scale *= other.scale;
+        self.opacity *= other.opacity;
+    }
+}
+
+/// The pose of an overlay at progress `p` of its entrance (`entering`) or exit: 0 is hidden, 1 is
+/// fully shown. A slide moves a tenth of the picture; pop and zoom change the size by a fifth.
+fn entrance_pose(kind: Entrance, p: f32, w: f32, h: f32, entering: bool) -> Pose {
+    let mut pose = Pose::STILL;
+    let away = 1.0 - p;
+    // leaving, a slide goes the way its name says; arriving, it comes from the opposite side
+    let sign = if entering { 1.0 } else { -1.0 };
+    match kind {
+        Entrance::None => {}
+        Entrance::Fade => pose.opacity = p,
+        Entrance::SlideUp => {
+            pose.opacity = p;
+            pose.dy = sign * away * 0.1 * h;
+        }
+        Entrance::SlideDown => {
+            pose.opacity = p;
+            pose.dy = -sign * away * 0.1 * h;
+        }
+        Entrance::SlideLeft => {
+            pose.opacity = p;
+            pose.dx = sign * away * 0.1 * w;
+        }
+        Entrance::SlideRight => {
+            pose.opacity = p;
+            pose.dx = -sign * away * 0.1 * w;
+        }
+        Entrance::Pop => {
+            pose.opacity = p;
+            pose.scale = 0.8 + 0.2 * p;
+        }
+        Entrance::Zoom => {
+            pose.opacity = p;
+            pose.scale = if entering {
+                1.25 - 0.25 * p
+            } else {
+                1.0 + 0.25 * away
+            };
+        }
+    }
+    pose
 }
 
 #[cfg(test)]
@@ -457,6 +564,7 @@ mod tests {
             Transition {
                 kind: TransitionKind::Fade,
                 duration_ms: 1000,
+                ease: od_core::Ease::default(),
             },
         );
         // clip 2 starts at 1000 ms and has fully arrived at 2000 ms
@@ -479,6 +587,7 @@ mod tests {
             Transition {
                 kind: TransitionKind::SlideLeft,
                 duration_ms: 1000,
+                ease: od_core::Ease::default(),
             },
         );
         let half = at(&s, &v, 1500);
@@ -535,6 +644,7 @@ mod tests {
                 motion: Some(Motion {
                     scale_from: 1.0,
                     scale_to: 2.0,
+                    ease: od_core::Ease::default(),
                 }),
             }],
         )
@@ -709,6 +819,9 @@ mod tests {
                 start_ms: 1000,
                 duration_ms: 2000,
                 fade_ms: Some(500),
+                enter: None,
+                exit: None,
+                ease: None,
             }],
         )
         .unwrap();
@@ -749,6 +862,7 @@ mod tests {
             Transition {
                 kind: TransitionKind::Fade,
                 duration_ms: 1000,
+                ease: od_core::Ease::default(),
             },
         );
         let doc = s.document();
@@ -768,5 +882,147 @@ mod tests {
         let doc = s.document();
         let r = VideoRenderer::new(doc, doc.video(&v).unwrap(), None);
         assert_eq!(r.signature(500), None, "footage changes every frame");
+    }
+
+    fn with_overlay(enter: od_core::Entrance, ease: od_core::Ease) -> (Session, NodeId) {
+        let (mut s, v, red) = footage_video();
+        // a 40x40 red square drawn near the middle of an otherwise transparent 100x200 frame
+        let mut card = NewNode::new(NodeKind::Frame);
+        (card.width, card.height) = (100.0, 200.0);
+        let card = s
+            .apply(
+                Actor::User,
+                None,
+                &[Operation::Create {
+                    parent: s.document().pages[0].root.id.clone(),
+                    index: None,
+                    node: card,
+                }],
+            )
+            .unwrap()
+            .created[0]
+            .clone();
+        let mut dot = NewNode::new(NodeKind::Rect);
+        (dot.x, dot.y, dot.width, dot.height) = (30.0, 80.0, 40.0, 40.0);
+        dot.fill = Paint::parse("#ff0000").ok();
+        s.apply(
+            Actor::User,
+            None,
+            &[Operation::Create {
+                parent: card.clone(),
+                index: None,
+                node: dot,
+            }],
+        )
+        .unwrap();
+        let _ = red;
+        s.apply(
+            Actor::User,
+            None,
+            &[Operation::AddOverlay {
+                video: v.clone(),
+                frame: card,
+                start_ms: 0,
+                duration_ms: 3000,
+                fade_ms: Some(1000),
+                enter: Some(enter),
+                exit: None,
+                ease: Some(ease),
+            }],
+        )
+        .unwrap();
+        (s, v)
+    }
+
+    /// The rows of red (255,0,0)-dominant pixels: where the square is, top and bottom.
+    fn red_rows(p: &Pixmap) -> Option<(u32, u32)> {
+        let rows: Vec<u32> = (0..p.height())
+            .filter(|&y| {
+                (0..p.width()).any(|x| {
+                    let c = px(p, x, y);
+                    c[0] > 200 && c[1] < 60 && c[2] < 60
+                })
+            })
+            .collect();
+        Some((*rows.first()?, *rows.last()?))
+    }
+
+    #[test]
+    fn an_overlay_that_slides_up_starts_lower_and_ends_in_place_and_pop_grows() {
+        let mut fake = Fake(Vec::new());
+        let (s, v) = with_overlay(od_core::Entrance::SlideUp, od_core::Ease::Linear);
+        let doc = s.document();
+        let mut r = VideoRenderer::new(doc, doc.video(&v).unwrap(), None).with_footage(&mut fake);
+        let settled = red_rows(&r.frame_at(1500).unwrap()).unwrap();
+        assert_eq!(settled, (80, 119), "the square's own place");
+        let early = red_rows(&r.frame_at(900).unwrap()).unwrap();
+        assert!(
+            early.0 > settled.0,
+            "still below its place at 0.9 of the entrance: {early:?}"
+        );
+        drop(r);
+
+        let mut fake = Fake(Vec::new());
+        let (s, v) = with_overlay(od_core::Entrance::Pop, od_core::Ease::Linear);
+        let doc = s.document();
+        let mut r = VideoRenderer::new(doc, doc.video(&v).unwrap(), None).with_footage(&mut fake);
+        let small = red_rows(&r.frame_at(800).unwrap()).unwrap();
+        let full = red_rows(&r.frame_at(1500).unwrap()).unwrap();
+        assert!(
+            small.1 - small.0 < full.1 - full.0,
+            "grows to full size: {small:?} then {full:?}"
+        );
+    }
+
+    #[test]
+    fn a_slide_up_transition_brings_the_new_clip_from_below_and_a_dip_passes_through_black() {
+        let (mut s, v, ..) = two_clips();
+        set_transition(
+            &mut s,
+            &v,
+            1,
+            Transition {
+                kind: TransitionKind::SlideUp,
+                duration_ms: 1000,
+                ease: od_core::Ease::Linear,
+            },
+        );
+        let half = at(&s, &v, 1500);
+        assert_eq!(
+            px(&half, 50, 10),
+            [255, 0, 0],
+            "the old clip is pushed up and out"
+        );
+        assert_eq!(
+            px(&half, 50, 190),
+            [0, 0, 255],
+            "the new clip comes up from below"
+        );
+
+        set_transition(
+            &mut s,
+            &v,
+            1,
+            Transition {
+                kind: TransitionKind::Dip,
+                duration_ms: 1000,
+                ease: od_core::Ease::Linear,
+            },
+        );
+        assert_eq!(
+            px(&at(&s, &v, 1500), 50, 100),
+            [0, 0, 0],
+            "black in the middle"
+        );
+        let early = px(&at(&s, &v, 1250), 50, 100);
+        assert!(
+            early[0] > 100 && early[2] == 0,
+            "the old clip fading out: {early:?}"
+        );
+        let late = px(&at(&s, &v, 1750), 50, 100);
+        assert!(
+            late[2] > 100 && late[0] == 0,
+            "the new clip fading in: {late:?}"
+        );
     }
 }

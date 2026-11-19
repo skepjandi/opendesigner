@@ -437,6 +437,14 @@ pub enum Operation {
         duration_ms: u32,
         #[serde(default)]
         fade_ms: Option<u32>,
+        /// How it arrives (default fade) and leaves (default fade).
+        #[serde(default)]
+        enter: Option<crate::video::Entrance>,
+        #[serde(default)]
+        exit: Option<crate::video::Entrance>,
+        /// The easing of the arrival and exit (default ease_out).
+        #[serde(default)]
+        ease: Option<crate::video::Ease>,
     },
     /// Remove an overlay.
     RemoveOverlay { video: NodeId, overlay: NodeId },
