@@ -8,6 +8,16 @@ All notable changes to OpenDesigner are documented here.
 
 ## 2026-11-19
 
+### build(repo): a Linux build-and-test container; the ACP test no longer guesses where `target/` puts the mock agent
+
+**Area:** `build(repo)`, `test(agent)`
+
+**Change:** `scripts/test-linux.sh` builds `packaging/linux/Dockerfile` (Ubuntu 24.04, distribution Qt 6.4, lld) and runs the AGENTS.md checks inside it. Running it found two real problems, both fixed: the ACP tests located the mock agent by walking up from the test executable, which breaks with the newer Cargo `target/` layout (they now ask Cargo for the path), and the Qt shell did not link on Linux because the cxx-qt initializers were never referenced from Rust (`run()` now calls `init_crate!`/`init_qml_module!`; the container links with lld, which resolves archives in any order).
+
+**Verified (Ubuntu 24.04 aarch64 in Docker, not Windows, not x86_64):** `cargo fmt --check`, `clippy -D warnings` and the 123 default-member tests pass; the editor crate builds and links and 24 of its 25 unit tests pass. **Not verified / failing:** `the_chat_runs_a_scripted_agent_through_the_editor_and_hands_it_the_local_server` fails there (not investigated), the window session was not reached, and nothing was run on a real Linux desktop. macOS stays the supported platform for now.
+
+**PR:** n/a
+
 ### feat(app): first-run skill offer and the agent's plan in the chat
 
 **Area:** `feat(app)`, `feat(agent)`

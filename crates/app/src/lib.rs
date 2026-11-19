@@ -11,6 +11,12 @@ const MAIN_QML: &str = "qrc:/qt/qml/org/opendesigner/app/qml/main.qml";
 
 /// Opens the editor window and runs the event loop. Returns the process exit code.
 pub fn run() -> i32 {
+    // The Qt glue of each crate registers itself through an initializer. Linux links those in
+    // whole, so the program must say which ones it uses; macOS only keeps what is referenced.
+    cxx_qt::init_crate!(cxx_qt);
+    cxx_qt::init_crate!(cxx_qt_lib);
+    cxx_qt::init_crate!(opendesigner_app);
+    cxx_qt::init_qml_module!("org.opendesigner.app");
     let mut app = QGuiApplication::new();
     // The native macOS/Windows styles cannot be restyled; the basic style takes our theme.
     QQuickStyle::set_style(&QString::from("Basic"));
