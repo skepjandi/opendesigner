@@ -16,6 +16,17 @@ Rectangle {
     property real playhead: 0
     property bool playing: false
     property string picture: ""
+    // the background preview (every frame drawn small on a worker thread): its status from
+    // `editor.previewStatus()`, and whether playing waits for it to get ahead of the playhead
+    property var pv: ({})
+    property bool buffering: false
+    // the preview could not be started (no ffmpeg for the footage, a video that is gone)
+    property bool failed: false
+    property string previewError: ""
+    property real lastTick: 0
+    property int shownIdx: -1
+    readonly property bool cacheOk: !!video && pv.video === video.id && !pv.stale && pv.total > 0
+    readonly property int pct: pv.total > 0 ? Math.floor(100 * pv.ready / pv.total) : 0
     // pixels per second of the timeline
     property real zoom: 70
 
@@ -25,10 +36,70 @@ Rectangle {
         clipsModel.sync(video ? video.clips : [])
         overlaysModel.sync(video ? video.overlays : [])
         previewTimer.restart()
+        ensureTimer.restart()
     }
-    onPlayheadChanged: previewTimer.restart()
-    function show() { picture = video ? editor.videoPreview(video.id, playhead, 480) : "" }
+    onPlayheadChanged: {
+        // while playing the picture comes from the cache only; a single frame is drawn on
+        // demand only when the user scrubs
+        if (showCached()) return
+        if (!playing) previewTimer.restart()
+    }
+    onPlayingChanged: {
+        if (playing) {
+            if (video && playhead >= video.duration_ms) playhead = 0
+            lastTick = Date.now()
+            buffering = true
+            ensure()
+        } else {
+            buffering = false
+        }
+    }
+    Component.onCompleted: ensure()
+    Component.onDestruction: editor.previewStop()
+    function ensure() {
+        if (!video || video.clips.length === 0) { editor.previewStop(); pv = ({}); failed = false; previewError = ""; return }
+        if (failed) return // it did not work once; the panel says so
+        const status = JSON.parse(editor.previewStart(video.id))
+        failed = !!status.error
+        previewError = status.error ? status.error : ""
+        pv = status
+    }
+    function refresh() { pv = JSON.parse(editor.previewStatus()) }
+    function indexAt(ms) { return Math.min(Math.floor(ms * pv.fps / 1000), pv.total - 1) }
+    // the cached picture of the playhead, when it is drawn
+    function showCached() {
+        if (!cacheOk) return false
+        const i = indexAt(playhead)
+        if (i >= pv.ready) return false
+        if (i !== shownIdx) { picture = editor.previewFrame(i); shownIdx = i }
+        return true
+    }
+    // a single picture drawn on demand (scrubbing before the cache has got there)
+    function show() {
+        if (showCached()) return
+        if (playing) return // never wait for a render while playing
+        shownIdx = -1
+        picture = video ? editor.videoPreview(video.id, playhead, 480) : ""
+    }
     function seek(ms) { playing = false; playhead = Math.max(0, Math.min(ms, video ? video.duration_ms : 0)) }
+    // one step of playback: the playhead follows the clock, but never gets ahead of the pictures
+    function tick() {
+        const now = Date.now()
+        const dt = Math.min(now - lastTick, 250)
+        lastTick = now
+        refresh()
+        if (pv.stale) { buffering = true; ensure(); return }
+        if (!cacheOk) { buffering = !pv.error && previewError === ""; return }
+        if (buffering) {
+            // start once the first second is drawn (or all of it)
+            if (pv.ready >= Math.min(pv.total, pv.fps) || pv.done) buffering = false
+            else return
+        }
+        const next = playhead + dt
+        if (next >= video.duration_ms || (pv.done && indexAt(next) >= pv.ready)) { playhead = 0; return }
+        if (indexAt(next) >= pv.ready && !pv.done) { buffering = true; return }
+        playhead = next
+    }
     // overlays that overlap in time go on lanes below each other
     function laneOf(i) {
         const list = video ? video.overlays : []
@@ -49,11 +120,21 @@ Rectangle {
     }
 
     Timer { id: previewTimer; interval: 120; onTriggered: root.show() }
+    Timer { id: ensureTimer; interval: 500; onTriggered: root.ensure() }
+    // playback at the preview's rate, by the clock
     Timer {
-        interval: 100; repeat: true; running: root.playing && !!root.video
+        interval: root.pv.fps ? Math.round(1000 / root.pv.fps) : 66
+        repeat: true; running: root.playing && !!root.video
+        onTriggered: root.tick()
+    }
+    // follows the worker while it draws, so the first picture and the progress show
+    Timer {
+        interval: 150; repeat: true
+        running: !!root.video && !root.playing && !!root.pv.video && !root.pv.done
         onTriggered: {
-            root.playhead += 100
-            if (root.playhead >= root.video.duration_ms) { root.playhead = 0; root.playing = false }
+            root.refresh()
+            if (root.pv.stale) root.ensure()
+            else root.showCached()
         }
     }
 
@@ -75,7 +156,7 @@ Rectangle {
             Layout.fillWidth: true
             Layout.margins: 10
             model: root.videos.map(v => v.name)
-            onActivated: i => { root.picked = i; root.playhead = 0 }
+            onActivated: i => { root.playing = false; root.picked = i; root.playhead = 0 }
         }
         Image {
             visible: !!root.video
@@ -103,6 +184,49 @@ Rectangle {
                 color: Theme.muted
                 font.pixelSize: 11
             }
+        }
+        RowLayout {
+            visible: !!root.video && root.video.clips.length > 0 && !!root.pv.video && !root.pv.stale && (!root.pv.done || root.buffering)
+            Layout.leftMargin: 10
+            Layout.rightMargin: 10
+            ProgressBar { Layout.fillWidth: true; from: 0; to: 100; value: root.pct }
+            Label {
+                color: Theme.muted
+                font.pixelSize: 11
+                text: root.pv.done
+                      ? (root.buffering ? "Waiting for the preview" : "Preview ready")
+                      : (root.playing && root.buffering ? "Buffering " : "Preparing preview ") + root.pct + "%"
+            }
+        }
+        Label {
+            visible: !!root.video && (root.previewError !== "" || !!root.pv.error)
+            Layout.fillWidth: true
+            Layout.leftMargin: 10
+            Layout.rightMargin: 10
+            wrapMode: Text.WordWrap
+            color: Theme.danger
+            font.pixelSize: 11
+            text: "Preview stopped: " + (root.previewError || root.pv.error)
+        }
+        Label {
+            visible: !!root.video && !!root.pv.capped
+            Layout.fillWidth: true
+            Layout.leftMargin: 10
+            Layout.rightMargin: 10
+            wrapMode: Text.WordWrap
+            color: Theme.muted
+            font.pixelSize: 11
+            text: root.pv.capped ? "The preview holds only the first " + (root.pv.ready / root.pv.fps).toFixed(1) + " s (memory limit); the export has all of it." : ""
+        }
+        Label {
+            visible: !!root.video
+            Layout.fillWidth: true
+            Layout.leftMargin: 10
+            Layout.rightMargin: 10
+            wrapMode: Text.WordWrap
+            color: Theme.muted
+            font.pixelSize: 11
+            text: "The preview is small and silent. The exported MP4 has full size and the footage's sound."
         }
         Label {
             visible: !!root.video

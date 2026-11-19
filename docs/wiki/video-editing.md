@@ -43,6 +43,17 @@ Where we deliberately differ: local-only and open files (Kino stores footage in 
 - **Motion.** Eases (`linear`, `ease_in`, `ease_out`, `ease_in_out` (default), `back` with a small overshoot) shape every transition, every clip zoom and every overlay entrance. Transitions: `cut`, `fade`, `slide_left|right|up|down`, `dip` (through black), `zoom_in`. An overlay has `enter` and `exit` (`none`, `fade` (default), `slide_up|down|left|right`, `pop`, `zoom`), each taking `fade_ms`, and an `ease`. Pose per moment: offset, scale and opacity, so an entrance is the overlay's own frame moved or scaled, not a new frame. There are no free keyframes yet.
 - **Sequence view.** `list_videos` returns `story`: one sentence per clip (when it starts, how it arrives and over how long, what it shows, its zoom and ease, when it ends) and per overlay (start, enter, exit, end). The window's Video tab draws the same as a timeline: a seconds ruler, a clip lane (footage and frames coloured apart, the overlapped stretch of each transition marked), overlay lanes (overlapping overlays stack), a playhead you can click or drag, the preview and Play, and the sentences below it.
 
+### Preview in the Video tab
+
+Play in the Video tab plays a **cached preview**, not a live render. When a video is shown (or chosen, or changed) a worker thread draws every frame of it from a detached copy of the project (`od_agent::video_preview`, the same copy `export_video` uses), one frame after the other so footage is decoded as a stream, and keeps each as a PNG in memory. The window shows "Preparing preview N%"; Play starts once the first second is drawn and keeps going while the playhead stays behind the drawn frames (it shows "Buffering" and waits when it catches up). The playhead follows the clock (real elapsed time), and the video loops at its end.
+
+Limits, stated in the panel too:
+
+- **Small and slow:** longest side at most 360 px, at most 15 pictures a second (or the video's own rate when lower). The exported MP4 is full size at the video's rate.
+- **Silent:** footage sound is not played (no Qt Multimedia); the export mixes it in.
+- **Bounded memory:** about 256 MiB of encoded pictures; a picture that holds still (see `VideoRenderer::signature`) is drawn once and shared. At the cap the preview keeps what it has and the panel says so.
+- **Cancelled, not repaired, on change:** any change to the project (the log grows: the user's edit, an agent's, undo) makes the cache stale; the worker stops before its next frame and a new one starts. Switching video or closing the panel cancels it too. While the cache is not there yet, scrubbing draws the one frame asked for on demand.
+
 ## Timeline model (intended)
 
 - A **composition** page has an ordered list of tracks (video, audio, overlay, text), each holding clips with `start`, `duration`, `source in/out`, transform, effects and keyframes. Clips are nodes with stable ids, so the operation set is the same family as design operations plus `trim`, `split`, `retime`, `ripple`.

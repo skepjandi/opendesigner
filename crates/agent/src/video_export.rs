@@ -13,7 +13,7 @@ use crate::tools::ToolError;
 /// video of minutes is drawn and encoded (the workspace lock is taken only to make the copy).
 pub struct Source {
     pub doc: Document,
-    dir: Option<std::path::PathBuf>,
+    pub(crate) dir: Option<std::path::PathBuf>,
 }
 
 impl Source {
@@ -77,7 +77,7 @@ fn document_in<'a>(
 }
 
 /// Lets the renderer ask `ffmpeg` for footage pictures.
-struct Decoder(FootageDecoder);
+pub(crate) struct Decoder(pub(crate) FootageDecoder);
 
 impl FootageSource for Decoder {
     fn frame(&mut self, file: &str, at_ms: u64, w: u32, h: u32) -> Result<Vec<u8>, String> {
@@ -85,7 +85,7 @@ impl FootageSource for Decoder {
     }
 }
 
-fn has_footage(v: &od_core::Video) -> bool {
+pub(crate) fn has_footage(v: &od_core::Video) -> bool {
     v.clips.iter().any(|c| c.footage.is_some())
 }
 

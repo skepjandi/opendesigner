@@ -181,6 +181,17 @@ Item {
                    check(names.indexOf("Screen") >= 0 && names.indexOf("Body") >= 0, "the device should add a body and a screen")
         },
         function () {
+            // the video preview is asked for by the panel: it must answer, and it must say so
+            // when there is nothing to show
+            const empty = editor.previewStatus()
+            const started = editor.previewStart("v_999")
+            const frame = editor.previewFrame(0)
+            editor.previewStop()
+            return check(empty === "{}", "there is no preview yet: " + empty) &&
+                   check(started.indexOf("does not exist") >= 0, "a video that does not exist starts no preview: " + started) &&
+                   check(frame === "", "there is no picture to show")
+        },
+        function () {
             // the panels can be rearranged and every change leaves a working window
             editor.layoutFloat("video", 120, 90, 420, 520)
             return check(dock.windowIds.length === 1, "floating a panel should give it a window") &&
