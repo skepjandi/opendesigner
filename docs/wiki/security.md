@@ -63,7 +63,7 @@ Allowed destinations: the user's configured model endpoint or agent, sites the u
 
 ## Credentials
 
-- In-app chat uses agents the user has signed in to; we do not read their credentials or tokens.
+- In-app chat uses agents the user has signed in to; we do not read their credentials or tokens. The chat starts only the command the user typed or picked (no shell, never from a project file or an agent), gives the agent the loopback MCP URL and its bearer token, and serves it no file or terminal capability. Note what the agent can do on its own: it runs with the user's rights in the project folder and asks permission through its own prompts, which the editor shows; the editor cannot sandbox it.
 - A direct provider mode (BYOK), if built, stores keys only in the OS secure store (Keychain, Credential Manager, Secret Service), reads them only in Rust, and never logs them or writes them to projects, exports, fixtures or error messages.
 
 ## Updates and supply chain

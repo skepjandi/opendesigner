@@ -29,8 +29,41 @@ fn the_editor_window_runs_a_scripted_session() {
     }
     std::fs::write(work.join("fixture.png"), &fixture).unwrap();
 
+    // a scripted ACP agent for the chat steps of the session
+    let exe = std::env::current_exe().unwrap();
+    let mock = exe
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("examples")
+        .join(if cfg!(windows) {
+            "mock_acp_agent.exe"
+        } else {
+            "mock_acp_agent"
+        });
+    if !mock.exists() {
+        let built = Command::new(env!("CARGO"))
+            .args([
+                "build",
+                "--example",
+                "mock_acp_agent",
+                "-p",
+                "opendesigner-agent",
+            ])
+            .status()
+            .unwrap();
+        assert!(built.success());
+    }
+    let session_log = work.join("agent-session.json");
+
     let mut child = Command::new(env!("CARGO_BIN_EXE_opendesigner-app"))
         .arg(format!("--selftest={}", work.display()))
+        .arg(format!(
+            "--selftest-agent=\"{}\" normal \"{}\"",
+            mock.display(),
+            session_log.display()
+        ))
         .env("QT_QPA_PLATFORM", "offscreen")
         .env("OPENDESIGNER_CONFIG_DIR", tmp.path().join("cfg"))
         .env("HOME", &home)
@@ -138,6 +171,15 @@ fn the_editor_window_runs_a_scripted_session() {
         log_file.contains("\"type\":\"restore\""),
         "the restore is in the history"
     );
+    // the chat gave the scripted agent the editor's local MCP server and its token
+    let given: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&session_log).unwrap()).unwrap();
+    let token = std::fs::read_to_string(tmp.path().join("cfg/mcp-token")).unwrap();
+    assert_eq!(
+        given["mcpServers"][0]["headers"][0]["value"],
+        format!("Bearer {}", token.trim())
+    );
+    assert_eq!(given["cwd"], project.display().to_string());
     assert!(
         tmp.path().join("cfg/mcp-token").exists(),
         "the agent connection created its token"

@@ -20,6 +20,7 @@ fn main() {
             "qml/LayersPanel.qml",
             "qml/InspectorPanel.qml",
             "qml/AgentPanel.qml",
+            "qml/ChatPanel.qml",
             "qml/CanvasView.qml",
             "qml/SelfTest.qml",
         ]);

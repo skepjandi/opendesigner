@@ -37,7 +37,7 @@ Rectangle {
             Layout.fillWidth: true
             background: Rectangle { color: Theme.panel }
             Repeater {
-                model: ["Notes", "History", "Connect"]
+                model: ["Notes", "History", "Connect", "Chat"]
                 TabButton {
                     required property string modelData
                     required property int index
@@ -357,6 +357,9 @@ Rectangle {
                     }
                 }
             }
+
+            // ---- chat ----
+            ChatPanel { editor: root.editor }
         }
     }
 

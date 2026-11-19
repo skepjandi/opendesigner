@@ -8,6 +8,18 @@ All notable changes to OpenDesigner are documented here.
 
 ## 2026-11-19
 
+### feat(agent): in-app chat over the Agent Client Protocol
+
+**Area:** `feat(agent)`, `feat(ui)`, `docs(wiki)`
+
+**Problem:** Using the agent meant leaving the editor for a terminal and pasting a connect command.
+
+**Change:** `od_agent::acp` is a client for ACP v1 (JSON-RPC over the child's stdio): it starts the agent the user configures, negotiates the version, opens a session in the project folder with the editor's MCP server (HTTP, bearer token) as its tool, streams text, thoughts and tool calls, surfaces permission requests, and cancels. It serves no file or terminal capability. The editor gets a Chat tab: presets or a custom command (split without a shell), Connect (which also turns on the agent connection), a conversation view, permission buttons, Cancel and Disconnect. A first-prompt preamble points the agent at `get_guidance`, so the user's selection and notes travel with every request.
+
+**Verified:** `fmt`, `clippy -D warnings`, tests against a scripted agent (`examples/mock_acp_agent`): streaming and ordering, permission allow/reject/cancel, a cancelled turn, refusing a file request, the MCP server and token handed over, a wrong protocol version, no HTTP support, an authentication error with the agent's own hint, a missing program, an agent that dies mid-turn; the editor's state tests and the offscreen window session run a whole conversation. **Not verified:** any real agent (Claude Code, Codex and Gemini adapters were not installed or signed in), the preset commands and package names (taken from published names, which have changed before), ACP v2, Windows (`.exe` lookup in the tests is unchecked), long conversations and resizing of the chat view.
+
+**PR:** n/a
+
 ### build(app): a macOS app bundle script with a licensing guard
 
 **Area:** `build(app)`, `docs(repo)`

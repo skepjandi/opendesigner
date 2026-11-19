@@ -1,6 +1,7 @@
 //! OpenDesigner editor: a Qt Quick window over the Rust core. The binary is a thin `main` over
 //! [`run`]; the code lives in this library so the tests link the generated Qt glue.
 
+pub mod chat;
 pub mod editor;
 pub mod state;
 

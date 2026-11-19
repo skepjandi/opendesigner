@@ -30,6 +30,7 @@ pub mod qobject {
         #[qproperty(QString, tokens)]
         #[qproperty(QString, languages)]
         #[qproperty(QString, language)]
+        #[qproperty(QString, chat)]
         #[qproperty(bool, can_undo, cxx_name = "canUndo")]
         #[qproperty(bool, can_redo, cxx_name = "canRedo")]
         #[qproperty(bool, mcp_running, cxx_name = "mcpRunning")]
@@ -183,6 +184,24 @@ pub mod qobject {
         ) -> QString;
 
         #[qinvokable]
+        #[cxx_name = "chatStart"]
+        fn chat_start(self: Pin<&mut Self>, command: &QString);
+        #[qinvokable]
+        #[cxx_name = "chatSend"]
+        fn chat_send(self: Pin<&mut Self>, text: &QString);
+        #[qinvokable]
+        #[cxx_name = "chatAnswer"]
+        fn chat_answer(self: Pin<&mut Self>, request: &QString, option: &QString);
+        #[qinvokable]
+        #[cxx_name = "chatCancel"]
+        fn chat_cancel(self: Pin<&mut Self>);
+        #[qinvokable]
+        #[cxx_name = "chatStop"]
+        fn chat_stop(self: Pin<&mut Self>);
+        #[qinvokable]
+        #[cxx_name = "chatLastCommand"]
+        fn chat_last_command(self: &Self) -> QString;
+        #[qinvokable]
         #[cxx_name = "startMcp"]
         fn start_mcp(self: Pin<&mut Self>);
         #[qinvokable]
@@ -231,6 +250,7 @@ pub struct EditorRust {
     tokens: QString,
     languages: QString,
     language: QString,
+    chat: QString,
     can_undo: bool,
     can_redo: bool,
     mcp_running: bool,
@@ -337,6 +357,7 @@ impl qobject::Editor {
         self.as_mut().set_tokens(q(&snap.tokens));
         self.as_mut().set_languages(q(&snap.languages));
         self.as_mut().set_language(q(&snap.language));
+        self.as_mut().set_chat(q(&snap.chat));
         self.as_mut().set_can_undo(snap.can_undo);
         self.as_mut().set_can_redo(snap.can_redo);
         self.as_mut().set_mcp_running(snap.mcp_running);
@@ -644,6 +665,61 @@ impl qobject::Editor {
             self.as_mut()
                 .show(&format!("Agents can connect at {url}"), false);
         }
+    }
+
+    /// Starts the chat agent; the agent connection is turned on first if it is off.
+    pub fn chat_start(mut self: Pin<&mut Self>, command: &QString) {
+        if !*self.mcp_running() {
+            self.as_mut().start_mcp();
+        }
+        let command = command.to_string();
+        let qt = self.qt_thread();
+        let hook: crate::chat::ChatHook = Arc::new(move |input| {
+            let _ = qt.queue(move |editor| editor.on_chat_input(input));
+        });
+        if self
+            .as_mut()
+            .act(|s| s.chat_start(&command, hook))
+            .is_some()
+        {
+            EditorState::save_chat_command(&command);
+        }
+    }
+
+    pub fn chat_send(mut self: Pin<&mut Self>, text: &QString) {
+        let text = text.to_string();
+        self.as_mut().act(|s| s.chat_send(&text));
+    }
+
+    pub fn chat_answer(mut self: Pin<&mut Self>, request: &QString, option: &QString) {
+        let (request, option) = (request.to_string(), option.to_string());
+        self.as_mut().act(|s| s.chat_answer(&request, &option));
+    }
+
+    pub fn chat_cancel(mut self: Pin<&mut Self>) {
+        self.as_mut().act(|s| {
+            s.chat_cancel();
+            Ok(())
+        });
+    }
+
+    pub fn chat_stop(mut self: Pin<&mut Self>) {
+        self.as_mut().act(|s| {
+            s.chat_stop();
+            Ok(())
+        });
+    }
+
+    pub fn chat_last_command(&self) -> QString {
+        q(&EditorState::chat_last_command())
+    }
+
+    /// Called on the Qt thread when the chat connection reports something.
+    fn on_chat_input(mut self: Pin<&mut Self>, input: crate::chat::ChatInput) {
+        self.as_mut().act(|s| {
+            s.chat_apply(input);
+            Ok(())
+        });
     }
 
     pub fn stop_mcp(mut self: Pin<&mut Self>) {

@@ -14,8 +14,14 @@ Item {
             if (a.indexOf("--selftest=") === 0) return a.substring(11)
         return ""
     }
+    readonly property string agentCommand: {
+        for (const a of Qt.application.arguments)
+            if (a.indexOf("--selftest-agent=") === 0) return a.substring(17)
+        return ""
+    }
     property var ids: ({})
     property int n: 0
+    property int waits: 0
     visible: false
 
     function fail(msg) { console.log("SELFTEST FAIL: " + msg); Qt.exit(1) }
@@ -138,6 +144,38 @@ Item {
                    check(names.indexOf("Screen") >= 0 && names.indexOf("Body") >= 0, "the device should add a body and a screen")
         },
         function () {
+            if (agentCommand === "") return true // the chat needs an agent; the test passes one
+            editor.chatStart(agentCommand)
+            return check(!editor.messageIsError, "the chat should start: " + editor.message)
+        },
+        function () {
+            if (agentCommand === "") return true
+            const c = JSON.parse(editor.chat)
+            if (c.status === "starting") return "wait"
+            return check(c.status === "ready", "the chat did not connect: " + editor.chat) && check(editor.mcpRunning, "the chat turns the agent connection on")
+        },
+        function () {
+            if (agentCommand === "") return true
+            editor.chatSend("make the headline bigger")
+            return true
+        },
+        function () {
+            if (agentCommand === "") return true
+            const p = JSON.parse(editor.chat).permission
+            if (!p) return "wait"
+            editor.chatAnswer(p.request, p.options[0].id)
+            return true
+        },
+        function () {
+            if (agentCommand === "") return true
+            const c = JSON.parse(editor.chat)
+            if (c.status !== "ready") return "wait"
+            const said = c.messages.filter(m => m.role === "agent").map(m => m.text).join("")
+            const ok = check(said === "Hello world [fs refused] [chose yes]", "the agent's reply: " + said)
+            editor.chatStop()
+            return ok && check(JSON.parse(editor.chat).status === "off", "the chat should stop")
+        },
+        function () {
             grabTarget.grabToImage(function (result) {
                 if (!result.saveToFile(folder + "/window.png")) st.fail("could not save the window image")
                 st.n++
@@ -157,6 +195,13 @@ Item {
             const i = st.n
             let ok = false
             try { ok = st.steps[i]() } catch (e) { st.fail("step " + i + " threw: " + e); return }
+            if (ok === "wait") {
+                st.waits++
+                if (st.waits > 80) { st.fail("step " + i + " waited too long"); return }
+                timer.restart()
+                return
+            }
+            st.waits = 0
             if (!ok) return
             if (i === st.steps.length - 2) return // the grab step advances itself
             st.n++
