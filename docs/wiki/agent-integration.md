@@ -1,6 +1,6 @@
 # Agent Integration
 
-> **Status: Partially implemented.** The MCP server and the skill generator/installer (`crates/agent`, `opendesigner skill …`) are built and tested; the first-run prompt in the Qt app, the in-process Qt integration and the in-app chat are design only. Skill locations for the supported agents were verified against each agent's own docs on 2026-11-19 (see the target table).
+> **Status: Partially implemented.** The MCP server and the skill generator/installer (`crates/agent`, `opendesigner skill …`) are built and tested. The Qt app runs the MCP server in-process, has a Connect tab that previews and installs the skill, and a Chat tab (see [In-app chat](#in-app-chat)); an automatic first-run offer to install the skill is not built, and nothing here has been tried against a real Claude Code, Codex, Gemini CLI or opencode. Skill locations for the supported agents were verified against each agent's own docs on 2026-11-19 (see the target table).
 
 The point of OpenDesigner is that the user guides an agent *with the GUI*. Three mechanisms carry that, and the app installs the first two on first run.
 

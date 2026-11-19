@@ -8,6 +8,14 @@ All notable changes to OpenDesigner are documented here.
 
 ## 2026-11-19
 
+### docs(repo): status banners and README match what is built
+
+**Area:** `docs(repo)`
+
+**Change:** The roadmap, agent-integration, security and architecture banners and the README still described the editor, the chat and device frames as not built. They now say what exists and, in the same places, what has not been verified (no real agent, one OS, no video, no first-run skill offer).
+
+**Verified:** read against the code and the changelog entries above; no code changed. **PR:** n/a
+
 ### feat(agent): in-app chat over the Agent Client Protocol
 
 **Area:** `feat(agent)`, `feat(ui)`, `docs(wiki)`

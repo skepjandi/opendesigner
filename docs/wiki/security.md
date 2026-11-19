@@ -1,6 +1,6 @@
 # Security
 
-> **Status: Partially implemented.** The MCP endpoint's mitigations in [MCP endpoint](#mcp-endpoint) are built in `crates/agent` and covered by socket-level tests (token, `Host`, `Origin`, method and size limits, loopback bind). Everything else here is a requirement for code not yet written. Nothing has been reviewed by a third party.
+> **Status: Partially implemented.** The MCP endpoint's mitigations in [MCP endpoint](#mcp-endpoint) are built in `crates/agent` and covered by socket-level tests (token, `Host`, `Origin`, method and size limits, loopback bind). Also built: media paths and import, export file names, the chat's no-shell command start and its refusal of file and terminal requests, tested as described in [Agent Integration](./agent-integration.md). Everything else here is a requirement for code not yet written (fuzzing, update signing, video tooling). Nothing has been reviewed by a third party.
 
 ## Assets
 
