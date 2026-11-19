@@ -34,20 +34,119 @@ Item {
         const typed = inputText.text
         root.showCommands = typed.startsWith("/") && typed.indexOf(" ") < 0 && root.allCommands.length > 0
     }
+    // commands that are really settings of the session open a chooser here instead of being
+    // sent to the model as text
+    function categoryOf(cmd) {
+        switch (cmd) {
+        case "model": case "switch": case "modelpreset": return "model"
+        case "effort": case "thinking": case "think": case "reasoning": return "thought_level"
+        case "mode": case "plan": return "mode"
+        default: return ""
+        }
+    }
+    function optionFor(cmd) {
+        const cat = categoryOf(cmd)
+        return cat === "" ? null : ((root.chat.config || []).find(o => o.category === cat) || null)
+    }
+    function openChoice(opt) {
+        root.choiceOption = opt
+        choiceDialog.open()
+    }
+    property var choiceOption: null
     function useCommand(name) {
+        root.showCommands = false
+        const opt = optionFor(name)
+        if (opt) { inputText.text = ""; openChoice(opt); return }
         inputText.text = "/" + name + " "
         inputText.forceActiveFocus()
-        root.showCommands = false
     }
     function send() {
         const text = inputText.text.trim()
         if (text === "") return
+        if (text.startsWith("/") && text.indexOf(" ") < 0) {
+            const opt = optionFor(text.slice(1).toLowerCase())
+            if (opt) { inputText.text = ""; root.showCommands = false; openChoice(opt); return }
+        }
         root.editor.chatSend(text)
         inputText.text = ""
         root.showCommands = false
     }
     function openLink(link) { Qt.openUrlExternally(link) }
     function focusInput() { if (connected) inputText.forceActiveFocus() }
+
+    Dialog {
+        id: choiceDialog
+        modal: true
+        parent: Overlay.overlay
+        anchors.centerIn: Overlay.overlay
+        width: Math.min(460, Overlay.overlay ? Overlay.overlay.width - 60 : 460)
+        height: Math.min(520, Overlay.overlay ? Overlay.overlay.height - 60 : 520)
+        Overlay.modal: Rectangle { color: Qt.rgba(0, 0, 0, 0.55) }
+        title: root.choiceOption ? root.choiceOption.name : ""
+        background: Rectangle { radius: Theme.radius; color: Theme.panelRaised; border.width: 1; border.color: Theme.border }
+        header: Label { text: choiceDialog.title; color: Theme.text; font.pixelSize: 15; font.bold: true; padding: 14 }
+        contentItem: ListView {
+            id: choiceList
+            clip: true
+            model: root.choiceOption ? root.choiceOption.choices : []
+            boundsBehavior: Flickable.StopAtBounds
+            ScrollBar.vertical: ScrollBar {}
+            delegate: Rectangle {
+                id: choiceRow
+                required property var modelData
+                readonly property bool current: root.choiceOption && modelData.value === root.choiceOption.current
+                width: choiceList.width
+                height: choiceText.implicitHeight + 14
+                radius: 4
+                color: choiceHover.hovered ? Theme.field : "transparent"
+                border.width: current ? 1 : 0
+                border.color: Theme.accent
+                Label {
+                    id: choiceText
+                    x: 10; y: 7
+                    width: parent.width - 20
+                    text: choiceRow.modelData.name + (choiceRow.modelData.description && choiceRow.modelData.description !== choiceRow.modelData.name ? "\n" + choiceRow.modelData.description : "")
+                    color: choiceRow.current ? Theme.accent : Theme.text
+                    font.pixelSize: 12
+                    wrapMode: Text.WordWrap
+                }
+                HoverHandler { id: choiceHover }
+                TapHandler {
+                    onTapped: {
+                        root.editor.chatSetConfig(root.choiceOption.id, choiceRow.modelData.value)
+                        choiceDialog.close()
+                    }
+                }
+            }
+        }
+        footer: RowLayout {
+            Item { Layout.fillWidth: true }
+            Btn { text: "Close"; onClicked: choiceDialog.close() }
+            Item { implicitWidth: 6 }
+        }
+    }
+
+    // the session's settings and the agent's commands, from one button
+    Menu {
+        id: optionsMenu
+        Instantiator {
+            model: root.chat.config || []
+            delegate: MenuItem {
+                required property var modelData
+                text: (modelData.category === "thought_level" ? "Effort" : modelData.category === "model" ? "Model" : modelData.category === "mode" ? "Mode" : modelData.name) + ":  " + (modelData.choices.find(c => c.value === modelData.current) || { name: modelData.current }).name
+                onTriggered: root.openChoice(modelData)
+            }
+            onObjectAdded: (i, o) => optionsMenu.insertItem(i, o)
+            onObjectRemoved: (i, o) => optionsMenu.removeItem(o)
+        }
+        MenuSeparator { visible: (root.chat.commands || []).length > 0 }
+        MenuItem {
+            visible: (root.chat.commands || []).length > 0
+            height: visible ? implicitHeight : 0
+            text: "The agent's commands…"
+            onTriggered: { root.showCommands = true; inputText.forceActiveFocus() }
+        }
+    }
 
     DirectionPicker {
         id: direction
@@ -342,12 +441,15 @@ Item {
                 ToolTip.text: "Pick a look, colors, type and mood; they go into the prompt"
             }
             Btn {
-                text: "/"
-                onClicked: { root.showCommands = true; inputText.forceActiveFocus() }
+                text: "⚙"
+                implicitWidth: 34
+                leftPadding: 0
+                rightPadding: 0
+                onClicked: optionsMenu.popup(this, 0, -optionsMenu.implicitHeight)
                 ToolTip.visible: hovered
                 ToolTip.delay: 500
-                ToolTip.text: "The agent's own commands"
-                enabled: (root.chat.commands || []).length > 0
+                ToolTip.text: "Model, effort, mode and the agent's commands"
+                enabled: (root.chat.config || []).length > 0 || (root.chat.commands || []).length > 0
             }
             ScrollView {
                 Layout.fillWidth: true
