@@ -8,6 +8,16 @@ All notable changes to OpenDesigner are documented here.
 
 ## 2026-11-19
 
+### feat(app): every Direction section has "Let the agent decide"
+
+**Area:** `feat(app)`
+
+**Change:** Look, Colors, Type, Mood, Motion, Layout and Imagery each end with a "Let the agent decide" button that clears that section (it shows as chosen when nothing is picked). The picker no longer pre-selects a default in each section, so an untouched section adds nothing to the prompt.
+
+**Verified:** the window session passes with no QML warning. **Not verified:** by eye.
+
+**PR:** n/a
+
 ### feat(mcp): audio in import_file, a built-in sound maker, and the agent is told what it has
 
 **Area:** `feat(mcp)`, `feat(skill)`, `feat(app)`

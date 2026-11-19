@@ -46,13 +46,6 @@ Dialog {
     width: Math.min(720, Overlay.overlay ? Overlay.overlay.width - 60 : 720)
     height: Math.min(680, Overlay.overlay ? Overlay.overlay.height - 60 : 680)
     Overlay.modal: Rectangle { color: Qt.rgba(0, 0, 0, 0.55) }
-    onOpened: {
-        if (picker.styles.length === 0) picker.styles = ["swiss"]
-        if (picker.palette === "") picker.palette = "midnight-gold"
-        if (picker.typePair === "") picker.typePair = "helvetica"
-        if (picker.motion === "") picker.motion = "standard"
-        if (picker.density === "") picker.density = "balanced"
-    }
     background: Rectangle { radius: Theme.radius; color: Theme.panelRaised; border.width: 1; border.color: Theme.border }
     header: Label { text: picker.title; color: Theme.text; font.pixelSize: 15; font.bold: true; padding: 14 }
 
@@ -92,6 +85,13 @@ Dialog {
                         ToolTip.text: modelData.note
                     }
                 }
+                            Btn {
+                    text: "Let the agent decide"
+                    active: picker.styles.length === 0
+                    implicitHeight: 26
+                    font.pixelSize: 11
+                    onClicked: { picker.styles = [] }
+                }
             }
 
             Label { text: "Colors"; color: Theme.accent; font.pixelSize: 12; font.bold: true }
@@ -116,6 +116,13 @@ Dialog {
                         font.pixelSize: 11
                         onClicked: { picker.palette = modelData.id; picker.customColors = "" }
                     }
+                }
+                            Btn {
+                    text: "Let the agent decide"
+                    active: picker.palette === "" && picker.customColors === ""
+                    implicitHeight: 26
+                    font.pixelSize: 11
+                    onClicked: { picker.palette = ""; picker.customColors = ""; customColorsField.text = "" }
                 }
             }
             RowLayout {
@@ -148,6 +155,13 @@ Dialog {
                         onClicked: picker.typePair = modelData.id
                     }
                 }
+                            Btn {
+                    text: "Let the agent decide"
+                    active: picker.typePair === ""
+                    implicitHeight: 26
+                    font.pixelSize: 11
+                    onClicked: { picker.typePair = "" }
+                }
             }
 
             Label { text: "Mood"; color: Theme.accent; font.pixelSize: 12; font.bold: true }
@@ -164,6 +178,13 @@ Dialog {
                         font.pixelSize: 11
                         onClicked: picker.moods = picker.toggled(picker.moods, modelData.id)
                     }
+                }
+                            Btn {
+                    text: "Let the agent decide"
+                    active: picker.moods.length === 0
+                    implicitHeight: 26
+                    font.pixelSize: 11
+                    onClicked: { picker.moods = [] }
                 }
             }
 
@@ -182,6 +203,13 @@ Dialog {
                         onClicked: picker.motion = modelData.id
                     }
                 }
+                            Btn {
+                    text: "Let the agent decide"
+                    active: picker.motion === ""
+                    implicitHeight: 26
+                    font.pixelSize: 11
+                    onClicked: { picker.motion = "" }
+                }
             }
 
             Label { text: "Layout"; color: Theme.accent; font.pixelSize: 12; font.bold: true }
@@ -199,6 +227,13 @@ Dialog {
                         onClicked: picker.density = modelData.id
                     }
                 }
+                            Btn {
+                    text: "Let the agent decide"
+                    active: picker.density === ""
+                    implicitHeight: 26
+                    font.pixelSize: 11
+                    onClicked: { picker.density = "" }
+                }
             }
 
             Label { text: "Imagery"; color: Theme.accent; font.pixelSize: 12; font.bold: true }
@@ -215,6 +250,13 @@ Dialog {
                         font.pixelSize: 11
                         onClicked: picker.imagery = picker.toggled(picker.imagery, modelData.id)
                     }
+                }
+                            Btn {
+                    text: "Let the agent decide"
+                    active: picker.imagery.length === 0
+                    implicitHeight: 26
+                    font.pixelSize: 11
+                    onClicked: { picker.imagery = [] }
                 }
             }
 
