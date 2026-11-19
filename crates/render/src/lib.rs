@@ -70,6 +70,7 @@ struct Ctx<'a> {
     tokens: &'a BTreeMap<String, String>,
     project_dir: Option<&'a FsPath>,
     warnings: Vec<Warning>,
+    view: View,
 }
 
 /// Renders `frame` at `scale` (1.0 = one pixel per document unit). `project_dir` is the project
@@ -79,6 +80,17 @@ pub fn render_frame(
     frame: &NodeId,
     scale: f32,
     project_dir: Option<&FsPath>,
+) -> Result<Rendered, RenderError> {
+    render_frame_in_bands(doc, frame, scale, project_dir, None)
+}
+
+/// [`render_frame`] with the number of bands chosen (`None`: by size and cores).
+fn render_frame_in_bands(
+    doc: &Document,
+    frame: &NodeId,
+    scale: f32,
+    project_dir: Option<&FsPath>,
+    bands: Option<usize>,
 ) -> Result<Rendered, RenderError> {
     if !(0.01..=16.0).contains(&scale) || !scale.is_finite() {
         return Err(RenderError::BadScale);
@@ -101,18 +113,121 @@ pub fn render_frame(
         return Err(RenderError::TooLarge { width, height });
     }
     let (w, h) = (width as u32, height as u32);
-    let mut pixmap = Pixmap::new(w, h).ok_or(RenderError::TooLarge { width, height })?;
-    let mut ctx = Ctx {
-        tokens: &doc.tokens,
-        project_dir,
-        warnings: Vec::new(),
+    let bands = bands.unwrap_or_else(|| band_count(node, h));
+    render_bands(doc, node, scale, (w, h), project_dir, bands)
+}
+
+/// Frames with at least this many nodes are drawn in horizontal bands on several threads.
+const BAND_MIN_NODES: usize = 256;
+const BAND_MIN_ROWS: u32 = 64;
+const MAX_BANDS: usize = 8;
+/// Rows drawn past each side of a band so seams match a single pass.
+const BAND_OVERLAP: u32 = 4;
+
+fn count_nodes(node: &Node, limit: usize) -> usize {
+    let mut n = 1;
+    for child in &node.children {
+        if n >= limit {
+            break;
+        }
+        n += count_nodes(child, limit - n);
+    }
+    n
+}
+
+/// How many bands to draw `node` in: one unless the frame is busy and tall enough to split.
+fn band_count(node: &Node, height: u32) -> usize {
+    let threads = std::thread::available_parallelism().map_or(1, |n| n.get());
+    let wanted = threads
+        .min(MAX_BANDS)
+        .min((height / BAND_MIN_ROWS).max(1) as usize);
+    if wanted < 2 || count_nodes(node, BAND_MIN_NODES) < BAND_MIN_NODES {
+        1
+    } else {
+        wanted
+    }
+}
+
+/// Draws the top-left `size` pixels of the frame in `bands` slices of rows. Slices are
+/// independent pixmaps (each skips what lies outside it), so they run in parallel and are then
+/// copied side by side; layering inside a slice is unchanged.
+fn render_bands(
+    doc: &Document,
+    node: &Node,
+    scale: f32,
+    (w, h): (u32, u32),
+    project_dir: Option<&FsPath>,
+    bands: usize,
+) -> Result<Rendered, RenderError> {
+    let too_large = || RenderError::TooLarge {
+        width: u64::from(w),
+        height: u64::from(h),
     };
-    let base = Transform::from_scale(scale, scale);
-    draw(&mut ctx, &mut pixmap, node, base, 1.0, None, true)?;
-    Ok(Rendered {
-        pixmap,
-        warnings: ctx.warnings,
-    })
+    let rows = h.div_ceil(bands.max(1) as u32).max(1);
+    let starts: Vec<u32> = (0..h).step_by(rows as usize).collect();
+    let draw_band = |top: u32| -> Result<Band, RenderError> {
+        // Draw a few rows beyond the slice on each side: a shape that crosses the seam is then
+        // anti-aliased with its whole outline in view, and the seam shows no difference.
+        let first = top.saturating_sub(BAND_OVERLAP);
+        let last = (top + rows).min(h);
+        let band_h = (last + BAND_OVERLAP).min(h) - first;
+        let mut pixmap = Pixmap::new(w, band_h).ok_or_else(too_large)?;
+        let mut ctx = Ctx {
+            tokens: &doc.tokens,
+            project_dir,
+            warnings: Vec::new(),
+            view: View {
+                width: w as f32,
+                height: band_h as f32,
+            },
+        };
+        let base = Transform::from_row(scale, 0.0, 0.0, scale, 0.0, -(first as f32));
+        draw(&mut ctx, &mut pixmap, node, base, 1.0, None, true)?;
+        let skip = (top - first) as usize * w as usize * 4;
+        let keep = (last - top) as usize * w as usize * 4;
+        Ok((pixmap.data()[skip..skip + keep].to_vec(), ctx.warnings))
+    };
+    let parts: Vec<Result<Band, RenderError>> = if starts.len() == 1 {
+        vec![draw_band(0)]
+    } else {
+        std::thread::scope(|scope| {
+            let handles: Vec<_> = starts
+                .iter()
+                .map(|&top| scope.spawn(move || draw_band(top)))
+                .collect();
+            handles
+                .into_iter()
+                .map(|h| {
+                    h.join().unwrap_or_else(|_| {
+                        Err(RenderError::Encode("a render thread failed".into()))
+                    })
+                })
+                .collect()
+        })
+    };
+    let mut pixmap = Pixmap::new(w, h).ok_or_else(too_large)?;
+    let mut warnings: Vec<Warning> = Vec::new();
+    for (top, part) in starts.iter().zip(parts) {
+        let (band, band_warnings) = part?;
+        let at = *top as usize * w as usize * 4;
+        pixmap.data_mut()[at..at + band.len()].copy_from_slice(&band);
+        for warning in band_warnings {
+            if !warnings.contains(&warning) {
+                warnings.push(warning);
+            }
+        }
+    }
+    Ok(Rendered { pixmap, warnings })
+}
+
+/// A drawn band's rows (RGBA, premultiplied) and what it could not draw.
+type Band = (Vec<u8>, Vec<Warning>);
+
+/// The pixels one band covers, in its own pixmap's coordinates.
+#[derive(Clone, Copy)]
+struct View {
+    width: f32,
+    height: f32,
 }
 
 fn draw(
@@ -137,34 +252,60 @@ fn draw(
     let opacity = parent_opacity * node.opacity as f32;
     let (w, h) = (node.width as f32, node.height as f32);
 
-    let shape = match node.kind {
-        NodeKind::Frame | NodeKind::Rect => {
-            rounded_rect(w, h, (node.corner_radius as f32).min(w.min(h) / 2.0))
-        }
-        NodeKind::Ellipse => Rect::from_xywh(0.0, 0.0, w, h).and_then(PathBuilder::from_oval),
-        NodeKind::Group => None,
-        NodeKind::Text => {
-            let color = match &node.fill {
-                Some(fill) => fill.resolve(ctx.tokens)?,
-                None => od_core::Rgba {
-                    r: 0,
-                    g: 0,
-                    b: 0,
-                    a: 255,
-                },
-            };
-            text::draw_text(pixmap, mask, node, transform, color, opacity);
-            None
-        }
-        NodeKind::Image => {
-            match load_image(ctx, node) {
-                Ok(image) => images::draw_image(pixmap, mask, node, transform, opacity, &image),
-                Err(reason) => ctx.warnings.push(Warning::ImageNotRendered {
-                    id: node.id.clone(),
-                    reason,
-                }),
+    // Anything wholly outside the band is not drawn. A frame clips its children, so its subtree
+    // goes with it; text can overflow its box downward and sideways, so only a start below the
+    // band counts for it.
+    let margin = node
+        .stroke
+        .as_ref()
+        .map_or(0.0, |s| s.width as f32 * transform.sx / 2.0)
+        + 1.0;
+    let (left, top) = (transform.tx, transform.ty);
+    let (right, bottom) = (left + w * transform.sx, top + h * transform.sy);
+    let outside = if node.kind == NodeKind::Text {
+        top - margin > ctx.view.height
+    } else {
+        right + margin < 0.0
+            || bottom + margin < 0.0
+            || left - margin > ctx.view.width
+            || top - margin > ctx.view.height
+    };
+    if outside && (node.kind == NodeKind::Frame || node.children.is_empty()) {
+        return Ok(());
+    }
+
+    let shape = if outside {
+        None
+    } else {
+        match node.kind {
+            NodeKind::Frame | NodeKind::Rect => {
+                rounded_rect(w, h, (node.corner_radius as f32).min(w.min(h) / 2.0))
             }
-            None
+            NodeKind::Ellipse => Rect::from_xywh(0.0, 0.0, w, h).and_then(PathBuilder::from_oval),
+            NodeKind::Group => None,
+            NodeKind::Text => {
+                let color = match &node.fill {
+                    Some(fill) => fill.resolve(ctx.tokens)?,
+                    None => od_core::Rgba {
+                        r: 0,
+                        g: 0,
+                        b: 0,
+                        a: 255,
+                    },
+                };
+                text::draw_text(pixmap, mask, node, transform, color, opacity);
+                None
+            }
+            NodeKind::Image => {
+                match load_image(ctx, node) {
+                    Ok(image) => images::draw_image(pixmap, mask, node, transform, opacity, &image),
+                    Err(reason) => ctx.warnings.push(Warning::ImageNotRendered {
+                        id: node.id.clone(),
+                        reason,
+                    }),
+                }
+                None
+            }
         }
     };
 
@@ -857,5 +998,97 @@ mod tests {
             })
         ));
         assert!(slice_columns(&r.pixmap, 0).is_err());
+    }
+
+    /// Strokes, rounded corners, ellipses, nested frames, tall text across band edges and nodes
+    /// that hang outside the frame.
+    fn busy_frame() -> (Session, NodeId) {
+        let mut s = Session::new(Document::new("t"));
+        let page = s.add_page("p").unwrap();
+        let root = s.document().page(&page).unwrap().root.id.clone();
+        let mut big = NewNode::new(NodeKind::Frame);
+        big.width = 400.0;
+        big.height = 900.0;
+        big.fill = Some(Paint::parse("#101820").unwrap());
+        let frame = add(&mut s, &root, big);
+        let mut inner = NewNode::new(NodeKind::Frame);
+        inner.x = 20.0;
+        inner.y = 300.0;
+        inner.width = 300.0;
+        inner.height = 400.0;
+        inner.corner_radius = Some(30.0);
+        inner.fill = Some(Paint::parse("#223344").unwrap());
+        let inner = add(&mut s, &frame, inner);
+        for i in 0..300_u32 {
+            let mut n = NewNode::new(match i % 3 {
+                0 => NodeKind::Ellipse,
+                _ => NodeKind::Rect,
+            });
+            n.x = f64::from(i % 17) * 29.0 - 40.0;
+            n.y = f64::from(i) * 3.3 - 20.0;
+            n.width = 37.0;
+            n.height = 23.0;
+            if i % 3 != 0 {
+                n.corner_radius = Some(6.0);
+            }
+            n.opacity = Some(0.8);
+            n.fill = Some(Paint::parse(["#f2ca83", "#33aa77", "#aa3377"][i as usize % 3]).unwrap());
+            if i % 5 == 0 {
+                n.stroke = Some(Stroke {
+                    paint: Paint::parse("#ffffff").unwrap(),
+                    width: 3.0,
+                });
+            }
+            add(&mut s, if i % 4 == 0 { &inner } else { &frame }, n);
+        }
+        let mut t = NewNode::new(NodeKind::Text);
+        t.x = 30.0;
+        t.y = 100.0;
+        t.width = 120.0;
+        t.height = 20.0;
+        t.font_size = Some(40.0);
+        t.text = Some("a long line of words that wraps over many rows".into());
+        t.fill = Some(Paint::parse("#fcf1d9").unwrap());
+        add(&mut s, &frame, t);
+        (s, frame)
+    }
+
+    #[test]
+    fn bands_draw_what_one_pass_draws() {
+        let (s, frame) = busy_frame();
+        for scale in [0.3_f32, 1.0, 1.7] {
+            let one = render_frame_in_bands(s.document(), &frame, scale, None, Some(1)).unwrap();
+            for bands in [2, 3, 8] {
+                let many =
+                    render_frame_in_bands(s.document(), &frame, scale, None, Some(bands)).unwrap();
+                assert_eq!(one.pixmap.width(), many.pixmap.width());
+                assert_eq!(one.pixmap.height(), many.pixmap.height());
+                // Float rounding of a shifted outline can move a few anti-aliased edge samples.
+                let diffs: Vec<u8> = one
+                    .pixmap
+                    .data()
+                    .iter()
+                    .zip(many.pixmap.data())
+                    .map(|(a, b)| a.abs_diff(*b))
+                    .collect();
+                let worst = diffs.iter().max().unwrap();
+                let off = diffs.iter().filter(|d| **d > 2).count();
+                assert!(
+                    *worst <= 64 && off * 5000 <= diffs.len(),
+                    "scale {scale}, {bands} bands: {off} values differ, by up to {worst}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_busy_frame_is_split_and_a_plain_one_is_not() {
+        let (s, frame) = busy_frame();
+        let node = s.document().node(&frame).unwrap();
+        let cores = std::thread::available_parallelism().map_or(1, |n| n.get());
+        assert_eq!(band_count(node, 900) > 1, cores > 1);
+        assert_eq!(band_count(node, 40), 1, "too short to split");
+        let (plain, id) = frame_session();
+        assert_eq!(band_count(plain.document().node(&id).unwrap(), 50), 1);
     }
 }

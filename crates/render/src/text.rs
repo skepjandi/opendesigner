@@ -4,6 +4,7 @@
 //! renders the same on every machine. Other families are looked up in the system fonts, which are
 //! loaded the first time a document asks for a family the bundle does not have.
 
+use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex, PoisonError};
 
 use cosmic_text::{
@@ -18,9 +19,26 @@ const LATO_BOLD: &[u8] = include_bytes!("../fonts/Lato-Bold.ttf");
 pub const DEFAULT_FAMILY: &str = "Lato";
 const DEFAULT_LINE_HEIGHT: f64 = 1.2;
 
+/// What decides a text node's layout. Colour, opacity and position do not.
+#[derive(PartialEq, Eq, Hash)]
+struct LayoutKey {
+    text: String,
+    size: u32,
+    line: u32,
+    family: String,
+    weight: u16,
+    align: u8,
+    wrap_width: Option<u32>,
+}
+
+/// Laid-out text kept between renders: shaping costs far more than drawing the glyphs, and an
+/// edit renders the whole frame again with nearly all of its text unchanged.
+const MAX_LAYOUTS: usize = 4096;
+
 struct Fonts {
     system: FontSystem,
     cache: SwashCache,
+    layouts: HashMap<LayoutKey, Buffer>,
     system_fonts_loaded: bool,
 }
 
@@ -41,6 +59,7 @@ impl Fonts {
         Fonts {
             system: FontSystem::new_with_locale_and_db("en-US".to_string(), db),
             cache: SwashCache::new(),
+            layouts: HashMap::new(),
             system_fonts_loaded: false,
         }
     }
@@ -57,6 +76,7 @@ impl Fonts {
     fn ensure_system_fonts(&mut self) {
         if !self.system_fonts_loaded {
             self.system.db_mut().load_system_fonts();
+            self.layouts.clear();
             self.system_fonts_loaded = true;
         }
     }
@@ -97,20 +117,41 @@ pub(crate) fn draw_text(
     if !fonts.has_family(family) || text.chars().any(|c| c as u32 > 0x24F) {
         fonts.ensure_system_fonts();
     }
-    let mut buffer = Buffer::new(&mut fonts.system, Metrics::new(size, line));
-    buffer.set_size(wrap_width, None);
-    let attrs = Attrs::new()
-        .family(Family::Name(family))
-        .weight(Weight(weight));
-    buffer.set_text(text, &attrs, Shaping::Advanced, Some(align));
+    let key = LayoutKey {
+        text: text.to_string(),
+        size: size.to_bits(),
+        line: line.to_bits(),
+        family: family.to_string(),
+        weight,
+        align: align as u8,
+        wrap_width: wrap_width.map(f32::to_bits),
+    };
+    if fonts.layouts.len() >= MAX_LAYOUTS && !fonts.layouts.contains_key(&key) {
+        fonts.layouts.clear();
+    }
+    let Fonts {
+        system,
+        cache,
+        layouts,
+        ..
+    } = fonts;
+    let buffer = layouts.entry(key).or_insert_with(|| {
+        let mut buffer = Buffer::new(system, Metrics::new(size, line));
+        buffer.set_size(wrap_width, None);
+        let attrs = Attrs::new()
+            .family(Family::Name(family))
+            .weight(Weight(weight));
+        buffer.set_text(text, &attrs, Shaping::Advanced, Some(align));
+        buffer
+    });
 
     let (width, height) = (pixmap.width() as i32, pixmap.height() as i32);
     let mask_width = mask.map_or(0, |m| m.width() as i32);
     let alpha = f32::from(color.a) / 255.0 * opacity;
     let data = pixmap.data_mut();
     buffer.draw(
-        &mut fonts.system,
-        &mut fonts.cache,
+        system,
+        cache,
         CtColor::rgb(color.r, color.g, color.b),
         |gx, gy, gw, gh, c| {
             let coverage = f32::from(c.a()) / 255.0 * alpha;
