@@ -8,6 +8,7 @@ Item {
     required property var editor
     required property var canvas
     required property var dock
+    required property var window
     required property var grabTarget
 
     readonly property string folder: {
@@ -87,6 +88,30 @@ Item {
             return check(pin > 0, "pin was not created") &&
                    check(JSON.parse(editor.annotations).length === 1, "pin missing from annotations") &&
                    check(JSON.parse(editor.annotations)[0].bounds.width === 400, "pin should carry the node's bounds")
+        },
+        function () {
+            const layers = window.panels.layers
+            if (!layers) return "wait"
+            const frame = JSON.parse(editor.layers).find(r => r.kind === "frame")
+            const open = layers.shownCount
+            layers.toggleFold(frame.id)
+            const folded = layers.shownCount
+            layers.expandAll()
+            const all = layers.shownCount
+            layers.toggleFold(frame.id)
+            editor.select(ids.text)
+            return check(open === 5 && folded === 2 && all === 5, "folding a layer hides its children: " + open + "/" + folded + "/" + all)
+        },
+        function () {
+            return check(window.panels.layers.shownCount === 5, "selecting a layer on the canvas unfolds the ones above it: " + window.panels.layers.shownCount)
+        },
+        function () {
+            window.overlaysHidden = true
+            const hidden = !canvas.overlays
+            window.overlaysHidden = false
+            editor.select(ids.rect)
+            return check(hidden && canvas.overlays, "the overlay toggle reaches the canvas") &&
+                   check(Icons.source("eye", Theme.text).indexOf("data:image/svg+xml") === 0, "the vendored icons load")
         },
         function () {
             probe.sync([{ id: "a", v: 1 }, { id: "b", v: 1 }, { id: "c", v: 1 }])

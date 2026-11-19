@@ -18,6 +18,8 @@ ApplicationWindow {
     Editor { id: backend }
 
     property string tool: "select"
+    // hides what the editor draws over the picture (selection, agent outlines, pins, markers)
+    property bool overlaysHidden: false
     // the panels are placed by the dock (`Dock.qml`, `layout.rs`); the ones other code talks to
     // register themselves here when they are created
     property var canvas: null
@@ -113,6 +115,7 @@ ApplicationWindow {
     Shortcut { sequence: "V"; enabled: win.canAct; onActivated: win.tool = "select" }
     Shortcut { sequence: "H"; enabled: win.canAct; onActivated: win.tool = "hand" }
     Shortcut { sequence: "C"; enabled: win.canAct; onActivated: win.tool = "pin" }
+    Shortcut { sequence: "Shift+H"; enabled: win.canAct; onActivated: win.overlaysHidden = !win.overlaysHidden }
 
     // view
     Shortcut { sequences: [StandardKey.ZoomIn, "="]; enabled: !win.typing; onActivated: win.zoomBy(1.25) }
@@ -154,27 +157,23 @@ ApplicationWindow {
                     Layout.preferredHeight: 28
                     fillMode: Image.PreserveAspectFit
                 }
-                Label {
-                    text: backend.projectName
-                    color: Theme.text
-                    font.pixelSize: 14
-                    font.bold: true
-                    Layout.rightMargin: 12
-                }
+                Item { implicitWidth: 12 }
                 Repeater {
                     model: [
-                        { id: "select", label: "Select", key: "V", tip: "Select and move what the agent made" },
-                        { id: "hand", label: "Hand", key: "H", tip: "Drag to move the view (or hold Space)" },
-                        { id: "pin", label: "Note", key: "C", tip: "Pin a note for the agent on a layer or a region" }
+                        { id: "select", label: "Select", icon: "mouse-pointer-2", key: "V", tip: "Select and move what the agent made" },
+                        { id: "hand", label: "Hand", icon: "hand", key: "H", tip: "Drag to move the view (or hold Space)" },
+                        { id: "pin", label: "Note", icon: "map-pin", key: "C", tip: "Pin a note for the agent on a layer or a region" }
                     ]
                     delegate: Btn {
                         required property var modelData
-                        text: modelData.label
+                        iconName: modelData.icon
+                        Accessible.name: modelData.label
+                        implicitWidth: 34
+                        leftPadding: 0
+                        rightPadding: 0
                         active: win.tool === modelData.id
                         onClicked: win.tool = modelData.id
-                        ToolTip.visible: hovered
-                        ToolTip.delay: 600
-                        ToolTip.text: modelData.tip + " (" + modelData.key + ")"
+                        tip: modelData.tip + " (" + modelData.key + ")"
                     }
                 }
                 ComboBox {
@@ -215,31 +214,46 @@ ApplicationWindow {
                     ToolTip.text: win.briefFormat ? win.briefFormat.label + (win.brief.chosen_by === "user" ? " (you chose it; the agent asks before changing it)" : " (the agent chose it)") : "No size chosen: the agent picks what fits. Click to choose."
                 }
                 Item { Layout.fillWidth: true }
-                Btn { text: "Undo"; enabled: backend.canUndo; onClicked: backend.undo() }
-                Btn { text: "Redo"; enabled: backend.canRedo; onClicked: backend.redo() }
-                Rectangle { width: 1; height: 22; color: Theme.border; Layout.leftMargin: 6; Layout.rightMargin: 6 }
-                Btn { text: "−"; implicitWidth: 30; leftPadding: 0; rightPadding: 0; onClicked: win.zoomBy(0.8) }
-                Label { text: Math.round((win.canvas ? win.canvas.zoom : 1) * 100) + "%"; color: Theme.muted; Layout.preferredWidth: 44; horizontalAlignment: Text.AlignHCenter }
-                Btn { text: "+"; implicitWidth: 30; leftPadding: 0; rightPadding: 0; onClicked: win.zoomBy(1.25) }
-                Btn { text: "Fit"; onClicked: win.fitCanvas() }
-                Rectangle { width: 1; height: 22; color: Theme.border; Layout.leftMargin: 6; Layout.rightMargin: 6 }
+                Btn { iconName: "undo-2"; tip: "Undo (⌘Z)"; Accessible.name: "Undo"; implicitWidth: 34; leftPadding: 0; rightPadding: 0; enabled: backend.canUndo; onClicked: backend.undo() }
+                Btn { iconName: "redo-2"; tip: "Redo (⇧⌘Z)"; Accessible.name: "Redo"; implicitWidth: 34; leftPadding: 0; rightPadding: 0; enabled: backend.canRedo; onClicked: backend.redo() }
                 Btn {
-                    text: "Layout"
-                    onClicked: layoutMenu.popup(parent, 0, parent.height)
-                    ToolTip.visible: hovered
-                    ToolTip.delay: 600
-                    ToolTip.text: "Show or hide panels, reset the arrangement. Drag a tab to move a panel; right-click a tab for more."
+                    id: overlayToggle
+                    iconName: "scan-eye"
+                    implicitWidth: 34
+                    leftPadding: 0
+                    rightPadding: 0
+                    active: win.overlaysHidden
+                    Accessible.name: "Hide editor overlays"
+                    Accessible.checkable: true
+                    Accessible.checked: win.overlaysHidden
+                    tip: win.overlaysHidden ? "Overlays are hidden: showing the clean design. Click to show selection, agent outlines and pins (⇧H)"
+                                            : "Hide selection, agent outlines, pins and markers to see the clean design (⇧H)"
+                    onClicked: win.overlaysHidden = !win.overlaysHidden
                 }
-                Btn { text: "Export…"; primary: true; onClicked: exportDialog.openDialog() }
+                Rectangle { width: 1; height: 22; color: Theme.border; Layout.leftMargin: 6; Layout.rightMargin: 6 }
+                Btn { iconName: "minus"; tip: "Zoom out (⌘−)"; Accessible.name: "Zoom out"; implicitWidth: 30; leftPadding: 0; rightPadding: 0; onClicked: win.zoomBy(0.8) }
+                Label { text: Math.round((win.canvas ? win.canvas.zoom : 1) * 100) + "%"; color: Theme.muted; Layout.preferredWidth: 44; horizontalAlignment: Text.AlignHCenter }
+                Btn { iconName: "plus"; tip: "Zoom in (⌘+)"; Accessible.name: "Zoom in"; implicitWidth: 30; leftPadding: 0; rightPadding: 0; onClicked: win.zoomBy(1.25) }
+                Btn { iconName: "maximize"; tip: "Fit the frame (⇧1)"; Accessible.name: "Fit"; implicitWidth: 34; leftPadding: 0; rightPadding: 0; onClicked: win.fitCanvas() }
+                Rectangle { width: 1; height: 22; color: Theme.border; Layout.leftMargin: 6; Layout.rightMargin: 6 }
                 Btn {
-                    text: "⋯"
+                    iconName: "layout-panel-left"
+                    Accessible.name: "Layout"
+                    implicitWidth: 34
+                    leftPadding: 0
+                    rightPadding: 0
+                    onClicked: layoutMenu.popup(parent, 0, parent.height)
+                    tip: "Layout: show or hide panels, reset the arrangement. Drag a tab to move a panel; right-click a tab for more."
+                }
+                Btn { text: "Export…"; iconName: "download"; primary: true; onClicked: exportDialog.openDialog() }
+                Btn {
+                    iconName: "ellipsis"
+                    Accessible.name: "More"
                     implicitWidth: 34
                     leftPadding: 0
                     rightPadding: 0
                     onClicked: moreMenu.open()
-                    ToolTip.visible: hovered
-                    ToolTip.delay: 600
-                    ToolTip.text: "Project: colors, languages, open another project, shortcuts"
+                    tip: "Project: colors, languages, open another project, shortcuts"
                     Menu {
                         id: moreMenu
                         y: parent.height
@@ -299,7 +313,15 @@ ApplicationWindow {
 
     // ---------- panels and windows ----------
     // What each panel is and what it is wired to. The dock decides where each one is shown.
-    Component { id: layersPanel; LayersPanel { editor: backend } }
+    Component {
+        id: layersPanel
+        LayersPanel {
+            id: layersView
+            editor: backend
+            Component.onCompleted: win.panels.layers = layersView
+            Component.onDestruction: if (win.panels.layers === layersView) win.panels.layers = null
+        }
+    }
     Component {
         id: canvasPanel
         ColumnLayout {
@@ -332,6 +354,7 @@ ApplicationWindow {
                 id: canvasView
                 editor: backend
                 tool: win.tool
+                overlays: !win.overlaysHidden
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 onToolFinished: win.tool = "select"
@@ -849,6 +872,7 @@ ApplicationWindow {
                 ["Pin a note for the agent", "C   (click a layer, or drag a region)"],
                 ["Next / previous layer", "Tab   /   ⇧Tab"],
                 ["Edit the selected text", "Return"],
+                ["Hide / show the overlays (selection, agent outlines, pins)", "⇧H"],
                 ["Deselect", "Esc"]] },
             { name: "Edit", rows: [
                 ["Undo / redo", "⌘Z   /   ⇧⌘Z"],
@@ -964,5 +988,5 @@ ApplicationWindow {
         offer.open()
     }
 
-    SelfTest { id: selfTest; editor: backend; canvas: win.canvas; dock: dock; grabTarget: shell }
+    SelfTest { id: selfTest; editor: backend; window: win; canvas: win.canvas; dock: dock; grabTarget: shell }
 }

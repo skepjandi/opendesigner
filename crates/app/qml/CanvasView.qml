@@ -9,6 +9,8 @@ Item {
     id: root
     required property var editor
     property string tool: "select"
+    // false shows the clean design: no selection, agent outlines, pins or markers over it
+    property bool overlays: true
     property real zoom: 0.25
     property real panX: 40
     property real panY: 40
@@ -177,6 +179,7 @@ Item {
         model: unrenderedModel
         delegate: Item {
             id: ph
+            visible: root.overlays
             required property string json
             readonly property var modelData: JSON.parse(json)
             x: root.panX + modelData.x * root.zoom
@@ -206,6 +209,7 @@ Item {
         model: overflowsModel
         delegate: Item {
             id: ov
+            visible: root.overlays
             required property string json
             readonly property var modelData: JSON.parse(json)
             x: root.panX + modelData.x * root.zoom
@@ -235,6 +239,7 @@ Item {
         delegate: Item {
             required property string json
             readonly property var modelData: JSON.parse(json)
+            visible: root.overlays
             x: root.panX + modelData.x * root.zoom
             y: root.panY + modelData.y * root.zoom
             width: modelData.width * root.zoom
@@ -256,6 +261,7 @@ Item {
         model: notesModel
         delegate: Item {
             id: pin
+            visible: root.overlays
             required property string json
             readonly property var modelData: JSON.parse(json)
             x: root.panX + modelData.bounds.x * root.zoom
@@ -282,7 +288,7 @@ Item {
     Item {
         id: selection
         readonly property var r: root.live ? root.live : root.selBounds
-        visible: !!r && root.tool === "select"
+        visible: root.overlays && !!r && root.tool === "select"
         x: r ? root.panX + r.x * root.zoom : 0
         y: r ? root.panY + r.y * root.zoom : 0
         width: r ? r.width * root.zoom : 0

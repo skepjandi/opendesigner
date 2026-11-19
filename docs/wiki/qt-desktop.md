@@ -107,7 +107,7 @@ there.
 
 ## Agent-first interface and shortcuts
 
-> **Status: Implemented (macOS).** The app is for pointing and correcting, not for drawing: an agent creates the frames, shapes, text and videos and decides their names and sizes. The toolbar therefore has **Select**, **Hand** and **Note** (pin) plus undo/redo, zoom, language, **Export** and a "⋯" menu (colors, languages, open another project, save, shortcuts). There are no rectangle, ellipse, text, frame, image or device tools, and the window shows no size or name prompts. What a user can still do by hand: select, move and resize (drag or arrow keys), edit any property in the inspector, delete, pin notes, undo, change colors (tokens) and languages, and drop files in the window, which go to the agent's memory (the project's `media/` folder) and are never placed on the design.
+> **Status: Implemented (macOS).** The app is for pointing and correcting, not for drawing: an agent creates the frames, shapes, text and videos and decides their names and sizes. The toolbar therefore has **Select**, **Hand** and **Note** (pin) plus undo/redo, the overlay toggle, zoom, language, **Export** and a "more" menu (colors, languages, open another project, save, shortcuts). There are no rectangle, ellipse, text, frame, image or device tools, and the window shows no size or name prompts. What a user can still do by hand: select, move and resize (drag or arrow keys), edit any property in the inspector, delete, pin notes, undo, change colors (tokens) and languages, and drop files in the window, which go to the agent's memory (the project's `media/` folder) and are never placed on the design.
 
 Keys follow what Figma and Penpot agree on, read on 2026-11-19 from Penpot's shortcut tables (`penpot-docs` `user-guide/introduction/shortcuts.njk`) and Figma's help and community lists. macOS only; Qt writes Command as `Ctrl` in key sequences.
 
@@ -122,6 +122,7 @@ Keys follow what Figma and Penpot agree on, read on 2026-11-19 from Penpot's sho
 | Move the selection | arrows 1 px, `⇧` arrows 10 px | Figma, Penpot |
 | Bring forward / back, front / back | `⌘]` `⌘[`, `⌥⌘]` `⌥⌘[` | Figma (Penpot uses `⌘↑` `⌘↓`) |
 | Edit the selected text | `Return` | Penpot (start editing) |
+| Hide / show the editor overlays | `⇧H` | ours |
 | Deselect | `Esc` | both |
 | Undo / redo | `⌘Z` / `⇧⌘Z` | both |
 | Delete | `⌫` | both |
@@ -147,6 +148,16 @@ Banned: Qt Canvas Painter (GPL-only). If A and B disagree with export, `render` 
 ## Text
 
 Design-grade text (kerning, OpenType features, variable fonts, per-run styles) must shape identically on canvas and in export. Whether Qt's text stack or a Rust shaper in `render` (`rustybuzz`/`cosmic-text`) is the single source is a Phase 0 spike; the answer must be one engine for both.
+
+## Icons
+
+UI icons are [Lucide](https://lucide.dev) SVGs (ISC; Feather parts MIT), vendored unchanged in `crates/app/qml/icons/` with `LICENSE`, and listed into the QML module's resources by `build.rs` (`LICENSE`) and generated into `IconSet.qml` (every `*.svg` in the folder). No emoji or Unicode symbols are used as icons (AGENTS.md). QML cannot read its own resource files, so `build.rs` writes the drawings into a generated `IconSet.qml` (git-ignored); `Icons.qml` (singleton) returns one as a `data:image/svg+xml` URL with `currentColor` replaced by the requested color; `Icon.qml` shows it (`name`, `size`, `color`) so icons follow `Theme` and the hover, active and disabled states with no extra Qt module (no Qt Quick Shapes, no effects). `Btn` takes `iconName` and `tip` (tooltip and accessible name for icon-only buttons). To add an icon, copy it from Lucide into the folder; nothing else is needed. Layers rows use `file`, `frame`, `group`, `square`, `circle`, `type`, `image` for the node kinds.
+
+## Overlays, layers folding
+
+The **overlay toggle** (toolbar eye-in-frame icon, `⇧H`, also in the shortcut list) hides everything the editor draws over the picture: the selection box, size label and handles, the blue "agent" outlines, pinned notes, and the unrendered-image and text-overflow markers. Tools still work while hidden (a click selects, keys move); the button shows as on while overlays are hidden. The state lasts for the session and is not saved in the layout file.
+
+Layers with children show a disclosure chevron; the folded layers are remembered by id for the session, the panel header has Expand all and Collapse all, and selecting a layer on the canvas unfolds the ones above it. The rows keep going through `JsonModel`, so folding changes only the rows that appear or vanish.
 
 ## Theme and brand
 

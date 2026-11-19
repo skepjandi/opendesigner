@@ -100,6 +100,7 @@ Accessibility and IME pass, crash-safe autosave and recovery, Qt deployment per 
 
 | Date | Decision | Why |
 |------|----------|-----|
+| 2026-11-20 | UI icons are vendored Lucide SVGs (ISC), tinted at load time; no emoji or Unicode symbols as icons | Popular (large community, many maintainers), actively released, permissive licence compatible with MPL-2.0; Tabler and Phosphor (MIT) were the alternatives. Tinting by replacing `currentColor` and loading a data URL needs no extra Qt module ([Qt Desktop](./qt-desktop.md#icons)) |
 | 2026-11-19 | Build a native GUI for agent-guided asset creation instead of continuing to script store art through a CLI agent | Text-only guidance is the bottleneck ([Architecture](./architecture.md#the-problem-this-solves)) |
 | 2026-11-19 | UI toolkit: **Qt 6 (C++/QML)**, over GPUI (first choice, dropped the same day) | The canvas and video preview are custom rendering under any toolkit; Qt supplies the surrounding problems (text input/IME, accessibility, native dialogs and menus, high-DPI, playback, packaging) that GPUI leaves to us, and GPUI is pre-1.0 with a young widget set. Costs: two languages, LGPL obligations, heavier distribution ([Qt Desktop](./qt-desktop.md#why-qt)) |
 | 2026-11-19 | Core crates never import Qt; the Qt app, MCP server and CLI share operations; C++/QML hold presentation only | OpenCut's principle; headless and testable; keeps the toolkit replaceable |
