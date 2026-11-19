@@ -1,10 +1,14 @@
-//! CPU rasterizer for OpenDesigner documents: frames, groups, rectangles, ellipses and text to
-//! pixels, and PNG export. Images are not drawn yet; they are reported as warnings so an export
-//! never silently drops content (`docs/wiki/roadmap.md`, Phase 2).
+//! CPU rasterizer for OpenDesigner documents: frames, groups, rectangles, ellipses, text and
+//! images to pixels, and PNG export. Anything it cannot draw (a missing or unreadable image) is
+//! reported as a warning so an export never silently drops content.
 
+mod images;
 mod text;
 
+pub use images::dimensions as image_dimensions;
+
 use std::collections::BTreeMap;
+use std::path::Path as FsPath;
 
 use od_core::{Document, Node, NodeId, NodeKind, OpError, limits};
 use thiserror::Error;
@@ -40,7 +44,17 @@ pub enum RenderError {
 /// Content the renderer could not draw.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Warning {
-    ImageNotRendered(NodeId),
+    ImageNotRendered { id: NodeId, reason: String },
+}
+
+impl std::fmt::Display for Warning {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Warning::ImageNotRendered { id, reason } => {
+                write!(f, "image {id} was not drawn: {reason}")
+            }
+        }
+    }
 }
 
 pub struct Rendered {
@@ -50,11 +64,18 @@ pub struct Rendered {
 
 struct Ctx<'a> {
     tokens: &'a BTreeMap<String, String>,
+    project_dir: Option<&'a FsPath>,
     warnings: Vec<Warning>,
 }
 
-/// Renders `frame` at `scale` (1.0 = one pixel per document unit).
-pub fn render_frame(doc: &Document, frame: &NodeId, scale: f32) -> Result<Rendered, RenderError> {
+/// Renders `frame` at `scale` (1.0 = one pixel per document unit). `project_dir` is the project
+/// folder whose `media/` holds the images; without one, image nodes are reported, not drawn.
+pub fn render_frame(
+    doc: &Document,
+    frame: &NodeId,
+    scale: f32,
+    project_dir: Option<&FsPath>,
+) -> Result<Rendered, RenderError> {
     if !(0.01..=16.0).contains(&scale) || !scale.is_finite() {
         return Err(RenderError::BadScale);
     }
@@ -79,6 +100,7 @@ pub fn render_frame(doc: &Document, frame: &NodeId, scale: f32) -> Result<Render
     let mut pixmap = Pixmap::new(w, h).ok_or(RenderError::TooLarge { width, height })?;
     let mut ctx = Ctx {
         tokens: &doc.tokens,
+        project_dir,
         warnings: Vec::new(),
     };
     let base = Transform::from_scale(scale, scale);
@@ -131,8 +153,13 @@ fn draw(
             None
         }
         NodeKind::Image => {
-            ctx.warnings
-                .push(Warning::ImageNotRendered(node.id.clone()));
+            match load_image(ctx, node) {
+                Ok(image) => images::draw_image(pixmap, mask, node, transform, opacity, &image),
+                Err(reason) => ctx.warnings.push(Warning::ImageNotRendered {
+                    id: node.id.clone(),
+                    reason,
+                }),
+            }
             None
         }
     };
@@ -171,6 +198,16 @@ fn draw(
         draw(ctx, pixmap, child, transform, opacity, child_mask, false)?;
     }
     Ok(())
+}
+
+/// The decoded image an image node refers to, or why there is none.
+fn load_image(ctx: &Ctx, node: &Node) -> Result<std::sync::Arc<Pixmap>, String> {
+    let reference = node.image.as_deref().ok_or("no image is set")?;
+    let dir = ctx
+        .project_dir
+        .ok_or("the document has no project folder to read media from")?;
+    let path = od_core::media::resolve(dir, reference).map_err(|e| e.to_string())?;
+    images::load(&path)
 }
 
 fn clip_mask(
@@ -329,7 +366,7 @@ mod tests {
     fn fills_the_frame_and_draws_children_at_their_offsets() {
         let (mut s, frame) = frame_session();
         add(&mut s, &frame, rect(10.0, 10.0, 20.0, 20.0, "#0000ff"));
-        let r = render_frame(s.document(), &frame, 1.0).unwrap();
+        let r = render_frame(s.document(), &frame, 1.0, None).unwrap();
         assert_eq!((r.pixmap.width(), r.pixmap.height()), (100, 50));
         assert_eq!(px(&r, 5, 5), [255, 0, 0, 255]);
         assert_eq!(px(&r, 20, 20), [0, 0, 255, 255]);
@@ -344,7 +381,7 @@ mod tests {
         group.opacity = Some(0.5);
         group.children.push(rect(90.0, 0.0, 50.0, 50.0, "#0000ff"));
         add(&mut s, &frame, group);
-        let r = render_frame(s.document(), &frame, 1.0).unwrap();
+        let r = render_frame(s.document(), &frame, 1.0, None).unwrap();
         let blended = px(&r, 95, 10);
         assert!(blended[0] > 100 && blended[0] < 160, "{blended:?}");
         assert!(blended[2] > 100 && blended[2] < 160, "{blended:?}");
@@ -355,7 +392,7 @@ mod tests {
     fn scale_multiplies_the_output_size_and_geometry() {
         let (mut s, frame) = frame_session();
         add(&mut s, &frame, rect(10.0, 10.0, 20.0, 20.0, "#0000ff"));
-        let r = render_frame(s.document(), &frame, 2.0).unwrap();
+        let r = render_frame(s.document(), &frame, 2.0, None).unwrap();
         assert_eq!((r.pixmap.width(), r.pixmap.height()), (200, 100));
         assert_eq!(px(&r, 40, 40), [0, 0, 255, 255]);
         assert_eq!(px(&r, 10, 10), [255, 0, 0, 255]);
@@ -371,7 +408,7 @@ mod tests {
             width: 4.0,
         });
         add(&mut s, &frame, card);
-        let r = render_frame(s.document(), &frame, 1.0).unwrap();
+        let r = render_frame(s.document(), &frame, 1.0, None).unwrap();
         assert_eq!(
             px(&r, 0, 0),
             [255, 0, 0, 255],
@@ -382,11 +419,178 @@ mod tests {
     }
 
     #[test]
-    fn images_are_reported_not_dropped_silently() {
+    fn an_image_that_cannot_be_drawn_is_reported_with_the_reason() {
         let (mut s, frame) = frame_session();
-        let i = add(&mut s, &frame, NewNode::new(NodeKind::Image));
-        let r = render_frame(s.document(), &frame, 1.0).unwrap();
-        assert_eq!(r.warnings, vec![Warning::ImageNotRendered(i)]);
+        let none = add(&mut s, &frame, NewNode::new(NodeKind::Image));
+        let mut missing = NewNode::new(NodeKind::Image);
+        missing.image = Some("media/gone.png".into());
+        let missing = add(&mut s, &frame, missing);
+        let dir = tempfile::tempdir().unwrap();
+        let r = render_frame(s.document(), &frame, 1.0, Some(dir.path())).unwrap();
+        let reasons: Vec<(NodeId, String)> = r
+            .warnings
+            .iter()
+            .map(|Warning::ImageNotRendered { id, reason }| (id.clone(), reason.clone()))
+            .collect();
+        assert_eq!(reasons.len(), 2);
+        assert_eq!(reasons[0].0, none);
+        assert!(reasons[0].1.contains("no image"), "{reasons:?}");
+        assert_eq!(reasons[1].0, missing);
+        let without_folder = render_frame(s.document(), &frame, 1.0, None).unwrap();
+        assert_eq!(without_folder.warnings.len(), 2);
+        assert!(
+            without_folder.warnings[0]
+                .to_string()
+                .contains("was not drawn")
+        );
+    }
+
+    /// Writes a PNG into `<dir>/media/<name>`: green on the left half, blue on the right.
+    fn two_tone(dir: &std::path::Path, name: &str, w: u32, h: u32) -> String {
+        let mut p = Pixmap::new(w, h).unwrap();
+        for (i, px) in p.data_mut().chunks_exact_mut(4).enumerate() {
+            let x = i as u32 % w;
+            let c = if x < w / 2 {
+                [0, 255, 0, 255]
+            } else {
+                [0, 0, 255, 255]
+            };
+            px.copy_from_slice(&c);
+        }
+        std::fs::create_dir_all(dir.join("media")).unwrap();
+        std::fs::write(dir.join("media").join(name), encode_png(&p, true).unwrap()).unwrap();
+        format!("media/{name}")
+    }
+
+    fn image_frame(
+        dir: &std::path::Path,
+        scale: f32,
+        configure: impl FnOnce(&mut NewNode),
+    ) -> Rendered {
+        let (mut s, frame) = frame_session();
+        let mut n = NewNode::new(NodeKind::Image);
+        n.image = Some(two_tone(dir, "shot.png", 20, 10));
+        configure(&mut n);
+        add(&mut s, &frame, n);
+        render_frame(s.document(), &frame, scale, Some(dir)).unwrap()
+    }
+
+    #[test]
+    fn images_fill_cover_or_contain_their_box() {
+        let dir = tempfile::tempdir().unwrap();
+        let at = |n: &mut NewNode, x, y, w, h, fit| {
+            n.x = x;
+            n.y = y;
+            n.width = w;
+            n.height = h;
+            n.image_fit = fit;
+        };
+        let stretched = image_frame(dir.path(), 1.0, |n| {
+            at(n, 0.0, 0.0, 100.0, 50.0, Some(od_core::ImageFit::Fill));
+        });
+        assert_eq!(px(&stretched, 20, 25), [0, 255, 0, 255]);
+        assert_eq!(px(&stretched, 80, 25), [0, 0, 255, 255]);
+        assert!(stretched.warnings.is_empty());
+
+        // a 2:1 picture covering a square keeps its middle: half green, half blue
+        let covered = image_frame(dir.path(), 1.0, |n| at(n, 10.0, 5.0, 40.0, 40.0, None));
+        assert_eq!(px(&covered, 15, 25), [0, 255, 0, 255]);
+        assert_eq!(px(&covered, 45, 25), [0, 0, 255, 255]);
+        assert_eq!(
+            px(&covered, 15, 6),
+            [0, 255, 0, 255],
+            "the whole box is covered"
+        );
+
+        // contained, it is 40x20 centered vertically: the bands above and below stay red
+        let contained = image_frame(dir.path(), 1.0, |n| {
+            at(n, 10.0, 5.0, 40.0, 40.0, Some(od_core::ImageFit::Contain));
+        });
+        assert_eq!(px(&contained, 15, 25), [0, 255, 0, 255]);
+        assert_eq!(px(&contained, 15, 8), [255, 0, 0, 255]);
+        assert_eq!(px(&contained, 15, 42), [255, 0, 0, 255]);
+    }
+
+    #[test]
+    fn images_follow_scale_corner_radius_and_opacity() {
+        let dir = tempfile::tempdir().unwrap();
+        let doubled = image_frame(dir.path(), 2.0, |n| {
+            n.width = 100.0;
+            n.height = 50.0;
+        });
+        assert_eq!(px(&doubled, 40, 50), [0, 255, 0, 255]);
+        assert_eq!(px(&doubled, 160, 50), [0, 0, 255, 255]);
+
+        let rounded = image_frame(dir.path(), 1.0, |n| {
+            n.width = 100.0;
+            n.height = 50.0;
+            n.corner_radius = Some(25.0);
+        });
+        assert_eq!(
+            px(&rounded, 0, 0),
+            [255, 0, 0, 255],
+            "the corner is cut away"
+        );
+        assert_eq!(px(&rounded, 80, 25), [0, 0, 255, 255]);
+
+        let faint = image_frame(dir.path(), 1.0, |n| {
+            n.width = 100.0;
+            n.height = 50.0;
+            n.opacity = Some(0.5);
+        });
+        let mixed = px(&faint, 10, 25);
+        assert!(
+            mixed[0] > 100 && mixed[1] > 100,
+            "red shows through: {mixed:?}"
+        );
+    }
+
+    #[test]
+    fn a_large_image_drawn_small_is_averaged_not_aliased() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut checker = Pixmap::new(64, 64).unwrap();
+        for (i, px) in checker.data_mut().chunks_exact_mut(4).enumerate() {
+            let (x, y) = (i % 64, i / 64);
+            let v = if (x + y) % 2 == 0 { 255 } else { 0 };
+            px.copy_from_slice(&[v, v, v, 255]);
+        }
+        std::fs::create_dir_all(dir.path().join("media")).unwrap();
+        std::fs::write(
+            dir.path().join("media/checker.png"),
+            encode_png(&checker, true).unwrap(),
+        )
+        .unwrap();
+        let r = image_frame(dir.path(), 1.0, |n| {
+            n.image = Some("media/checker.png".into());
+            n.width = 8.0;
+            n.height = 8.0;
+        });
+        let v = px(&r, 4, 4)[0];
+        assert!(
+            (90..=165).contains(&v),
+            "a 1px checker shrunk 8x is mid gray, got {v}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_media_symlink_pointing_outside_the_project_is_not_followed() {
+        let project = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let real = two_tone(outside.path(), "secret.png", 20, 10);
+        std::fs::create_dir_all(project.path().join("media")).unwrap();
+        std::os::unix::fs::symlink(
+            outside.path().join(real),
+            project.path().join("media/link.png"),
+        )
+        .unwrap();
+        let r = image_frame(project.path(), 1.0, |n| {
+            n.image = Some("media/link.png".into());
+            n.width = 100.0;
+            n.height = 50.0;
+        });
+        assert_eq!(r.warnings.len(), 1);
+        assert_eq!(px(&r, 10, 10), [255, 0, 0, 255]);
     }
 
     /// A white 400x200 frame with one black text node at (20, 20).
@@ -415,7 +619,7 @@ mod tests {
         t.font_size = Some(40.0);
         configure(&mut t);
         add(&mut s, &frame, t);
-        render_frame(s.document(), &frame, 1.0).unwrap()
+        render_frame(s.document(), &frame, 1.0, None).unwrap()
     }
 
     /// Count of non-white pixels and their bounding box (x0, y0, x1, y1).
@@ -556,19 +760,19 @@ mod tests {
         let (mut s, frame) = frame_session();
         let rect_id = add(&mut s, &frame, rect(0.0, 0.0, 1.0, 1.0, "#000000"));
         assert!(matches!(
-            render_frame(s.document(), &rect_id, 1.0),
+            render_frame(s.document(), &rect_id, 1.0, None),
             Err(RenderError::NotAFrame { .. })
         ));
         assert!(matches!(
-            render_frame(s.document(), &NodeId::parse("n_999").unwrap(), 1.0),
+            render_frame(s.document(), &NodeId::parse("n_999").unwrap(), 1.0, None),
             Err(RenderError::NoSuchNode(_))
         ));
         assert!(matches!(
-            render_frame(s.document(), &frame, 0.0),
+            render_frame(s.document(), &frame, 0.0, None),
             Err(RenderError::BadScale)
         ));
         assert!(matches!(
-            render_frame(s.document(), &frame, f32::NAN),
+            render_frame(s.document(), &frame, f32::NAN, None),
             Err(RenderError::BadScale)
         ));
         s.apply(
@@ -587,7 +791,7 @@ mod tests {
         )
         .unwrap();
         assert!(matches!(
-            render_frame(s.document(), &frame, 1.0),
+            render_frame(s.document(), &frame, 1.0, None),
             Err(RenderError::TooLarge { .. })
         ));
     }

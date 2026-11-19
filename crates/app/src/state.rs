@@ -329,6 +329,54 @@ impl EditorState {
         Ok(id.to_string())
     }
 
+    /// Copies the image into the project's `media/`, adds an image node for it in the active
+    /// frame (at most 80% of the frame, centered on `center` or on the frame) and selects it.
+    pub fn import_image(
+        &mut self,
+        src: &std::path::Path,
+        center: Option<(f64, f64)>,
+    ) -> Res<String> {
+        let frame = self
+            .active_frame
+            .clone()
+            .ok_or("open or create a frame first")?;
+        let (reference, (iw, ih), (fw, fh)) = self.with_ws(|ws| {
+            let reference = ws.import_media(src).map_err(|e| e.to_string())?;
+            let path = ws.media_path(&reference).map_err(|e| e.to_string())?;
+            let size = od_render::image_dimensions(&path).inspect_err(|_| {
+                let _ = std::fs::remove_file(&path);
+            })?;
+            let node = ws
+                .session
+                .document()
+                .node(&frame)
+                .ok_or("the frame no longer exists")?;
+            Ok((reference, size, (node.width, node.height)))
+        })?;
+        let (iw, ih) = (f64::from(iw), f64::from(ih));
+        let fit = (fw * 0.8 / iw).min(fh * 0.8 / ih).min(1.0);
+        let (w, h) = ((iw * fit).round().max(1.0), (ih * fit).round().max(1.0));
+        let (cx, cy) = center.unwrap_or((fw / 2.0, fh / 2.0));
+        let mut node = NewNode::new(NodeKind::Image);
+        node.name = src
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .map(|s| s.chars().take(60).collect());
+        node.image = Some(reference);
+        node.x = (cx - w / 2.0).round();
+        node.y = (cy - h / 2.0).round();
+        node.width = w;
+        node.height = h;
+        let created = self.apply_user(&[Operation::Create {
+            parent: frame,
+            index: None,
+            node,
+        }])?;
+        let id = created.first().ok_or("nothing was created")?.clone();
+        self.select(Some(id.as_str()))?;
+        Ok(id.to_string())
+    }
+
     pub fn delete_selected(&mut self) -> Res<()> {
         let Some(id) = self.selected() else {
             return Ok(());
@@ -498,8 +546,8 @@ impl EditorState {
             let node = doc.node(frame).ok_or("the frame no longer exists")?;
             let longest = node.width.max(node.height).max(1.0);
             let scale = scale.clamp(0.01, MAX_CANVAS_SIDE / longest).min(16.0);
-            let rendered =
-                od_render::render_frame(doc, frame, scale as f32).map_err(|e| e.to_string())?;
+            let rendered = od_render::render_frame(doc, frame, scale as f32, ws.dir())
+                .map_err(|e| e.to_string())?;
             let png = od_render::encode_png(&rendered.pixmap, false).map_err(|e| e.to_string())?;
             Ok(format!("data:image/png;base64,{}", STANDARD.encode(png)))
         })
@@ -693,7 +741,7 @@ impl EditorState {
             changed: to_string(&changed),
             unrendered: to_string(
                 &frame
-                    .map(|f| collect_unrendered(doc, f))
+                    .map(|f| collect_unrendered(doc, f, ws.dir()))
                     .unwrap_or_default(),
             ),
             can_undo: ws.session.can_undo(),
@@ -708,28 +756,52 @@ impl EditorState {
     }
 }
 
-/// Image nodes in a frame: the renderer does not draw them yet, so the canvas marks where they are
-/// (and exports report them).
-fn collect_unrendered(doc: &od_core::Document, frame: &NodeId) -> Vec<Value> {
-    fn walk(doc: &od_core::Document, frame: &NodeId, n: &Node, out: &mut Vec<Value>) {
+/// Why an image node cannot be drawn, or `None` when its file is readable.
+fn image_problem(n: &Node, dir: Option<&std::path::Path>) -> Option<String> {
+    let check = || -> Result<(), String> {
+        let reference = n.image.as_deref().ok_or("no image is set")?;
+        let dir = dir.ok_or("the project has no folder")?;
+        let path = od_core::media::resolve(dir, reference).map_err(|e| e.to_string())?;
+        od_render::image_dimensions(&path).map(|_| ())
+    };
+    check().err()
+}
+
+/// Image nodes in a frame that the renderer cannot draw (no file, unreadable file): the canvas
+/// marks where they are and says why.
+fn collect_unrendered(
+    doc: &od_core::Document,
+    frame: &NodeId,
+    dir: Option<&std::path::Path>,
+) -> Vec<Value> {
+    fn walk(
+        doc: &od_core::Document,
+        frame: &NodeId,
+        dir: Option<&std::path::Path>,
+        n: &Node,
+        out: &mut Vec<Value>,
+    ) {
         if !n.visible {
             return;
         }
         if n.kind == NodeKind::Image {
-            if let Some(b) = geometry::bounds_in_frame(doc, frame, &n.id) {
+            if let (Some(reason), Some(b)) = (
+                image_problem(n, dir),
+                geometry::bounds_in_frame(doc, frame, &n.id),
+            ) {
                 out.push(json!({
-                    "id": n.id, "kind": "image", "x": b.x, "y": b.y,
-                    "width": b.width, "height": b.height,
+                    "id": n.id, "kind": "image", "reason": reason,
+                    "x": b.x, "y": b.y, "width": b.width, "height": b.height,
                 }));
             }
         }
         for c in &n.children {
-            walk(doc, frame, c, out);
+            walk(doc, frame, dir, c, out);
         }
     }
     let mut out = Vec::new();
     if let Some(root) = doc.node(frame) {
-        walk(doc, frame, root, &mut out);
+        walk(doc, frame, dir, root, &mut out);
     }
     out
 }
@@ -1078,6 +1150,68 @@ mod tests {
         s.stop_mcp();
         assert!(!s.snapshot().mcp_running);
         assert_eq!(s.connect_command(), "");
+    }
+
+    fn write_png(path: &std::path::Path, w: u32, h: u32) {
+        let mut bytes = Vec::new();
+        let mut enc = png::Encoder::new(&mut bytes, w, h);
+        enc.set_color(png::ColorType::Rgb);
+        enc.set_depth(png::BitDepth::Eight);
+        let mut writer = enc.write_header().unwrap();
+        writer
+            .write_image_data(&[10, 20, 30].repeat((w * h) as usize))
+            .unwrap();
+        drop(writer);
+        std::fs::write(path, bytes).unwrap();
+    }
+
+    #[test]
+    fn importing_an_image_copies_it_adds_a_fitted_node_and_refuses_non_images() {
+        let (mut s, t) = state();
+        let small = t.path().join("small.png");
+        let large = t.path().join("large.png");
+        write_png(&small, 100, 50);
+        write_png(&large, 1600, 800);
+
+        let id = s.import_image(&small, None).unwrap();
+        let node = insp(&s);
+        assert_eq!(node["id"], id);
+        assert_eq!(node["image"], "media/small.png");
+        assert_eq!(
+            (node["width"].as_f64(), node["height"].as_f64()),
+            (Some(100.0), Some(50.0))
+        );
+        assert_eq!(
+            (node["x"].as_f64(), node["y"].as_f64()),
+            (Some(150.0), Some(125.0)),
+            "centered in the 400x300 frame"
+        );
+
+        s.import_image(&large, Some((100.0, 100.0))).unwrap();
+        let node = insp(&s);
+        assert_eq!(
+            node["width"].as_f64(),
+            Some(320.0),
+            "no wider than 80% of the frame"
+        );
+        assert_eq!(node["height"].as_f64(), Some(160.0));
+        assert_eq!(
+            node["x"].as_f64(),
+            Some(-60.0),
+            "centered on the drop point"
+        );
+        assert!(s.snapshot().unrendered == "[]", "both files are readable");
+
+        let text = t.path().join("notes.png");
+        std::fs::write(&text, b"not an image").unwrap();
+        let before = s.snapshot().layers;
+        assert!(s.import_image(&text, None).is_err());
+        assert_eq!(s.snapshot().layers, before, "a refused file adds nothing");
+        assert!(!t.path().join("p.od/media/notes.png").exists());
+
+        s.undo().unwrap();
+        s.undo().unwrap();
+        assert!(s.selected().is_none() || insp(&s)["kind"] != "image");
     }
 
     #[test]

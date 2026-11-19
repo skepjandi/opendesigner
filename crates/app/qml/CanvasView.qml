@@ -97,7 +97,7 @@ Item {
         visible: root.fw > 0
     }
 
-    // images the renderer cannot draw yet are marked here (and reported on export)
+    // images the renderer cannot draw (no file, unreadable file) are marked here with the reason
     Repeater {
         model: root.unrendered
         delegate: Item {
@@ -114,10 +114,13 @@ Item {
                 border.color: Qt.rgba(1, 1, 1, 0.25)
             }
             Text {
-                anchors.centerIn: parent
-                text: "image"
+                anchors.fill: parent
+                anchors.margins: 4
+                text: "image: " + ph.modelData.reason
                 color: Theme.muted
                 font.pixelSize: 11
+                wrapMode: Text.WordWrap
+                elide: Text.ElideRight
             }
         }
     }
@@ -362,6 +365,14 @@ Item {
             if (!active) return
             root.zoomAt(scale / lastScale, centroid.position.x, centroid.position.y)
             lastScale = scale
+        }
+    }
+    // dropping image files adds them to the frame where they land
+    DropArea {
+        anchors.fill: parent
+        onDropped: drop => {
+            const p = root.toFrame(drop.x, drop.y)
+            for (const url of drop.urls) root.editor.importImageAt(url.toString(), p.x, p.y)
         }
     }
 }

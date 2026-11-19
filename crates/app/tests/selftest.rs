@@ -18,6 +18,17 @@ fn the_editor_window_runs_a_scripted_session() {
     let work = tmp.path().join("work");
     std::fs::create_dir_all(&work).unwrap();
 
+    // a magenta 64x32 picture for the session to import
+    let mut fixture = Vec::new();
+    {
+        let mut enc = png::Encoder::new(&mut fixture, 64, 32);
+        enc.set_color(png::ColorType::Rgb);
+        enc.set_depth(png::BitDepth::Eight);
+        let mut w = enc.write_header().unwrap();
+        w.write_image_data(&[255, 0, 255].repeat(64 * 32)).unwrap();
+    }
+    std::fs::write(work.join("fixture.png"), &fixture).unwrap();
+
     let mut child = Command::new(env!("CARGO_BIN_EXE_opendesigner-app"))
         .arg(format!("--selftest={}", work.display()))
         .env("QT_QPA_PLATFORM", "offscreen")
@@ -70,6 +81,28 @@ fn the_editor_window_runs_a_scripted_session() {
     let notes = std::fs::read_to_string(project.join("annotations.json")).unwrap();
     assert!(notes.contains("make this bigger"));
     assert!(project.join("exports/shot.png").exists());
+    assert_eq!(
+        std::fs::read(project.join("media/fixture.png")).unwrap(),
+        fixture,
+        "the imported image is copied into the project"
+    );
+    assert!(page.contains("media/fixture.png"));
+    // the exported frame contains the imported picture, centered
+    let shot = png::Decoder::new(std::io::Cursor::new(
+        std::fs::read(project.join("exports/shot.png")).unwrap(),
+    ));
+    let mut shot = shot.read_info().unwrap();
+    let mut pixels = vec![0; shot.output_buffer_size().unwrap()];
+    let info = shot.next_frame(&mut pixels).unwrap();
+    let at = |x: usize, y: usize| {
+        let i = (y * info.width as usize + x) * info.color_type.samples();
+        [pixels[i], pixels[i + 1], pixels[i + 2]]
+    };
+    assert_eq!(
+        at(660, 1434),
+        [255, 0, 255],
+        "the image is drawn into the export"
+    );
     assert!(
         !project.join("exports/bad.png").exists(),
         "a failed export writes nothing"

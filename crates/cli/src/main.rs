@@ -425,9 +425,9 @@ fn export(
     let target = preset_id.map(preset).transpose()?;
     let session: Session = project::load(dir)?;
     let frame_id = NodeId::parse(frame)?;
-    let rendered = od_render::render_frame(session.document(), &frame_id, scale)?;
+    let rendered = od_render::render_frame(session.document(), &frame_id, scale, Some(dir))?;
     for warning in &rendered.warnings {
-        eprintln!("warning: {warning:?} was not drawn");
+        eprintln!("warning: {warning}");
     }
     let keep_alpha = alpha && target.is_none_or(|p| p.allow_alpha);
     let bytes = od_render::encode_png(&rendered.pixmap, keep_alpha)?;

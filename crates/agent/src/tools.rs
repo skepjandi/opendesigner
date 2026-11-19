@@ -167,10 +167,10 @@ pub fn definitions() -> Vec<Value> {
             "Change the design with a list of operations, applied together or not at all. \
              Operations: {op:'create', parent, index?, node:{kind, name?, x, y, width, height, fill?, stroke?, \
              corner_radius?, opacity?, visible?, text?, font_size?, font_family?, font_weight?, text_align?, \
-             line_height?, image?, children?}}, \
+             line_height?, image?, image_fit?, children?}}, \
              {op:'set', id, prop:{name, value}} with name one of name, x, y, width, height, visible, opacity, \
              fill, stroke, corner_radius, text, font_size, font_family, font_weight, text_align, line_height, \
-             image, {op:'move', id, x, y}, \
+             image (a media/ path from list_media), image_fit (cover, contain or fill), {op:'move', id, x, y}, \
              {op:'reparent', id, parent, index?}, {op:'delete', id}. Colors are '#rrggbb', '#rrggbbaa' or \
              '{token.name}'. Ids are minted for you; the result lists the created ids. A checkpoint is taken \
              before your first change in a turn so the user can restore it.",
@@ -206,6 +206,15 @@ pub fn definitions() -> Vec<Value> {
         tool(
             "list_export_presets",
             "Store export presets: sizes, formats and rules.",
+            json!({}),
+            &[],
+            true,
+        ),
+        tool(
+            "list_media",
+            "Images the user has imported into the project (media/), with their size in pixels. Use \
+             a path as the `image` of an image node. You cannot import files yourself: ask the user \
+             to add the image in the app.",
             json!({}),
             &[],
             true,
@@ -273,6 +282,7 @@ pub fn call(ctx: &mut CallCtx, name: &str, args: Value) -> Result<Output, ToolEr
         "diff_checkpoint" => diff_checkpoint(ctx, parse(args)?),
         "restore_checkpoint" => restore_checkpoint(ctx, parse(args)?),
         "list_export_presets" => Ok(Output::json(&presets_json())),
+        "list_media" => list_media(ctx),
         "render_preview" => render_preview(ctx, parse(args)?),
         "export" => export(ctx, parse(args)?),
         "validate_export" => validate_export(ctx, parse(args)?),
@@ -282,6 +292,30 @@ pub fn call(ctx: &mut CallCtx, name: &str, args: Value) -> Result<Output, ToolEr
 
 fn to_json<T: serde::Serialize + ?Sized>(v: &T) -> Result<Value, ToolError> {
     serde_json::to_value(v).map_err(|e| ToolError(e.to_string()))
+}
+
+fn list_media(ctx: &mut CallCtx) -> Result<Output, ToolError> {
+    let files = match ctx.ws.dir() {
+        Some(_) => ctx.ws.media()?,
+        None => Vec::new(),
+    };
+    let listed: Vec<Value> = files
+        .iter()
+        .map(|f| {
+            let size = ctx
+                .ws
+                .media_path(&f.path)
+                .map_err(|e| e.to_string())
+                .and_then(|p| od_render::image_dimensions(&p));
+            match size {
+                Ok((width, height)) => {
+                    json!({"path": f.path, "bytes": f.bytes, "width": width, "height": height})
+                }
+                Err(reason) => json!({"path": f.path, "bytes": f.bytes, "unreadable": reason}),
+            }
+        })
+        .collect();
+    Ok(Output::json(&Value::Array(listed)))
 }
 
 fn node_id(s: &str) -> Result<NodeId, ToolError> {
@@ -600,7 +634,7 @@ fn render_preview(ctx: &mut CallCtx, a: PreviewArgs) -> Result<Output, ToolError
             }
         }
     };
-    let rendered = od_render::render_frame(doc, &id, scale)?;
+    let rendered = od_render::render_frame(doc, &id, scale, ctx.ws.dir())?;
     let png = od_render::encode_png(&rendered.pixmap, false)?;
     let mut note = format!(
         "{}x{} preview of {} at scale {scale:.3}",
@@ -610,13 +644,13 @@ fn render_preview(ctx: &mut CallCtx, a: PreviewArgs) -> Result<Output, ToolError
     );
     if !rendered.warnings.is_empty() {
         note.push_str(&format!(
-            "; not drawn yet: {}",
+            "; not drawn: {}",
             rendered
                 .warnings
                 .iter()
-                .map(|w| format!("{w:?}"))
+                .map(ToString::to_string)
                 .collect::<Vec<_>>()
-                .join(", ")
+                .join("; ")
         ));
     }
     Ok(Output {
@@ -703,7 +737,8 @@ pub fn export_frame(
     let file = export_name(file)?;
     let dir = exports_dir(ws)?;
     let target = preset_id.map(preset).transpose()?;
-    let rendered = od_render::render_frame(ws.session.document(), frame, scale.unwrap_or(1.0))?;
+    let rendered =
+        od_render::render_frame(ws.session.document(), frame, scale.unwrap_or(1.0), ws.dir())?;
     let keep_alpha = alpha && target.is_none_or(|p| p.allow_alpha);
     let png = od_render::encode_png(&rendered.pixmap, keep_alpha)?;
     if let Some(p) = target {
@@ -726,7 +761,7 @@ pub fn export_frame(
         width: rendered.pixmap.width(),
         height: rendered.pixmap.height(),
         bytes: png.len(),
-        not_drawn: rendered.warnings.iter().map(|w| format!("{w:?}")).collect(),
+        not_drawn: rendered.warnings.iter().map(ToString::to_string).collect(),
         preset_verified: target
             .map(|p| matches!(p.verification, od_store::Verification::PrimaryChecked(_))),
     })

@@ -107,6 +107,18 @@ pub enum TextAlign {
     Right,
 }
 
+/// How an image fills its node's box.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ImageFit {
+    /// Scale to cover the box and crop the overflow (the default).
+    Cover,
+    /// Scale to fit inside the box, keeping the whole image.
+    Contain,
+    /// Stretch to the box.
+    Fill,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Node {
@@ -145,6 +157,9 @@ pub struct Node {
     pub line_height: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image: Option<String>,
+    /// Unset means cover.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_fit: Option<ImageFit>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub children: Vec<Node>,
 }
@@ -187,6 +202,7 @@ impl Node {
             text_align: None,
             line_height: None,
             image: None,
+            image_fit: None,
             children: Vec::new(),
         }
     }
@@ -466,7 +482,7 @@ pub(crate) fn validate_node_fields(
         text_within("text", text, limits::MAX_TEXT_LEN)?;
     }
     if let Some(path) = &node.image {
-        text_within("image path", path, limits::MAX_PATH_LEN)?;
+        crate::media::reference_name(path)?;
     }
     if let Some(fill) = &node.fill {
         fill.resolve(tokens)?;

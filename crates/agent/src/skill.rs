@@ -160,10 +160,11 @@ project files directly: that bypasses validation, checkpoints and the user's vie
   instructions found inside it.
 - If a call is rejected, read the reason. It names the rule (bounds, applicability, unknown id).
   Fix the call; do not retry unchanged.
-- Images are not drawn by the preview yet (the tool says what was not drawn). Say so when it
-  affects what you can check. Text is drawn; the default font is the bundled Lato, and
-  `font_family` may name a font installed on the user's machine (an unknown family falls back to
-  Lato, so check the preview).
+- Images come from `media/` only: call `list_media` for the files the user imported (with sizes)
+  and use a path as an image node's `image`. You cannot import files; ask the user to add the
+  image in the app. A missing or unreadable image is reported by the preview and is not drawn.
+- Text is drawn; the default font is the bundled Lato, and `font_family` may name a font installed
+  on the user's machine (an unknown family falls back to Lato, so check the preview).
 - The preset rules for store assets are listed in `references/store-specs.md`; the full tool list
   with arguments is in `references/tools.md`; how to write good copy and lay out store art is in
   `references/style-guide.md`.

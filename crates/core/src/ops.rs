@@ -8,7 +8,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::OpError;
 use crate::limits::{self, finite_in, text_within};
-use crate::model::{Document, Node, NodeId, NodeKind, Stroke, TextAlign, validate_node_fields};
+use crate::model::{
+    Document, ImageFit, Node, NodeId, NodeKind, Stroke, TextAlign, validate_node_fields,
+};
 use crate::paint::Paint;
 
 /// One settable property with its new value. Serialized as `{"name": "x", "value": 10}`.
@@ -32,6 +34,7 @@ pub enum Property {
     TextAlign(Option<TextAlign>),
     LineHeight(Option<f64>),
     Image(Option<String>),
+    ImageFit(Option<ImageFit>),
 }
 
 impl Property {
@@ -54,6 +57,7 @@ impl Property {
             Property::TextAlign(_) => "text_align",
             Property::LineHeight(_) => "line_height",
             Property::Image(_) => "image",
+            Property::ImageFit(_) => "image_fit",
         }
     }
 
@@ -68,14 +72,14 @@ impl Property {
             Property::Width(_) | Property::Height(_) => kind != Group,
             Property::Fill(_) => matches!(kind, Frame | Rect | Ellipse | Text),
             Property::Stroke(_) => matches!(kind, Frame | Rect | Ellipse),
-            Property::CornerRadius(_) => matches!(kind, Frame | Rect),
+            Property::CornerRadius(_) => matches!(kind, Frame | Rect | Image),
             Property::Text(_)
             | Property::FontSize(_)
             | Property::FontFamily(_)
             | Property::FontWeight(_)
             | Property::TextAlign(_)
             | Property::LineHeight(_) => kind == Text,
-            Property::Image(_) => kind == Image,
+            Property::Image(_) | Property::ImageFit(_) => kind == Image,
         }
     }
 }
@@ -175,10 +179,11 @@ fn apply_property(
         }
         Property::Image(v) => {
             if let Some(p) = &v {
-                text_within("image path", p, limits::MAX_PATH_LEN)?;
+                crate::media::reference_name(p)?;
             }
             Property::Image(replace(&mut node.image, v))
         }
+        Property::ImageFit(v) => Property::ImageFit(replace(&mut node.image_fit, v)),
     })
 }
 
@@ -222,6 +227,8 @@ pub struct NewNode {
     #[serde(default)]
     pub image: Option<String>,
     #[serde(default)]
+    pub image_fit: Option<ImageFit>,
+    #[serde(default)]
     pub children: Vec<NewNode>,
 }
 
@@ -246,6 +253,7 @@ impl NewNode {
             text_align: None,
             line_height: None,
             image: None,
+            image_fit: None,
             children: Vec::new(),
         }
     }
@@ -323,6 +331,9 @@ impl NewNode {
         }
         if self.image.is_some() {
             set(Property::Image(self.image.clone()))?;
+        }
+        if self.image_fit.is_some() {
+            set(Property::ImageFit(self.image_fit))?;
         }
         for child in &self.children {
             node.children.push(child.build(next, tokens, depth + 1)?);
@@ -609,6 +620,7 @@ fn current_value(node: &Node, prop: &Property) -> Property {
         Property::TextAlign(_) => Property::TextAlign(node.text_align),
         Property::LineHeight(_) => Property::LineHeight(node.line_height),
         Property::Image(_) => Property::Image(node.image.clone()),
+        Property::ImageFit(_) => Property::ImageFit(node.image_fit),
     }
 }
 
