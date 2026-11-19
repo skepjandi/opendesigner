@@ -10,6 +10,15 @@ Item {
     required property var editor
 
     readonly property var chat: editor.chat ? JSON.parse(editor.chat) : ({ status: "off", messages: [], permission: null, plan: [] })
+    JsonModel { id: messagesModel }
+    JsonModel { id: planModel }
+    JsonModel { id: optionsModel }
+    onChatChanged: {
+        messagesModel.sync(chat.messages)
+        planModel.sync(chat.plan || [])
+        optionsModel.sync(chat.permission ? chat.permission.options : [])
+        Qt.callLater(() => list.positionViewAtEnd())
+    }
     readonly property bool connected: chat.status === "ready" || chat.status === "busy"
     readonly property var presets: JSON.parse(editor.chatPresets())
 
@@ -22,7 +31,6 @@ Item {
         if (last === "") commandField.text = presets[firstFound].command
     }
 
-    onChatChanged: Qt.callLater(() => list.positionViewAtEnd())
 
     ColumnLayout {
         anchors.fill: parent
@@ -92,9 +100,10 @@ Item {
                 spacing: 2
                 Label { text: "Plan"; color: Theme.text; font.pixelSize: 11; font.bold: true }
                 Repeater {
-                    model: root.chat.plan || []
+                    model: planModel
                     delegate: Label {
-                        required property var modelData
+                        required property string json
+                        readonly property var modelData: JSON.parse(json)
                         Layout.fillWidth: true
                         wrapMode: Text.Wrap
                         textFormat: Text.PlainText
@@ -113,10 +122,11 @@ Item {
             Layout.fillHeight: true
             clip: true
             spacing: 6
-            model: root.chat.messages
+            model: messagesModel
             delegate: Rectangle {
                 id: bubble
-                required property var modelData
+                required property string json
+                readonly property var modelData: JSON.parse(json)
                 width: ListView.view.width
                 implicitHeight: body.implicitHeight + 12
                 radius: Theme.radius
@@ -167,9 +177,10 @@ Item {
                     Layout.fillWidth: true
                     spacing: 6
                     Repeater {
-                        model: root.chat.permission ? root.chat.permission.options : []
+                        model: optionsModel
                         delegate: Btn {
-                            required property var modelData
+                            required property string json
+                            readonly property var modelData: JSON.parse(json)
                             text: modelData.name
                             primary: modelData.kind === "allow_once"
                             onClicked: root.editor.chatAnswer(root.chat.permission.request, modelData.id)

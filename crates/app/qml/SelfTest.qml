@@ -20,6 +20,16 @@ Item {
         return ""
     }
     property var ids: ({})
+    // stable updates: a model fed again with a changed list keeps the delegates of what stayed
+    property int built: 0
+    JsonModel { id: probe }
+    Repeater {
+        model: probe
+        delegate: Item {
+            required property string json
+            Component.onCompleted: st.built++
+        }
+    }
     property int n: 0
     property int waits: 0
     visible: false
@@ -76,6 +86,24 @@ Item {
             return check(pin > 0, "pin was not created") &&
                    check(JSON.parse(editor.annotations).length === 1, "pin missing from annotations") &&
                    check(JSON.parse(editor.annotations)[0].bounds.width === 400, "pin should carry the node's bounds")
+        },
+        function () {
+            probe.sync([{ id: "a", v: 1 }, { id: "b", v: 1 }, { id: "c", v: 1 }])
+            const first = st.built
+            probe.sync([{ id: "a", v: 1 }, { id: "b", v: 2 }, { id: "c", v: 1 }])
+            probe.sync([{ id: "c", v: 1 }, { id: "a", v: 1 }, { id: "b", v: 2 }, { id: "d", v: 1 }])
+            return check(first === 3, "the first list builds three rows: " + first) &&
+                   check(st.built === 4, "only the new row is built; changed and moved rows keep theirs: " + st.built) &&
+                   check(JSON.parse(probe.get(2).json).v === 2 && probe.count === 4, "the changed row carries its new value")
+        },
+        function () {
+            // the canvas is never blank while it redraws: the picture in front stays ready
+            if (!canvas.pictureReady) return "wait"
+            for (let i = 0; i < 3; ++i) {
+                editor.renderCanvas(canvas.renderScale)
+                if (!check(canvas.front.status === Image.Ready, "the picture in front must stay ready while a new one loads (round " + i + ")")) return false
+            }
+            return true
         },
         function () {
             return check(editor.skillOfferPending(), "an agent is installed and the skill is not, so it is offered") &&

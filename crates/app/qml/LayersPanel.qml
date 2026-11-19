@@ -10,6 +10,9 @@ Rectangle {
     color: Theme.panel
 
     readonly property var rows: editor.layers ? JSON.parse(editor.layers) : []
+    JsonModel { id: rowsModel }
+    onRowsChanged: rowsModel.sync(rows)
+    Component.onCompleted: rowsModel.sync(rows)
     readonly property var selectedIds: editor.selection ? JSON.parse(editor.selection) : []
 
     function isSelected(id) { return selectedIds.indexOf(id) >= 0 }
@@ -67,13 +70,14 @@ Rectangle {
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
-            model: root.rows
+            model: rowsModel
             boundsBehavior: Flickable.StopAtBounds
             ScrollBar.vertical: ScrollBar {}
 
             delegate: Rectangle {
                 id: row
-                required property var modelData
+                required property string json
+                readonly property var modelData: JSON.parse(json)
                 width: list.width
                 height: 26
                 color: root.isSelected(modelData.id) ? Theme.panelRaised

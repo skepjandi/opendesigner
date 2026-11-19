@@ -17,6 +17,7 @@ fn main() {
         .qml_files([
             "qml/Btn.qml",
             "qml/Field.qml",
+            "qml/JsonModel.qml",
             "qml/LayersPanel.qml",
             "qml/InspectorPanel.qml",
             "qml/AgentPanel.qml",

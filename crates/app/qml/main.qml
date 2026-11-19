@@ -19,6 +19,8 @@ ApplicationWindow {
     property string tool: "select"
     readonly property bool typing: activeFocusItem !== null && activeFocusItem.hasOwnProperty("cursorPosition")
     readonly property var frames: backend.frames ? JSON.parse(backend.frames) : []
+    JsonModel { id: framesModel }
+    onFramesChanged: framesModel.sync(frames)
 
     function toast(text, isError) {
         toastLabel.text = text
@@ -182,11 +184,12 @@ ApplicationWindow {
                         anchors.fill: parent
                         anchors.leftMargin: 6
                         orientation: ListView.Horizontal
-                        model: win.frames
+                        model: framesModel
                         spacing: 2
                         clip: true
                         delegate: Btn {
-                            required property var modelData
+                            required property string json
+                            readonly property var modelData: JSON.parse(json)
                             text: modelData.name + "  " + Math.round(modelData.width) + "×" + Math.round(modelData.height)
                             active: modelData.id === backend.activeFrame
                             height: 34
