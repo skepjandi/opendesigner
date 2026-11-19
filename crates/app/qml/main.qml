@@ -98,6 +98,14 @@ ApplicationWindow {
                         ToolTip.text: modelData.label + " (" + modelData.key + ")"
                     }
                 }
+                Btn {
+                    text: "Image…"
+                    enabled: backend.activeFrame !== ""
+                    onClicked: imageDialog.open()
+                    ToolTip.visible: hovered
+                    ToolTip.delay: 600
+                    ToolTip.text: "Add a PNG, JPEG or WebP image (or drop one on the canvas)"
+                }
                 Item { Layout.fillWidth: true }
                 Btn { text: "Undo"; enabled: backend.canUndo; onClicked: backend.undo() }
                 Btn { text: "Redo"; enabled: backend.canRedo; onClicked: backend.redo() }
@@ -235,6 +243,12 @@ ApplicationWindow {
     }
 
     FolderDialog { id: openDialog; title: "Open an OpenDesigner project folder"; onAccepted: backend.openProject(selectedFolder.toString()) }
+    FileDialog {
+        id: imageDialog
+        title: "Add an image"
+        nameFilters: ["Images (*.png *.jpg *.jpeg *.webp)"]
+        onAccepted: backend.importImage(selectedFile.toString())
+    }
     FolderDialog { id: parentDialog; title: "Where should the project folder go?"; onAccepted: newDialog.parentUrl = selectedFolder.toString() }
 
     Modal {

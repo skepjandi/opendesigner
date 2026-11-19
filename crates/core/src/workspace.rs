@@ -9,6 +9,7 @@ use serde::Serialize;
 use crate::annotations::{Annotation, Annotations};
 use crate::error::{OpError, ProjectError};
 use crate::history::{Actor, Session, TransactionKind};
+use crate::media;
 use crate::model::{Node, NodeId};
 use crate::ops::Operation;
 use crate::project;
@@ -100,6 +101,27 @@ impl Workspace {
 
     pub fn dir(&self) -> Option<&Path> {
         self.dir.as_deref()
+    }
+
+    fn project_dir(&self) -> Result<&Path, ProjectError> {
+        self.dir
+            .as_deref()
+            .ok_or_else(|| ProjectError::Invalid("the workspace has no project folder".into()))
+    }
+
+    /// Copies an image the user chose into the project's `media/` folder; returns its reference.
+    pub fn import_media(&self, src: &Path) -> Result<String, ProjectError> {
+        media::import(self.project_dir()?, src)
+    }
+
+    /// The images an image node can reference.
+    pub fn media(&self) -> Result<Vec<media::MediaFile>, ProjectError> {
+        media::list(self.project_dir()?)
+    }
+
+    /// Where a `media/<name>` reference lives on disk.
+    pub fn media_path(&self, reference: &str) -> Result<PathBuf, ProjectError> {
+        media::resolve(self.project_dir()?, reference)
     }
 
     pub fn save(&self) -> Result<(), ProjectError> {

@@ -136,7 +136,7 @@ Rectangle {
                 }
             }
             Row2 {
-                visible: root.node && root.has(root.node.kind, ["frame", "rect"])
+                visible: root.node && root.has(root.node.kind, ["frame", "rect", "image"])
                 label: "Radius"
                 Field {
                     Layout.fillWidth: true
@@ -201,6 +201,30 @@ Rectangle {
                         active: (root.node && root.node.text_align || "left") === modelData
                         onClicked: editor.setNodeProperty(root.node.id, "text_align", JSON.stringify(modelData))
                     }
+                }
+            }
+            Row2 {
+                visible: root.node && root.node.kind === "image"
+                label: "Fit"
+                Repeater {
+                    model: ["cover", "contain", "fill"]
+                    delegate: Btn {
+                        required property string modelData
+                        text: modelData
+                        active: (root.node && root.node.image_fit || "cover") === modelData
+                        onClicked: editor.setNodeProperty(root.node.id, "image_fit", JSON.stringify(modelData))
+                    }
+                }
+            }
+            Row2 {
+                visible: root.node && root.node.kind === "image"
+                label: "File"
+                Label {
+                    Layout.fillWidth: true
+                    text: root.node && root.node.image ? root.node.image : "none"
+                    color: Theme.muted
+                    font.pixelSize: 12
+                    elide: Text.ElideMiddle
                 }
             }
             ColumnLayout {

@@ -14,6 +14,7 @@
 | Project I/O | `project.rs` | `od.toml` (format, name, id counter, page ids, tokens), `pages/<id>.json`, `.od/history/log.jsonl`, `.od/history/checkpoints.json`; atomic writes; a newer `format` is refused; unknown fields, duplicate ids, a lagging id counter and ids that are not `[A-Za-z0-9_-]{1,64}` are rejected on load |
 | Annotations | `annotations.rs` | Pins on a node or a page region with a note, `open`/`resolved` status, author and resolver (`Actor`), saved in `annotations.json` at the project root. Not part of the undoable history: they are conversation, not content |
 | Workspace and guidance | `workspace.rs` | `Workspace` holds the session, annotations, the (ephemeral) selection and the project folder. `guidance()` returns what an agent reads first: pages, the selected nodes with their data, open notes (flagged `target_exists: false` when the node was deleted) and the user's edits since the agent's last turn |
+| Media | `media.rs` | `media/<plain name>` references (png, jpg, jpeg, webp), import by the user with magic-byte sniffing and unique names, listing and resolving without following symlinks. `Workspace::import_media`, `media`, `media_path` |
 
 Operation JSON as agents send it (the `opendesigner apply` command and the future MCP `apply_ops` tool take this array):
 
@@ -30,7 +31,7 @@ Operation JSON as agents send it (the `opendesigner apply` command and the futur
 Deviations from the design below, each deliberate for Phase 1:
 
 - **Colors are sRGB hex, not OKLCH.** Tokens map names to hex strings. OKLCH can be added without a format break by accepting more paint syntaxes.
-- **Tokens live in `od.toml`; there is no `presets/` or `media/` handling yet.** `image` nodes store a project-relative path that is validated for length only; resolving it inside the project root arrives with image rendering.
+- **Tokens live in `od.toml`; there is no `presets/` handling yet.** `image` nodes store `media/<plain file name>` (`.png`, `.jpg`, `.jpeg`, `.webp`), validated on every create, set and load; the file is imported by the user into `<project>/media/` and never rewritten. `image_fit` is `cover` (default), `contain` or `fill`; `corner_radius` rounds an image. Crop is not built.
 - **`set` takes a typed `prop` (`{"name": "x", "value": 10}`), not a dotted path.** The set of properties is closed, so every value is validated for its type and for the node kinds it applies to.
 - **Ids are minted by the document.** `create` takes a node without an id; `restore` carries ids and is refused from front ends.
 - **No timestamps in the log.** The log is deterministic; time is a front-end concern.
@@ -74,7 +75,7 @@ A page is a tree. Every node has `id`, `kind`, `name`, a transform and size, and
 | `rect`, `ellipse`, `line`, `polygon` | Primitives |
 | `path` | Bezier vector path, boolean operations stored as a derived result plus its sources |
 | `text` | Runs with font, size, weight, tracking, line height; shaped at render time. Built: one run per node with family, size, weight, alignment and line height; shaped by `cosmic-text` in `render` |
-| `image` | Reference into `media/` plus crop and fit |
+| `image` | Reference into `media/` plus fit and corner radius (built); crop (not built) |
 | `device` | A device frame (iPhone, iPad, Pixel, Mac window) with a screen slot for an `image` |
 | `instance` | An instance of a component, with overrides |
 | `clip`, `track` | Video composition members ([Video Editing](./video-editing.md)) |

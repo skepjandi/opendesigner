@@ -79,6 +79,12 @@ pub mod qobject {
             h: f64,
         ) -> QString;
         #[qinvokable]
+        #[cxx_name = "importImage"]
+        fn import_image(self: Pin<&mut Self>, url: &QString) -> QString;
+        #[qinvokable]
+        #[cxx_name = "importImageAt"]
+        fn import_image_at(self: Pin<&mut Self>, url: &QString, x: f64, y: f64) -> QString;
+        #[qinvokable]
         #[cxx_name = "deleteSelected"]
         fn delete_selected(self: Pin<&mut Self>);
         #[qinvokable]
@@ -244,6 +250,18 @@ impl qobject::Editor {
         self.as_mut().set_message_seq(seq);
     }
 
+    fn import_image_impl(
+        mut self: Pin<&mut Self>,
+        url: &QString,
+        center: Option<(f64, f64)>,
+    ) -> QString {
+        let path = path_from_url(&url.to_string());
+        q(&self
+            .as_mut()
+            .act(|s| s.import_image(std::path::Path::new(&path), center))
+            .unwrap_or_default())
+    }
+
     /// Runs an action on the state, reports an error to the user, and republishes the state.
     fn act<T>(
         mut self: Pin<&mut Self>,
@@ -370,6 +388,14 @@ impl qobject::Editor {
             .as_mut()
             .act(|s| s.create_node(&kind, x, y, w, h))
             .unwrap_or_default())
+    }
+
+    pub fn import_image(self: Pin<&mut Self>, url: &QString) -> QString {
+        self.import_image_impl(url, None)
+    }
+
+    pub fn import_image_at(self: Pin<&mut Self>, url: &QString, x: f64, y: f64) -> QString {
+        self.import_image_impl(url, Some((x, y)))
     }
 
     pub fn delete_selected(mut self: Pin<&mut Self>) {

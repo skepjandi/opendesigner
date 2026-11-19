@@ -84,6 +84,12 @@ Item {
             return check(JSON.parse(editor.selectionBounds).x === 120, "restore did not bring the position back")
         },
         function () {
+            const id = editor.importImage("file://" + folder + "/fixture.png")
+            return check(id !== "", "the image was not imported: " + editor.message) &&
+                   check(insp().image === "media/fixture.png", "the image node should point at the media copy") &&
+                   check(JSON.parse(editor.unrendered).length === 0, "a readable image needs no placeholder")
+        },
+        function () {
             const r = JSON.parse(editor.exportFrame("apple-iphone-6.9", "shot.png"))
             return check(!r.error && r.path === "exports/shot.png" && r.width === 1320, "validated export failed: " + JSON.stringify(r))
         },
@@ -112,7 +118,7 @@ Item {
             let ok = false
             try { ok = st.steps[i]() } catch (e) { st.fail("step " + i + " threw: " + e); return }
             if (!ok) return
-            if (i === 13) return // the grab step advances itself
+            if (i === st.steps.length - 2) return // the grab step advances itself
             st.n++
             timer.restart()
         }

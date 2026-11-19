@@ -473,3 +473,81 @@ fn text_styling_is_validated_undoable_and_only_for_text() {
         Err(OpError::NotApplicable { .. })
     ));
 }
+
+#[test]
+fn image_nodes_only_reference_plain_media_files_and_fit_is_undoable() {
+    use od_core::ImageFit;
+    let (mut s, root) = session();
+    let mut shot = NewNode::new(NodeKind::Image);
+    shot.width = 100.0;
+    shot.height = 50.0;
+    shot.image = Some("media/shot.png".into());
+    shot.image_fit = Some(ImageFit::Contain);
+    shot.corner_radius = Some(12.0);
+    let id = created_id(&mut s, &root, shot);
+    let node = s.document().node(&id).unwrap();
+    assert_eq!(node.image.as_deref(), Some("media/shot.png"));
+    assert_eq!(node.image_fit, Some(ImageFit::Contain));
+    assert_eq!(node.corner_radius, 12.0);
+
+    let set = |s: &mut Session, prop: Property| {
+        s.apply(
+            Actor::User,
+            None,
+            &[Operation::Set {
+                id: id.clone(),
+                prop,
+            }],
+        )
+    };
+    let before = s.document().clone();
+    for bad in [
+        "shot.png",
+        "media/../secret.png",
+        "/etc/passwd",
+        "media/a/b.png",
+        "media/shot.svg",
+        "https://example.com/x.png",
+        "media/.hidden.png",
+    ] {
+        assert!(
+            matches!(
+                set(&mut s, Property::Image(Some(bad.into()))),
+                Err(OpError::OutOfBounds { .. })
+            ),
+            "{bad:?} should be refused"
+        );
+    }
+    let mut hostile = NewNode::new(NodeKind::Image);
+    hostile.image = Some("../../etc/passwd".into());
+    assert!(
+        s.apply(Actor::User, None, &[create(&root, hostile)])
+            .is_err()
+    );
+    assert!(
+        same_content(&before, s.document()),
+        "refused edits change nothing"
+    );
+
+    set(&mut s, Property::ImageFit(Some(ImageFit::Fill))).unwrap();
+    s.undo(Actor::User).unwrap();
+    assert_eq!(
+        s.document().node(&id).unwrap().image_fit,
+        Some(ImageFit::Contain)
+    );
+
+    let mut text = NewNode::new(NodeKind::Text);
+    text.text = Some("x".into());
+    let text = created_id(&mut s, &root, text);
+    assert!(matches!(
+        s.apply(
+            Actor::User,
+            None,
+            &[Operation::Set {
+                id: text,
+                prop: Property::ImageFit(Some(ImageFit::Fill))
+            }]
+        ),
+        Err(OpError::NotApplicable { .. })
+    ));
+}
