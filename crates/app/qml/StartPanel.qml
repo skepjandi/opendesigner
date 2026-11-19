@@ -18,6 +18,21 @@ ScrollView {
     readonly property bool agentChosen: agentBox.currentIndex >= 0 && presets[agentBox.currentIndex].command !== "" || customCommand.text.trim() !== ""
     readonly property string command: presets[agentBox.currentIndex].command !== "" ? presets[agentBox.currentIndex].command : customCommand.text.trim()
 
+    // the agent's models and efforts, read by starting it briefly (the editor fills `agentProbe`)
+    readonly property var probe: editor.agentProbe ? JSON.parse(editor.agentProbe) : ({})
+    readonly property bool probeMatches: probe.command === root.command
+    readonly property var agentConfig: probeMatches && probe.config ? probe.config : []
+    readonly property var modelOption: agentConfig.find(o => o.category === "model") || null
+    readonly property var effortOption: agentConfig.find(o => o.category === "thought_level") || null
+    property string modelValue: ""
+    property string effortValue: ""
+    function readOptions() {
+        modelValue = ""; effortValue = ""
+        if (agentChosen && command !== "") editor.probeAgent(command)
+    }
+    Timer { id: probeTimer; interval: 500; onTriggered: root.readOptions() }
+    onCommandChanged: probeTimer.restart()
+
     function choose(url) {
         folderUrl = url
         info = JSON.parse(editor.inspectFolder(url))
@@ -185,6 +200,49 @@ ScrollView {
             text: "It also gets the MCP servers you added in the Connect panel, so it can call them (speech models, for example) while it works."
         }
 
+        RowLayout {
+            Layout.fillWidth: true
+            visible: root.agentChosen
+            spacing: 8
+            Label { text: "Model"; color: Theme.muted; font.pixelSize: 12 }
+            ComboBox {
+                Layout.preferredWidth: 220
+                enabled: !!root.modelOption
+                model: ["Agent default"].concat(root.modelOption ? root.modelOption.choices.map(c => c.name) : [])
+                currentIndex: {
+                    if (!root.modelOption || root.modelValue === "") return 0
+                    const i = root.modelOption.choices.findIndex(c => c.value === root.modelValue)
+                    return i >= 0 ? i + 1 : 0
+                }
+                onActivated: i => root.modelValue = i === 0 ? "" : root.modelOption.choices[i - 1].value
+            }
+            Label { text: "Effort"; color: Theme.muted; font.pixelSize: 12 }
+            ComboBox {
+                Layout.preferredWidth: 130
+                enabled: !!root.effortOption
+                model: ["Agent default"].concat(root.effortOption ? root.effortOption.choices.map(c => c.name) : [])
+                currentIndex: {
+                    if (!root.effortOption || root.effortValue === "") return 0
+                    const i = root.effortOption.choices.findIndex(c => c.value === root.effortValue)
+                    return i >= 0 ? i + 1 : 0
+                }
+                onActivated: i => root.effortValue = i === 0 ? "" : root.effortOption.choices[i - 1].value
+            }
+            BusyIndicator { running: visible; visible: root.probeMatches && !!root.probe.loading; implicitWidth: 18; implicitHeight: 18 }
+            Btn { text: "Refresh"; implicitHeight: 24; onClicked: root.readOptions() }
+        }
+        Label {
+            Layout.fillWidth: true
+            visible: root.agentChosen
+            wrapMode: Text.WordWrap
+            color: root.probeMatches && root.probe.error ? Theme.danger : Theme.muted
+            font.pixelSize: 11
+            text: !root.probeMatches || root.probe.loading ? "Reading the models this agent offers (it is started briefly)…"
+                : root.probe.error ? "Could not read the agent's models: " + root.probe.error
+                : !root.modelOption && !root.effortOption ? "This agent does not offer a choice of model or effort here; you can still use its own commands in the chat."
+                : "Chosen here, applied when the agent starts. You can change them in the chat any time."
+        }
+
         Label { text: "Size and format (optional)"; color: Theme.text; font.pixelSize: 15; font.bold: true }
         RowLayout {
             Layout.fillWidth: true
@@ -244,7 +302,7 @@ ScrollView {
                     const name = root.direct ? "" : (root.makeNew ? newName.text.trim() : root.existing[workspaceBox.currentIndex])
                     if (!root.editor.openWorkspace(root.folderUrl, name, true)) return
                     if (root.format) root.editor.setFormat(root.format.id || "", root.format.kind || "", root.format.width || 0, root.format.height || 0, root.format.fps || 0)
-                    if (root.agentChosen) root.editor.chatStartWith(root.command, prompt.text)
+                    if (root.agentChosen) root.editor.chatStartWith(root.command, prompt.text, root.modelValue, root.effortValue)
                     root.started()
                 }
             }
