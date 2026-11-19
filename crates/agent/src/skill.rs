@@ -262,6 +262,32 @@ and which text nodes each still lacks. `{"op": "set_localized_text", "locale": "
 `pt-BR`. Pass `locale` to `export`, `export_set` or `export_panorama` to render a language; set and
 panorama files are named `<prefix>-<locale>-01.png`. Translated text can be longer: check
 `render_preview` of each language for overflow.
+
+Videos: a video is a timeline of clips, and each clip shows one design frame for a while, so an
+app preview is made from the same frames as the store screenshots. `list_videos` shows them with
+the time each clip starts. Build one with operations:
+
+```json
+{"turn": "preview", "summary": "a 15 second app preview",
+ "ops": [{"op": "create_video", "name": "Preview", "fps": 30, "width": 886, "height": 1920},
+         {"op": "add_clip", "video": "v_20", "frame": "n_3", "duration_ms": 4000,
+          "motion": {"scale_from": 1.0, "scale_to": 1.12}},
+         {"op": "add_clip", "video": "v_20", "frame": "n_9", "duration_ms": 4000,
+          "transition": {"kind": "slide_left", "duration_ms": 500}}]}
+```
+
+The ids of a created video and clips come back in `created` (`v_...`, `c_...`). Width and height
+are even numbers; a frame of another shape is scaled to cover the video and cropped in the middle,
+so use frames of the video's shape. A transition (`cut`, `fade`, `slide_left`, `slide_right`)
+overlaps the end of the clip before it, so it makes the video shorter by its length; the first
+clip's transition is not shown. `motion` zooms slowly from `scale_from` to `scale_to` (1 to 3) over
+the clip. Change a clip with `set_clip` (`duration_ms`, `frame`, `transition`, `motion`), reorder
+with `move_clip`, remove with `remove_clip`. A frame that a clip shows cannot be deleted until the
+clip is removed. Look at a moment with `render_video_frame` (try the middle of a transition) and
+write the file with `export_video`, which needs `ffmpeg` on the user's computer and tells you if it
+is missing. For the App Store pass `preset` to `export_video` (see `list_video_presets`): sizes, 15 to 30
+seconds and 30 fps are checked before anything is encoded, and the preset says what it does not
+check (the audio track, the H.264 profile).
 "##;
 
 fn store_specs_md() -> String {

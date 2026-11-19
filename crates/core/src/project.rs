@@ -13,6 +13,7 @@ use crate::error::ProjectError;
 use crate::history::{Checkpoint, Session, Transaction};
 use crate::limits::MAX_FILE_BYTES;
 use crate::model::{Document, FORMAT_VERSION, NodeId, Page};
+use crate::video::Video;
 
 const MANIFEST: &str = "od.toml";
 const HISTORY_DIR: &str = ".od/history";
@@ -24,6 +25,8 @@ struct Manifest {
     name: String,
     next_id: u64,
     pages: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    videos: Vec<String>,
     // Tables must come last in TOML.
     #[serde(default)]
     tokens: BTreeMap<String, String>,
@@ -119,12 +122,21 @@ pub fn save(dir: &Path, session: &Session) -> Result<(), ProjectError> {
         write_atomic(&path, json.as_bytes())?;
     }
     remove_stale_pages(&pages_dir, doc)?;
+    let videos_dir = dir.join("videos");
+    for video in &doc.videos {
+        let path = videos_dir.join(format!("{}.json", video.id));
+        let mut json = serde_json::to_string_pretty(video).map_err(|e| parse_err(&path, e))?;
+        json.push('\n');
+        write_atomic(&path, json.as_bytes())?;
+    }
+    remove_stale_json(&videos_dir, doc.videos.iter().map(|v| v.id.to_string()))?;
 
     let manifest = Manifest {
         format: doc.format,
         name: doc.name.clone(),
         next_id: doc.next_id,
         pages: doc.pages.iter().map(|p| p.id.to_string()).collect(),
+        videos: doc.videos.iter().map(|v| v.id.to_string()).collect(),
         tokens: doc.tokens.clone(),
         locales: doc
             .locales
@@ -154,8 +166,13 @@ pub fn save(dir: &Path, session: &Session) -> Result<(), ProjectError> {
 }
 
 fn remove_stale_pages(pages_dir: &Path, doc: &Document) -> Result<(), ProjectError> {
-    let keep: HashSet<String> = doc.pages.iter().map(|p| format!("{}.json", p.id)).collect();
-    let Ok(entries) = fs::read_dir(pages_dir) else {
+    remove_stale_json(pages_dir, doc.pages.iter().map(|p| p.id.to_string()))
+}
+
+/// Deletes `<id>.json` files in `dir` whose id is not in `ids`.
+fn remove_stale_json(dir: &Path, ids: impl Iterator<Item = String>) -> Result<(), ProjectError> {
+    let keep: HashSet<String> = ids.map(|id| format!("{id}.json")).collect();
+    let Ok(entries) = fs::read_dir(dir) else {
         return Ok(());
     };
     for entry in entries.flatten() {
@@ -192,6 +209,21 @@ pub fn load(dir: &Path) -> Result<Session, ProjectError> {
         }
         pages.push(page);
     }
+    let mut videos = Vec::with_capacity(manifest.videos.len());
+    for video_id in &manifest.videos {
+        let id = NodeId::parse(video_id).map_err(|e| ProjectError::Invalid(e.to_string()))?;
+        let path = dir.join("videos").join(format!("{id}.json"));
+        let video: Video =
+            serde_json::from_str(&read_limited(&path)?).map_err(|e| parse_err(&path, e))?;
+        if video.id != id {
+            return Err(ProjectError::Invalid(format!(
+                "{} holds video {}, expected {id}",
+                path.display(),
+                video.id
+            )));
+        }
+        videos.push(video);
+    }
     let mut locales = BTreeMap::new();
     for (locale, texts) in manifest.locales {
         let mut parsed = BTreeMap::new();
@@ -208,6 +240,7 @@ pub fn load(dir: &Path) -> Result<Session, ProjectError> {
         tokens: manifest.tokens,
         locales,
         pages,
+        videos,
     };
 
     let history = dir.join(HISTORY_DIR);

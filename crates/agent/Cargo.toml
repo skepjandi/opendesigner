@@ -15,6 +15,7 @@ name = "od_agent"
 [dependencies]
 opendesigner-core = { path = "../core" }
 opendesigner-render = { path = "../render" }
+opendesigner-media = { path = "../media" }
 opendesigner-store = { path = "../store" }
 serde.workspace = true
 serde_json.workspace = true

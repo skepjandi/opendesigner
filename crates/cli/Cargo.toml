@@ -17,6 +17,7 @@ path = "src/main.rs"
 opendesigner-core = { path = "../core" }
 opendesigner-agent = { path = "../agent" }
 opendesigner-render = { path = "../render" }
+opendesigner-media = { path = "../media" }
 opendesigner-store = { path = "../store" }
 tokio.workspace = true
 clap.workspace = true

@@ -48,6 +48,18 @@ pub enum OpError {
     NoSuchAnnotation(u64),
     #[error("page {0} does not exist")]
     NoSuchPage(String),
+    #[error("video {0} does not exist")]
+    NoSuchVideo(String),
+    #[error("clip {0} does not exist")]
+    NoSuchClip(String),
+    #[error(
+        "frame {frame} is shown by clip {clip} of video {video}; remove that clip (or show another frame) first"
+    )]
+    FrameInUse {
+        frame: String,
+        clip: String,
+        video: String,
+    },
     #[error("internal error: {0}")]
     Internal(String),
 }

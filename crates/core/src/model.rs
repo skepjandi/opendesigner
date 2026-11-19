@@ -249,6 +249,8 @@ pub struct Document {
     /// entry shows its own `text` in that language.
     pub locales: BTreeMap<String, BTreeMap<NodeId, String>>,
     pub pages: Vec<Page>,
+    /// Timelines of clips that show frames of the pages.
+    pub videos: Vec<crate::video::Video>,
 }
 
 /// Where a node sits: the page index and the child indices from the page root.
@@ -267,6 +269,7 @@ impl Document {
             tokens: BTreeMap::new(),
             locales: BTreeMap::new(),
             pages: Vec::new(),
+            videos: Vec::new(),
         }
     }
 
@@ -479,7 +482,14 @@ impl Document {
             }
             self.validate_tree(&page.root, 0, &mut seen, &mut total)?;
         }
-        Ok(())
+        self.validate_videos()
+    }
+
+    pub(crate) fn check_counter_of(&self, id: &NodeId) -> Result<(), OpError> {
+        match id.number() {
+            Some(n) => self.check_counter(n),
+            None => Ok(()),
+        }
     }
 
     fn check_counter(&self, n: u64) -> Result<(), OpError> {

@@ -4,6 +4,7 @@
 
 mod images;
 mod text;
+pub mod video;
 
 pub use images::dimensions as image_dimensions;
 pub use tiny_skia::Pixmap;

@@ -12,6 +12,7 @@ use crate::model::{
     Document, ImageFit, Node, NodeId, NodeKind, Stroke, TextAlign, validate_node_fields,
 };
 use crate::paint::Paint;
+use crate::video::{Clip, ClipProperty, Motion, Transition, Video, VideoProperty};
 
 /// One settable property with its new value. Serialized as `{"name": "x", "value": 10}`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -381,6 +382,53 @@ pub enum Operation {
         #[serde(default)]
         text: Option<String>,
     },
+    /// Add an empty video: a timeline of clips shown at `fps`, rendered at `width` x `height`
+    /// pixels (even numbers, 16 to 4096).
+    CreateVideo {
+        name: String,
+        fps: u32,
+        width: u32,
+        height: u32,
+    },
+    /// Delete a video and its clips (the frames it showed are untouched).
+    DeleteVideo { id: NodeId },
+    /// Set one property of a video.
+    SetVideo { id: NodeId, prop: VideoProperty },
+    /// Add a clip showing `frame` for `duration_ms` to a video (appended when `index` is omitted).
+    /// `transition` and `motion` default to a cut and no zoom.
+    AddClip {
+        video: NodeId,
+        frame: NodeId,
+        duration_ms: u32,
+        #[serde(default)]
+        index: Option<usize>,
+        #[serde(default)]
+        transition: Option<Transition>,
+        #[serde(default)]
+        motion: Option<Motion>,
+    },
+    /// Remove a clip from a video.
+    RemoveClip { video: NodeId, clip: NodeId },
+    /// Move a clip to position `index` in its video.
+    MoveClip {
+        video: NodeId,
+        clip: NodeId,
+        index: usize,
+    },
+    /// Set one property of a clip.
+    SetClip {
+        video: NodeId,
+        clip: NodeId,
+        prop: ClipProperty,
+    },
+    /// Put back a video. Written by the history; front ends cannot issue it.
+    RestoreVideo { video: Video },
+    /// Put back a clip. Written by the history; front ends cannot issue it.
+    RestoreClip {
+        video: NodeId,
+        index: usize,
+        clip: Clip,
+    },
     /// Put back an existing subtree with its original ids. Written by the history when it
     /// resolves a `Create` or inverts a `Delete`; front ends cannot issue it.
     Restore {
@@ -400,6 +448,15 @@ impl Operation {
             Operation::Delete { .. } => "delete",
             Operation::SetToken { .. } => "set_token",
             Operation::SetLocalizedText { .. } => "set_localized_text",
+            Operation::CreateVideo { .. } => "create_video",
+            Operation::DeleteVideo { .. } => "delete_video",
+            Operation::SetVideo { .. } => "set_video",
+            Operation::AddClip { .. } => "add_clip",
+            Operation::RemoveClip { .. } => "remove_clip",
+            Operation::MoveClip { .. } => "move_clip",
+            Operation::SetClip { .. } => "set_clip",
+            Operation::RestoreVideo { .. } => "restore_video",
+            Operation::RestoreClip { .. } => "restore_clip",
             Operation::Restore { .. } => "restore",
         }
     }
@@ -586,6 +643,15 @@ pub fn apply(
                 touched: vec![id.clone()],
             })
         }
+        Operation::CreateVideo { .. }
+        | Operation::DeleteVideo { .. }
+        | Operation::SetVideo { .. }
+        | Operation::AddClip { .. }
+        | Operation::RemoveClip { .. }
+        | Operation::MoveClip { .. }
+        | Operation::SetClip { .. }
+        | Operation::RestoreVideo { .. }
+        | Operation::RestoreClip { .. } => crate::video::apply(doc, op, allow_internal),
         Operation::SetToken { name, value } => set_token(doc, name, value.as_deref()),
         Operation::SetLocalizedText { locale, id, text } => {
             let old = doc.set_locale_text(locale, id, text.as_deref())?;
@@ -603,6 +669,17 @@ pub fn apply(
         Operation::Delete { id } => {
             let loc = node_loc(doc, id)?;
             immutable_if_root(doc, &loc)?;
+            if let Some(subtree) = doc.node(id) {
+                let mut ids = Vec::new();
+                subtree.ids(&mut ids);
+                if let Some((video, clip)) = doc.video_using(&ids) {
+                    return Err(OpError::FrameInUse {
+                        frame: clip.frame.to_string(),
+                        clip: clip.id.to_string(),
+                        video: video.id.to_string(),
+                    });
+                }
+            }
             let (&index, parent_path) = loc
                 .path
                 .split_last()

@@ -86,6 +86,26 @@ enum Command {
     },
     /// List the project's languages and the text nodes each still lacks a translation for.
     Locales { dir: PathBuf },
+    /// List the project's videos: clips, when each starts, transitions and zoom.
+    Videos { dir: PathBuf },
+    /// Draw a video and encode it to exports/<file> as an H.264 MP4 (needs ffmpeg).
+    ExportVideo {
+        dir: PathBuf,
+        /// A video id from `videos`.
+        #[arg(long)]
+        video: String,
+        /// A plain file name ending in .mp4.
+        #[arg(long)]
+        file: String,
+        /// A store video preset (see `video-presets`); nothing is written if the video breaks it.
+        #[arg(long)]
+        preset: Option<String>,
+        /// Show this language's translations.
+        #[arg(long)]
+        locale: Option<String>,
+    },
+    /// List the store presets for videos (app previews).
+    VideoPresets,
     /// Render several frames into the project's exports/ as <prefix>-01.png, -02, ... and
     /// validate them as a set; nothing is written unless all of them pass.
     ExportSet {
@@ -369,6 +389,103 @@ fn run(cli: Cli) -> Result<(), CliError> {
                     }
                 );
             }
+        }
+        Command::Videos { dir } => {
+            let ws = Workspace::open(&dir)?;
+            let rows = od_core::view::videos(ws.session.document());
+            if rows.is_empty() {
+                println!("no videos yet; add one with a create_video operation (see `apply`)");
+            }
+            for v in rows {
+                println!(
+                    "{}\t{}\t{}x{} at {} fps\t{:.1} s\t{} frames",
+                    v.id,
+                    v.name,
+                    v.width,
+                    v.height,
+                    v.fps,
+                    v.duration_ms as f64 / 1000.0,
+                    v.frame_count
+                );
+                for c in &v.clips {
+                    println!(
+                        "  {}\t{} ({})\tstarts {} ms\t{} ms\t{:?} {} ms\tzoom {} to {}",
+                        c.id,
+                        c.frame_name,
+                        c.frame,
+                        c.start_ms,
+                        c.duration_ms,
+                        c.transition.kind,
+                        c.transition_ms,
+                        c.motion.scale_from,
+                        c.motion.scale_to
+                    );
+                }
+            }
+        }
+        Command::VideoPresets => {
+            for p in od_store::video::VIDEO_PRESETS {
+                println!(
+                    "{}\t{}\t{}-{} s, up to {} fps and {} MB\trules read on {} from {}",
+                    p.id,
+                    p.describe_sizes(),
+                    p.min_ms / 1000,
+                    p.max_ms / 1000,
+                    p.max_fps,
+                    p.max_bytes / 1_000_000,
+                    p.checked,
+                    p.source
+                );
+                println!("  not checked: {}", p.not_checked);
+            }
+        }
+        Command::ExportVideo {
+            dir,
+            video,
+            file,
+            preset,
+            locale,
+        } => {
+            let ws = Workspace::open(&dir)?;
+            let id = NodeId::parse(&video)?;
+            let ffmpeg =
+                od_media::Ffmpeg::locate().map_err(|e| CliError::Invalid(e.to_string()))?;
+            let out = od_agent::video_export::export_video(
+                &ws,
+                &id,
+                &file,
+                locale.as_deref(),
+                preset.as_deref(),
+                &ffmpeg,
+                &mut |done, total| {
+                    if done % 30 == 0 || done == total {
+                        eprint!("\rframe {done} of {total}");
+                    }
+                    true
+                },
+            )
+            .map_err(|e| CliError::Invalid(e.0))?;
+            eprintln!();
+            for w in &out.warnings {
+                eprintln!("warning: {w}");
+            }
+            if out.ffmpeg_gpl {
+                eprintln!(
+                    "note: {} is a GPL build; the app does not ship it",
+                    out.ffmpeg
+                );
+            }
+            println!(
+                "{}\t{}x{} at {} fps\t{} frames\t{:.1} s\t{} bytes\t{}",
+                out.path,
+                out.width,
+                out.height,
+                out.fps,
+                out.frames,
+                out.duration_ms as f64 / 1000.0,
+                out.bytes,
+                out.encoder
+            );
         }
         Command::ExportSet {
             dir,

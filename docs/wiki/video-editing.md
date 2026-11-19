@@ -1,6 +1,6 @@
 # Video Editing
 
-> **Status: Design.** OpenCut and Kino facts come from their public repository and docs as read on 2026-11-19; OpenCut's rewrite is in progress, so its desktop app is a scaffold, not a reference implementation to port. The timeline design is intent.
+> **Status: Partially implemented.** Built (video v1): videos made of **clips that show design frames**, with transitions (cut, fade, slide) and a slow zoom, as undoable operations (`crates/core/src/video.rs`); a renderer that draws any moment (`od_render::video`); encoding to H.264 MP4 by running `ffmpeg` (`crates/media`); MCP tools `list_videos`, `render_video_frame`, `export_video`, `list_video_presets`; CLI `videos`, `export-video`, `video-presets`; Apple app-preview rules (15-30 s, at most 30 fps, 886x1920 or 1920x886 for iPhone, 1200x1600 or 1600x1200 for iPad, 500 MB; read from Apple's page on 2026-11-19). Checked on macOS with Homebrew's ffmpeg 9.0.1 and its VideoToolbox H.264 encoder: a 5.4 s 886x1920 30 fps video encodes to a valid MP4 (ffprobe: h264, 162 frames). **Not built yet:** imported footage as clips (trim, split), audio, overlays and titles on top of footage, preview playback in the editor, a pinned LGPL ffmpeg bundled in the app. OpenCut and Kino facts come from their public repository and docs as read on 2026-11-19; OpenCut's rewrite is in progress, so its desktop app is a scaffold, not a reference implementation to port. The timeline design is intent.
 
 ## What videos are for here
 
@@ -30,6 +30,14 @@ Caveats: the OpenCut desktop app is a scaffold (its README says it opens a maxim
 - **Review and chat as first-class.** Notes on the timeline, references pasted into chat, live progress cards for long jobs. We take the in-app annotation model for video: a note pinned to a time range and a canvas region.
 
 Where we deliberately differ: local-only and open files (Kino stores footage in its cloud and has accounts, plans and credits); a design canvas in the same app, so a store set can contain video and stills; store-aware validation.
+
+## Built: video v1
+
+- **Model.** `Document.videos`: `Video {id, name, fps (1-60), width, height (even, 16-4096), clips}` and `Clip {id, frame, duration_ms (100-60,000), transition {kind, duration_ms}, motion {scale_from, scale_to}}`. Time is whole milliseconds. A transition overlaps the end of the clip before it, so a 500 ms fade makes the video 500 ms shorter than its clips; a video is at most 10 minutes and 500 clips. Stored as `videos/<id>.json` (listed in `od.toml`), like pages.
+- **Operations** (undoable, attributed, checkpointed like any edit): `create_video`, `delete_video`, `set_video` (name, fps, size), `add_clip`, `remove_clip`, `move_clip`, `set_clip` (duration_ms, frame, transition, motion). `restore_video` and `restore_clip` are the history's own and are refused from front ends. A frame that a clip shows cannot be deleted until the clip is removed.
+- **Rendering.** Each clip's frame is drawn by `render_frame` once at the scale the output needs (scaled to cover the video and cropped in the middle), then drawn with the zoom, offset and opacity of that moment: fade blends, slides push the old clip out.
+- **Encoding.** `od_media` pipes raw RGBA frames to `ffmpeg` (`-f rawvideo ... -c:v <encoder> -pix_fmt yuv420p -movflags +faststart`) and moves the finished `.part` file into `exports/` only when ffmpeg exits cleanly. It prefers an encoder the OS provides: `h264_videotoolbox` (macOS), `h264_mf` (Windows), then `libopenh264`, NVENC, QSV, AMF, VAAPI, and GPL `libx264` last. It looks for `ffmpeg` in `OPENDESIGNER_FFMPEG`, next to the app (and in a bundle's `Resources`), then `PATH`; without one the error says what to install. Release build on an M2 Pro: 5.4 s of 886x1920 in 7.8 s.
+- **Store rules.** `od_store::video` presets validate size, length, frame rate (before any encoding) and file size (after); a failure writes nothing and names the rule, the page and the day it was read. Not checked: H.264 profile/level, the 10-12 Mbps target, the audio track.
 
 ## Timeline model (intended)
 

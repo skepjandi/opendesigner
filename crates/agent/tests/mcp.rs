@@ -160,6 +160,10 @@ fn tools_list_describes_every_tool_with_a_closed_schema() {
         "device_template",
         "list_media",
         "list_locales",
+        "list_videos",
+        "list_video_presets",
+        "render_video_frame",
+        "export_video",
         "validate_export",
     ] {
         assert!(names.contains(&expected), "missing {expected}");
@@ -666,4 +670,137 @@ fn a_design_exports_in_each_language_without_touching_the_default() {
         json!({"ops": [{"op": "set_localized_text", "locale": "not a tag", "id": text, "text": "x"}]}),
     );
     assert!(err);
+}
+
+/// A video of two frames made only through tools, the way an agent would.
+fn make_video(f: &Fixture) -> (String, String, String) {
+    let r = f.ok(
+        "apply_ops",
+        json!({"ops": [
+            {"op":"create","parent":f.root,"node":{"kind":"frame","name":"One","width":400,"height":800,"fill":"#ff0000"}},
+            {"op":"create","parent":f.root,"node":{"kind":"frame","name":"Two","width":400,"height":800,"fill":"#0000ff"}},
+            {"op":"create_video","name":"Preview","fps":10,"width":200,"height":400}
+        ]}),
+    );
+    let created = r["created"].as_array().unwrap();
+    let ids: Vec<String> = created
+        .iter()
+        .map(|v| v.as_str().unwrap().to_string())
+        .collect();
+    let video = ids.iter().find(|i| i.starts_with("v_")).unwrap().clone();
+    let frames: Vec<&String> = ids.iter().filter(|i| i.starts_with("n_")).collect();
+    let (one, two) = (frames[0].clone(), frames[1].clone());
+    f.ok(
+        "apply_ops",
+        json!({"ops": [
+            {"op":"add_clip","video":video,"frame":one,"duration_ms":2000},
+            {"op":"add_clip","video":video,"frame":two,"duration_ms":2000,
+             "transition":{"kind":"fade","duration_ms":500},"motion":{"scale_from":1.0,"scale_to":1.5}}
+        ]}),
+    );
+    (video, one, two)
+}
+
+#[test]
+fn an_agent_builds_looks_at_and_lists_a_video_and_cannot_use_history_only_ops() {
+    let f = fixture();
+    let (video, one, _) = make_video(&f);
+    let listed = f.ok("list_videos", json!({}));
+    assert_eq!(listed[0]["id"], video);
+    assert_eq!(listed[0]["duration_ms"], 3500, "the fade overlaps 500 ms");
+    assert_eq!(listed[0]["frame_count"], 35);
+    assert_eq!(listed[0]["clips"][0]["frame"], one);
+    assert_eq!(listed[0]["clips"][0]["frame_name"], "One");
+    assert_eq!(listed[0]["clips"][1]["start_ms"], 1500);
+    assert_eq!(listed[0]["clips"][1]["transition_ms"], 500);
+
+    let resp = f.rpc(
+        "tools/call",
+        json!({"name":"render_video_frame","arguments":{"video":video,"time_ms":0,"max_side":100}}),
+    );
+    let content = &resp["result"]["content"];
+    use base64::Engine;
+    let png = base64::engine::general_purpose::STANDARD
+        .decode(content[0]["data"].as_str().unwrap())
+        .unwrap();
+    let facts = od_store::inspect_png(&png).unwrap();
+    assert_eq!((facts.width, facts.height), (50, 100), "shrunk to max_side");
+    assert!(content[1]["text"].as_str().unwrap().contains("at 0 ms"));
+
+    let (err, text) = f.tool(
+        "apply_ops",
+        json!({"ops":[{"op":"restore_clip","video":video,"index":0,"clip":{
+            "id":"c_99","frame":one,"duration_ms":1000}}]}),
+    );
+    assert!(err, "{text}");
+    let (err, text) = f.tool("apply_ops", json!({"ops":[{"op":"delete","id":one}]}));
+    assert!(err && text.contains("remove that clip"), "{text}");
+    let (err, text) = f.tool("export_video", json!({"video": video, "file": "../x.mp4"}));
+    assert!(err && text.contains("plain name"), "{text}");
+}
+
+#[test]
+fn export_video_writes_an_mp4_with_a_real_ffmpeg_and_says_what_is_missing_without_one() {
+    let f = fixture();
+    let (video, ..) = make_video(&f);
+    let (err, text) = f.tool(
+        "export_video",
+        json!({"video": video, "file": "preview.mp4"}),
+    );
+    if od_media::Ffmpeg::locate().is_err() {
+        assert!(err && text.contains("ffmpeg was not found"), "{text}");
+        eprintln!("skipped the encode: no ffmpeg on this machine");
+        return;
+    }
+    assert!(!err, "{text}");
+    let out: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(out["path"], "exports/preview.mp4");
+    assert_eq!(
+        (out["width"].as_u64(), out["height"].as_u64()),
+        (Some(200), Some(400))
+    );
+    assert_eq!(out["frames"], 35);
+    let file = f._tmp.path().join("p.od/exports/preview.mp4");
+    let data = std::fs::read(&file).unwrap();
+    assert_eq!(&data[4..8], b"ftyp");
+    assert_eq!(data.len() as u64, out["bytes"].as_u64().unwrap());
+}
+
+#[test]
+fn a_video_that_breaks_a_store_rule_is_refused_before_anything_is_encoded() {
+    let f = fixture();
+    let (video, ..) = make_video(&f);
+    let presets = f.ok("list_video_presets", json!({}));
+    let iphone = presets
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["id"] == "apple-app-preview-iphone")
+        .unwrap();
+    assert_eq!(iphone["sizes"], json!(["886x1920", "1920x886"]));
+    assert_eq!(iphone["max_fps"], 30);
+    assert!(
+        iphone["source"]
+            .as_str()
+            .unwrap()
+            .starts_with("https://developer.apple.com/")
+    );
+
+    // 200x400 and 3.5 s break the size and the minimum length; no ffmpeg is needed to know
+    let (err, text) = f.tool(
+        "export_video",
+        json!({"video": video, "file": "p.mp4", "preset": "apple-app-preview-iphone"}),
+    );
+    assert!(err, "{text}");
+    assert!(
+        text.contains("not written") && text.contains("886x1920"),
+        "{text}"
+    );
+    assert!(text.contains("minimum"), "{text}");
+    assert!(!f._tmp.path().join("p.od/exports/p.mp4").exists());
+    let (err, text) = f.tool(
+        "export_video",
+        json!({"video": video, "file": "p.mp4", "preset": "nope"}),
+    );
+    assert!(err && text.contains("unknown video preset"), "{text}");
 }

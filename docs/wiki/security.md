@@ -57,6 +57,8 @@ Kino's MCP endpoint is a useful precedent for the UX (fixed loopback port, keep 
 
 Projects, SVGs, images, fonts and video are untrusted inputs. Use maintained decoders; fuzz the project loader, the SVG importer and the preset parser; cap dimensions, node counts, nesting depth and decompressed sizes; no external references resolved on import (SVG `<image href>`, fonts by URL); media paths are `media/<plain name>`. Built: images are sniffed by magic bytes on import (PNG, JPEG, WebP; 64 MB cap) and decoded by the `image` crate with limits (16,384 px per side, 100 megapixels, 512 MB allocation); no fuzzing of the decoders is in place yet. FFmpeg is the largest native attack surface: pinned, checksum-verified, built with network protocols disabled (`--disable-network`, as OpenCut's manifest does), updated deliberately.
 
+Video export runs the `ffmpeg` program (found in `OPENDESIGNER_FFMPEG`, next to the app, or on `PATH`; never a path from a project file or an agent) as a child process with fixed arguments, raw frames on stdin and one output path inside the project's `exports/`, a plain `.mp4` name checked like the image export names. The agent chooses the video, the file name and the preset, nothing on the command line. Frames are drawn in this process; the child never reads project files.
+
 ## Network
 
 Allowed destinations: the user's configured model endpoint or agent, sites the user chose to fetch an asset from (a plain `GET`, no cookies), and the update channel if enabled. No telemetry. Documented in [AGENTS.md invariant 1](../../AGENTS.md).
