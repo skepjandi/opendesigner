@@ -4,6 +4,8 @@
 //! validated against the preset it claims to meet and fails loudly instead of producing a file a
 //! store will reject (AGENTS.md invariant 9).
 
+pub mod devices;
+
 use thiserror::Error;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

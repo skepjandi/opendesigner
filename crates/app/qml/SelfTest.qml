@@ -90,12 +90,25 @@ Item {
                    check(JSON.parse(editor.unrendered).length === 0, "a readable image needs no placeholder")
         },
         function () {
-            const r = JSON.parse(editor.exportFrame("apple-iphone-6.9", "shot.png"))
-            return check(!r.error && r.path === "exports/shot.png" && r.width === 1320, "validated export failed: " + JSON.stringify(r))
+            const r = JSON.parse(editor.exportAssets("frame", "apple-iphone-6.9", "shot.png", 1))
+            return check(!r.error && r.files.length === 1 && r.files[0].path === "exports/shot.png" && r.files[0].width === 1320, "validated export failed: " + JSON.stringify(r))
         },
         function () {
-            const r = JSON.parse(editor.exportFrame("google-feature-graphic", "bad.png"))
+            const r = JSON.parse(editor.exportAssets("frame", "google-feature-graphic", "bad.png", 1))
             return check(!!r.error && r.error.indexOf("1024x500") >= 0, "a wrong preset must be refused")
+        },
+        function () {
+            const set = JSON.parse(editor.exportAssets("set", "apple-iphone-6.9", "slide", 1))
+            const pano = JSON.parse(editor.exportAssets("panorama", "", "pano", 2))
+            return check(!set.error && set.files.length === 1 && set.files[0].path === "exports/slide-01.png", "set export failed: " + JSON.stringify(set)) &&
+                   check(!pano.error && pano.files.length === 2 && pano.files[0].width === 660, "panorama export failed: " + JSON.stringify(pano))
+        },
+        function () {
+            const kinds = JSON.parse(editor.deviceKinds())
+            const id = editor.addDevice(kinds[0].id)
+            const names = JSON.parse(editor.layers).map(l => l.name)
+            return check(kinds.length >= 3 && id !== "", "a device frame was not added: " + editor.message) &&
+                   check(names.indexOf("Screen") >= 0 && names.indexOf("Body") >= 0, "the device should add a body and a screen")
         },
         function () {
             grabTarget.grabToImage(function (result) {

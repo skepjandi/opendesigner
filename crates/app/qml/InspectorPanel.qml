@@ -8,6 +8,7 @@ Rectangle {
     id: root
     required property var editor
     signal requestPin(string nodeId)
+    signal requestReplaceImage(string nodeId)
     color: Theme.panel
 
     readonly property var node: editor.inspector && editor.inspector !== "null" ? JSON.parse(editor.inspector) : null
@@ -225,6 +226,10 @@ Rectangle {
                     color: Theme.muted
                     font.pixelSize: 12
                     elide: Text.ElideMiddle
+                }
+                Btn {
+                    text: "Replace…"
+                    onClicked: root.requestReplaceImage(root.node.id)
                 }
             }
             ColumnLayout {

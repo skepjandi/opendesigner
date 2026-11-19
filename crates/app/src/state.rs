@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex};
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
+use od_agent::export::{Plan, export_assets};
 use od_agent::mcp::{ChangeEvent, Handler};
 use od_agent::skill;
 use od_agent::{RunningServer, token};
@@ -15,6 +16,7 @@ use od_core::annotations::AnnotationTarget;
 use od_core::geometry::{self, Rect};
 use od_core::view;
 use od_core::{Actor, NewNode, Node, NodeId, NodeKind, Operation, Paint, Property, Workspace};
+use od_store::devices::{self, Device};
 use serde_json::{Value, json};
 
 const MAX_CANVAS_SIDE: f64 = 4096.0;
@@ -553,16 +555,204 @@ impl EditorState {
         })
     }
 
-    pub fn export(&self, preset: Option<&str>, file: &str) -> Res<Value> {
+    /// Exports into the project's `exports/`: `mode` is `frame` (the open frame), `set` (every
+    /// frame on the open frame's page, in drawing order, as `<name>-01.png`, ...) or `panorama`
+    /// (the open frame cut into `slices` columns). With a preset, nothing is written unless every
+    /// image and the count meet it.
+    pub fn export(&self, mode: &str, preset: Option<&str>, name: &str, slices: u32) -> Res<Value> {
         let frame = self.active_frame.clone().ok_or("no frame is open")?;
         self.with_ws(|ws| {
-            let out = od_agent::tools::export_frame(ws, &frame, file, preset, None, false)
-                .map_err(|e| e.0)?;
+            let siblings: Vec<NodeId>;
+            let plan = match mode {
+                "frame" => Plan::Frame {
+                    frame: &frame,
+                    file: name,
+                },
+                "set" => {
+                    let doc = ws.session.document();
+                    let page = doc
+                        .locate(&frame)
+                        .and_then(|l| doc.pages.get(l.page))
+                        .ok_or("the open frame is not on a page")?;
+                    siblings = view::frames(doc)
+                        .into_iter()
+                        .filter(|f| f.page == page.id.as_str())
+                        .map(|f| parse_id(&f.id))
+                        .collect::<Res<Vec<_>>>()?;
+                    Plan::Set {
+                        frames: &siblings,
+                        prefix: name,
+                    }
+                }
+                "panorama" => Plan::Panorama {
+                    frame: &frame,
+                    slices,
+                    prefix: name,
+                },
+                other => return Err(format!("unknown export mode {other:?}")),
+            };
+            let out = export_assets(ws, &plan, preset, None, false).map_err(|e| e.0)?;
+            let files: Vec<Value> = out
+                .files
+                .iter()
+                .map(|f| json!({"path": f.path, "width": f.width, "height": f.height, "bytes": f.bytes}))
+                .collect();
             Ok(json!({
-                "path": out.path, "width": out.width, "height": out.height, "bytes": out.bytes,
-                "not_drawn": out.not_drawn, "preset_verified": out.preset_verified,
+                "files": files, "not_drawn": out.not_drawn, "preset_verified": out.preset_verified,
             }))
         })
+    }
+
+    /// The device frames the editor can add.
+    pub fn device_kinds() -> Value {
+        Value::Array(
+            Device::ALL
+                .iter()
+                .map(|d| json!({"id": d.id(), "label": d.label()}))
+                .collect(),
+        )
+    }
+
+    /// Adds a generic device frame (see `od_store::devices`) to the open frame, centered, as large
+    /// as fits within 70% of the frame's width and 85% of its height unless `screen_width` is
+    /// given.
+    pub fn add_device(&mut self, kind: &str, screen_width: Option<f64>) -> Res<String> {
+        let device = Device::parse(kind).ok_or_else(|| format!("unknown device {kind:?}"))?;
+        let frame = self
+            .active_frame
+            .clone()
+            .ok_or("open or create a frame first")?;
+        let (fw, fh) = self.with_ws(|ws| {
+            ws.session
+                .document()
+                .node(&frame)
+                .map(|n| (n.width, n.height))
+                .ok_or_else(|| "the frame no longer exists".to_string())
+        })?;
+        let unit = devices::template(device, 100.0, None);
+        let (unit_w, unit_h) = unit
+            .children
+            .first()
+            .map_or((1.0, 1.0), |b| (b.width / 100.0, b.height / 100.0));
+        let sw = screen_width.unwrap_or_else(|| {
+            (fw * 0.7 / unit_w)
+                .min(fh * 0.85 / unit_h)
+                .round()
+                .max(50.0)
+        });
+        let mut node = devices::template(device, sw, None);
+        let (body_w, body_h) = node
+            .children
+            .first()
+            .map_or((0.0, 0.0), |b| (b.width, b.height));
+        node.x = ((fw - body_w) / 2.0).round();
+        node.y = ((fh - body_h) / 2.0).round();
+        let created = self.apply_user(&[Operation::Create {
+            parent: frame,
+            index: None,
+            node,
+        }])?;
+        let id = created.first().ok_or("nothing was created")?.clone();
+        self.select(Some(id.as_str()))?;
+        Ok(id.to_string())
+    }
+
+    /// Puts a new image into the node `id` (an image node, for example a device's screen),
+    /// keeping its position and size.
+    pub fn replace_image(&mut self, src: &std::path::Path, id: &str) -> Res<String> {
+        let id = parse_id(id)?;
+        let reference = self.with_ws(|ws| {
+            let node = ws
+                .session
+                .document()
+                .node(&id)
+                .ok_or_else(|| format!("{id} does not exist"))?;
+            if node.kind != NodeKind::Image {
+                return Err(format!("{id} is a {}, not an image", node.kind.as_str()));
+            }
+            let reference = ws.import_media(src).map_err(|e| e.to_string())?;
+            let path = ws.media_path(&reference).map_err(|e| e.to_string())?;
+            od_render::image_dimensions(&path).inspect_err(|_| {
+                let _ = std::fs::remove_file(&path);
+            })?;
+            Ok(reference)
+        })?;
+        self.apply_user(&[Operation::Set {
+            id: id.clone(),
+            prop: Property::Image(Some(reference)),
+        }])?;
+        self.select(Some(id.as_str()))?;
+        Ok(id.to_string())
+    }
+
+    /// Turns a device's placeholder screen (a rectangle named `Screen`) into an image node with
+    /// the same position, size and corners, in one undoable edit.
+    fn fill_screen(&mut self, src: &std::path::Path, screen: &NodeId) -> Res<String> {
+        let (parent, index, mut node) = self.with_ws(|ws| {
+            let doc = ws.session.document();
+            let loc = doc.locate(screen).ok_or("the screen no longer exists")?;
+            let (&index, up) = loc.path.split_last().ok_or("the screen has no parent")?;
+            let parent = doc
+                .node_at(&od_core::model::Location {
+                    page: loc.page,
+                    path: up.to_vec(),
+                })
+                .ok_or("the screen has no parent")?;
+            let s = doc.node(screen).ok_or("the screen no longer exists")?;
+            let mut n = NewNode::new(NodeKind::Image);
+            n.name = Some(s.name.clone());
+            n.x = s.x;
+            n.y = s.y;
+            n.width = s.width;
+            n.height = s.height;
+            n.corner_radius = Some(s.corner_radius);
+            Ok((parent.id.clone(), index, n))
+        })?;
+        node.image = Some(self.with_ws(|ws| {
+            let reference = ws.import_media(src).map_err(|e| e.to_string())?;
+            let path = ws.media_path(&reference).map_err(|e| e.to_string())?;
+            od_render::image_dimensions(&path).inspect_err(|_| {
+                let _ = std::fs::remove_file(&path);
+            })?;
+            Ok(reference)
+        })?);
+        node.image_fit = Some(od_core::ImageFit::Cover);
+        let created = self.apply_user(&[
+            Operation::Create {
+                parent,
+                index: Some(index + 1),
+                node,
+            },
+            Operation::Delete { id: screen.clone() },
+        ])?;
+        let id = created.first().ok_or("nothing was created")?.clone();
+        self.select(Some(id.as_str()))?;
+        Ok(id.to_string())
+    }
+
+    /// A file dropped on the canvas at `(x, y)` (frame coordinates): swaps the picture of the
+    /// image node under it, fills a device's screen, or adds a new image there.
+    pub fn drop_image(&mut self, src: &std::path::Path, x: f64, y: f64) -> Res<String> {
+        let under = self
+            .hit_test(x, y)
+            .and_then(|id| parse_id(&id).ok())
+            .and_then(|id| {
+                self.with_ws(|ws| {
+                    Ok(ws
+                        .session
+                        .document()
+                        .node(&id)
+                        .map(|n| (n.kind, n.name == devices::SCREEN_NAME)))
+                })
+                .ok()
+                .flatten()
+                .map(|(kind, is_screen)| (id, kind, is_screen))
+            });
+        match under {
+            Some((id, NodeKind::Image, _)) => self.replace_image(src, id.as_str()),
+            Some((id, NodeKind::Rect, true)) => self.fill_screen(src, &id),
+            _ => self.import_image(src, Some((x, y))),
+        }
     }
 
     // ---- agents ----
@@ -1080,11 +1270,137 @@ mod tests {
         let big = s.render_canvas(100.0).unwrap();
         assert!(big.len() < 40_000_000);
 
-        let err = s.export(Some("apple-iphone-6.9"), "shot.png").unwrap_err();
+        let err = s
+            .export("frame", Some("apple-iphone-6.9"), "shot.png", 1)
+            .unwrap_err();
         assert!(err.contains("1260x2736"), "{err}");
-        let ok = s.export(None, "draft.png").unwrap();
-        assert_eq!(ok["path"], "exports/draft.png");
-        assert!(s.export(None, "../x.png").is_err());
+        let ok = s.export("frame", None, "draft.png", 1).unwrap();
+        assert_eq!(ok["files"][0]["path"], "exports/draft.png");
+        assert!(s.export("frame", None, "../x.png", 1).is_err());
+        assert!(s.export("zip", None, "x", 1).is_err());
+    }
+
+    #[test]
+    fn sets_and_panoramas_export_all_or_nothing() {
+        let (mut s, t) = state();
+        s.create_node("frame", 0.0, 0.0, 400.0, 300.0).unwrap();
+        let exports = t.path().join("p.od/exports");
+
+        let set = s.export("set", None, "slide", 1).unwrap();
+        let paths: Vec<&str> = set["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|f| f["path"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            paths,
+            ["exports/slide-01.png", "exports/slide-02.png"],
+            "both frames on the page"
+        );
+
+        // Google phone screenshots need 2 to 8 images of at most 2:1; 400x300 is fine on shape
+        // but the preset's size rules refuse it, so nothing is written
+        let refused = s
+            .export("set", Some("google-phone"), "play", 1)
+            .unwrap_err();
+        assert!(refused.contains("play-01.png"), "{refused}");
+        assert!(!exports.join("play-01.png").exists());
+
+        let pano = s.export("panorama", None, "wide", 2).unwrap();
+        assert_eq!(pano["files"][0]["width"], 200);
+        assert!(s.export("panorama", None, "odd", 7).is_err());
+        assert!(!exports.join("odd-01.png").exists());
+    }
+
+    #[test]
+    fn a_device_frame_is_added_centered_and_a_dropped_capture_replaces_its_screen() {
+        let (mut s, t) = state();
+        let id = s.add_device("phone", None).unwrap();
+        assert_eq!(s.selected().map(|i| i.to_string()), Some(id));
+        let layers: Value = serde_json::from_str(&s.snapshot().layers).unwrap();
+        let names: Vec<&str> = layers
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|l| l["name"].as_str().unwrap())
+            .collect();
+        assert!(
+            names.contains(&"Body") && names.contains(&"Screen"),
+            "{names:?}"
+        );
+        assert!(s.add_device("watch", None).is_err());
+
+        // the screen starts as a placeholder rectangle: a drop on it turns it into an image of
+        // the same size and place (one undoable edit), and a drop on that image swaps the capture
+        let screen_id = layers
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|l| l["name"] == "Screen")
+            .map(|l| parse_id(l["id"].as_str().unwrap()).unwrap())
+            .unwrap();
+        let frame = s.active_frame.clone().unwrap();
+        let screen = s
+            .with_ws(|ws| {
+                Ok(geometry::bounds_in_frame(
+                    ws.session.document(),
+                    &frame,
+                    &screen_id,
+                ))
+            })
+            .unwrap()
+            .unwrap();
+        let (cx, cy) = (
+            screen.x + screen.width / 2.0,
+            screen.y + screen.height / 2.0,
+        );
+        let layer_count = layers.as_array().unwrap().len();
+
+        let capture = t.path().join("capture.png");
+        write_png(&capture, 90, 195);
+        let first = s.drop_image(&capture, cx, cy).unwrap();
+        let node = insp(&s);
+        assert_eq!(node["kind"], "image");
+        assert_eq!(node["name"], "Screen");
+        assert_eq!(node["image"], "media/capture.png");
+        assert_eq!(node["width"].as_f64(), Some(screen.width));
+        let after: Value = serde_json::from_str(&s.snapshot().layers).unwrap();
+        assert_eq!(
+            after.as_array().unwrap().len(),
+            layer_count,
+            "the placeholder was replaced, not stacked"
+        );
+        let (w, h) = (node["width"].clone(), node["height"].clone());
+
+        let second_file = t.path().join("second.png");
+        write_png(&second_file, 60, 130);
+        let again = s.drop_image(&second_file, cx, cy).unwrap();
+        assert_eq!(
+            again, first,
+            "the picture under the drop is replaced, not stacked"
+        );
+        assert_eq!(insp(&s)["image"], "media/second.png");
+        assert_eq!(
+            (insp(&s)["width"].clone(), insp(&s)["height"].clone()),
+            (w, h)
+        );
+        s.undo().unwrap();
+        assert_eq!(
+            insp(&s)["image"],
+            "media/capture.png",
+            "the swap is one undoable edit"
+        );
+        s.undo().unwrap();
+        let reverted: Value = serde_json::from_str(&s.snapshot().layers).unwrap();
+        assert!(
+            reverted
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|l| l["name"] == "Screen" && l["kind"] == "rect"),
+            "undoing the fill brings the placeholder back"
+        );
     }
 
     #[test]

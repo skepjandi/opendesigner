@@ -6,6 +6,7 @@ mod images;
 mod text;
 
 pub use images::dimensions as image_dimensions;
+pub use tiny_skia::Pixmap;
 
 use std::collections::BTreeMap;
 use std::path::Path as FsPath;
@@ -13,8 +14,7 @@ use std::path::Path as FsPath;
 use od_core::{Document, Node, NodeId, NodeKind, OpError, limits};
 use thiserror::Error;
 use tiny_skia::{
-    Color, FillRule, Mask, Paint as SkPaint, Path, PathBuilder, Pixmap, Rect, Stroke as SkStroke,
-    Transform,
+    Color, FillRule, Mask, Paint as SkPaint, Path, PathBuilder, Rect, Stroke as SkStroke, Transform,
 };
 
 /// Largest exported image, in pixels per side and in total (about 256 MB of RGBA).
@@ -39,6 +39,10 @@ pub enum RenderError {
     Document(#[from] OpError),
     #[error("PNG encoding failed: {0}")]
     Encode(String),
+    #[error(
+        "{width} px wide cannot be cut into {count} equal slices (use a count that divides the width)"
+    )]
+    BadSlices { width: u32, count: u32 },
 }
 
 /// Content the renderer could not draw.
@@ -269,6 +273,22 @@ fn rounded_rect(w: f32, h: f32, r: f32) -> Option<Path> {
     p.cubic_to(0.0, r - c, r - c, 0.0, r, 0.0);
     p.close();
     p.finish()
+}
+
+/// Cuts `pixmap` into `count` equal-width columns, left to right: the slices of a panorama.
+pub fn slice_columns(pixmap: &Pixmap, count: u32) -> Result<Vec<Pixmap>, RenderError> {
+    let width = pixmap.width();
+    if count == 0 || width % count != 0 {
+        return Err(RenderError::BadSlices { width, count });
+    }
+    let each = width / count;
+    (0..count)
+        .map(|i| {
+            let area = tiny_skia::IntRect::from_xywh((i * each) as i32, 0, each, pixmap.height());
+            area.and_then(|r| pixmap.clone_rect(r))
+                .ok_or(RenderError::BadSlices { width, count })
+        })
+        .collect()
 }
 
 /// Encodes a PNG. With `alpha` false the image is flattened onto white and written as RGB, which
@@ -813,5 +833,29 @@ mod tests {
             .read_info()
             .unwrap();
         assert_eq!(reader.info().color_type, png::ColorType::Rgba);
+    }
+
+    #[test]
+    fn a_panorama_is_cut_into_equal_columns_that_meet_at_the_seams() {
+        let (mut s, frame) = frame_session();
+        add(&mut s, &frame, rect(50.0, 0.0, 50.0, 50.0, "#0000ff"));
+        let r = render_frame(s.document(), &frame, 1.0, None).unwrap();
+        let slices = slice_columns(&r.pixmap, 2).unwrap();
+        assert_eq!(slices.len(), 2);
+        assert!(slices.iter().all(|p| (p.width(), p.height()) == (50, 50)));
+        let color = |p: &Pixmap| {
+            let c = p.pixel(25, 25).unwrap();
+            [c.red(), c.green(), c.blue()]
+        };
+        assert_eq!(color(&slices[0]), [255, 0, 0]);
+        assert_eq!(color(&slices[1]), [0, 0, 255]);
+        assert!(matches!(
+            slice_columns(&r.pixmap, 3),
+            Err(RenderError::BadSlices {
+                width: 100,
+                count: 3
+            })
+        ));
+        assert!(slice_columns(&r.pixmap, 0).is_err());
     }
 }

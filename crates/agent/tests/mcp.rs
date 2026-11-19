@@ -155,6 +155,10 @@ fn tools_list_describes_every_tool_with_a_closed_schema() {
         "list_export_presets",
         "render_preview",
         "export",
+        "export_set",
+        "export_panorama",
+        "device_template",
+        "list_media",
         "validate_export",
     ] {
         assert!(names.contains(&expected), "missing {expected}");
@@ -426,4 +430,149 @@ fn the_change_hook_reports_what_an_agent_touched() {
         [("agent:codex".to_string(), 1)],
         "reads do not fire the hook"
     );
+}
+
+fn wide_frame(f: &Fixture, width: u32) -> String {
+    let r = f.ok(
+        "apply_ops",
+        json!({"ops": [{"op":"create","parent":f.root,"node":{
+            "kind":"frame","name":"Panorama","width":width,"height":2868,"fill":"#060b1c",
+            "children":[{"kind":"rect","name":"Ribbon","x":0,"y":1000,"width":width,
+                         "height":300,"fill":"#f2ca83"}]}}]}),
+    );
+    r["created"][0].as_str().unwrap().to_string()
+}
+
+#[test]
+fn a_panorama_is_cut_into_validated_slides_or_nothing_is_written() {
+    let f = fixture();
+    let wide = wide_frame(&f, 3 * 1320);
+    let dir = f.ws.lock().unwrap().dir().unwrap().to_path_buf();
+
+    let ok = f.ok(
+        "export_panorama",
+        json!({"frame": wide, "slices": 3, "prefix": "shot", "preset": "apple-iphone-6.9"}),
+    );
+    let files: Vec<&str> = ok["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v["path"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        files,
+        [
+            "exports/shot-01.png",
+            "exports/shot-02.png",
+            "exports/shot-03.png"
+        ]
+    );
+    assert_eq!(ok["files"][0]["width"], 1320);
+    for n in 1..=3 {
+        assert!(dir.join(format!("exports/shot-0{n}.png")).exists());
+    }
+    let v = f.ok(
+        "validate_export",
+        json!({"preset":"apple-iphone-6.9","files":["shot-01.png","shot-02.png","shot-03.png"]}),
+    );
+    assert_eq!(v["ok"], true);
+
+    // a count that does not divide the width, and slices that break the preset: nothing is written
+    let (err, text) = f.tool(
+        "export_panorama",
+        json!({"frame": wide, "slices": 7, "prefix": "odd", "preset": "apple-iphone-6.9"}),
+    );
+    assert!(err && text.contains("equal slices"), "{text}");
+    let (err, text) = f.tool(
+        "export_panorama",
+        json!({"frame": wide, "slices": 11, "prefix": "many", "preset": "apple-iphone-6.9"}),
+    );
+    assert!(
+        err && text.contains("the set") && text.contains("many-01.png"),
+        "{text}"
+    );
+    let (err, text) = f.tool(
+        "export_panorama",
+        json!({"frame": wide, "slices": 3, "prefix": "wrong", "preset": "google-feature-graphic"}),
+    );
+    assert!(err && text.contains("wrong-01.png"), "{text}");
+    for stem in ["odd", "many", "wrong"] {
+        assert!(
+            !dir.join(format!("exports/{stem}-01.png")).exists(),
+            "{stem}"
+        );
+    }
+}
+
+#[test]
+fn a_set_is_validated_as_a_set_including_its_count() {
+    let f = fixture();
+    let a = wide_frame(&f, 1080);
+    let b = wide_frame(&f, 1080);
+    let dir = f.ws.lock().unwrap().dir().unwrap().to_path_buf();
+    // Google wants at least two phone screenshots; these are 1080x2868 (under the 2:1 limit? no)
+    let (err, text) = f.tool(
+        "export_set",
+        json!({"frames": [a], "prefix": "play", "preset": "google-phone"}),
+    );
+    assert!(
+        err && text.contains("the set"),
+        "one image breaks the count rule: {text}"
+    );
+    assert!(!dir.join("exports/play-01.png").exists());
+
+    let ok = f.ok("export_set", json!({"frames": [a, b], "prefix": "free"}));
+    assert_eq!(ok["files"].as_array().unwrap().len(), 2);
+    assert!(dir.join("exports/free-02.png").exists());
+
+    let (err, text) = f.tool("export_set", json!({"frames": [], "prefix": "x"}));
+    assert!(err, "{text}");
+    let (err, text) = f.tool("export_set", json!({"frames": [a], "prefix": "../x"}));
+    assert!(err && text.contains("plain name"), "{text}");
+}
+
+#[test]
+fn a_device_template_is_a_valid_create_payload_that_applies_as_is() {
+    let f = fixture();
+    let t = f.ok(
+        "device_template",
+        json!({"kind": "phone", "screen_width": 600}),
+    );
+    assert_eq!(t["node"]["kind"], "group");
+    assert_eq!(t["node"]["children"][1]["name"], "Screen");
+    let created = f.ok(
+        "apply_ops",
+        json!({"ops": [{"op":"create","parent":f.root,"node":t["node"]}]}),
+    );
+    assert_eq!(
+        created["created"].as_array().unwrap().len(),
+        1,
+        "the group is the one top-level node"
+    );
+    let found = f.ok("find_nodes", json!({"name_contains": "Screen"}));
+    assert_eq!(
+        found.as_array().unwrap().len(),
+        1,
+        "the screen is inside the group"
+    );
+
+    for bad in [
+        json!({"kind": "watch", "screen_width": 600}),
+        json!({"kind": "phone", "screen_width": 5}),
+        json!({"kind": "phone", "screen_width": f64::NAN}),
+        json!({"kind": "phone", "screen_width": 600, "image": "nope"}),
+    ] {
+        let (err, text) = f.tool("device_template", bad.clone());
+        if bad["image"] == "nope" {
+            // the template itself is just data; the create operation is what refuses a bad path
+            let node = serde_json::from_str::<Value>(&text).unwrap();
+            let (err, _) = f.tool(
+                "apply_ops",
+                json!({"ops": [{"op":"create","parent":f.root,"node":node["node"]}]}),
+            );
+            assert!(err, "a bad image path is refused when applied");
+        } else {
+            assert!(err, "{bad}: {text}");
+        }
+    }
 }
