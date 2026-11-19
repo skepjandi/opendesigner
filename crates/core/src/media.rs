@@ -115,6 +115,35 @@ pub fn footage_name(reference: &str) -> Result<&str, OpError> {
     }
 }
 
+pub const AUDIO_EXTENSIONS: [&str; 5] = ["mp3", "wav", "m4a", "aac", "ogg"];
+
+/// The file name in an audio reference `media/<name>.mp3|wav|m4a|aac|ogg`, or the rule it breaks.
+/// A sound track of a video names a file this way, like an image node names its picture.
+pub fn audio_name(reference: &str) -> Result<&str, OpError> {
+    let bad = |detail: String| OpError::OutOfBounds {
+        what: "audio",
+        detail,
+    };
+    let name = reference
+        .strip_prefix("media/")
+        .ok_or_else(|| bad(format!("{reference:?} must look like media/<file name>")))?;
+    let ext_ok = name
+        .rsplit_once('.')
+        .is_some_and(|(_, e)| AUDIO_EXTENSIONS.contains(&e.to_ascii_lowercase().as_str()));
+    let chars_ok = !name.starts_with('.')
+        && name.chars().count() <= MAX_NAME_LEN
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | ' '));
+    if ext_ok && chars_ok {
+        Ok(name)
+    } else {
+        Err(bad(format!(
+            "{name:?} must be a plain file name ending in .mp3, .wav, .m4a, .aac or .ogg"
+        )))
+    }
+}
+
 /// Copies a video the user chose into `<project>/media/` and returns its reference. Only MP4 and
 /// QuickTime files are accepted (checked by their first bytes).
 pub fn import_footage(project_dir: &Path, src: &Path) -> Result<String, ProjectError> {
