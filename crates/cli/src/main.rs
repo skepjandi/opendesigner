@@ -6,7 +6,10 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
-use od_core::{Actor, Node, NodeId, OpError, Operation, ProjectError, Session, project};
+use od_core::{
+    Actor, AnnotationTarget, Node, NodeId, OpError, Operation, ProjectError, Session, Workspace,
+    project,
+};
 use od_render::RenderError;
 use od_store::{ImageFacts, Preset, Verification};
 use thiserror::Error;
@@ -81,6 +84,45 @@ enum Command {
     },
     /// List the built-in store presets.
     Presets,
+    /// Pin a note on a node (or a page region) for an agent to read.
+    Annotate {
+        dir: PathBuf,
+        note: String,
+        /// The node the note is pinned to.
+        #[arg(long, conflicts_with = "page")]
+        node: Option<String>,
+        /// A page, with --region x,y,w,h, instead of a node.
+        #[arg(long, requires = "region")]
+        page: Option<String>,
+        #[arg(long, requires = "page")]
+        region: Option<String>,
+        #[arg(long)]
+        agent: Option<String>,
+    },
+    /// List annotations.
+    Annotations {
+        dir: PathBuf,
+        /// Include resolved ones.
+        #[arg(long)]
+        all: bool,
+    },
+    /// Mark an annotation resolved.
+    Resolve {
+        dir: PathBuf,
+        id: u64,
+        /// What was done, in the user's terms.
+        #[arg(long)]
+        note: Option<String>,
+        #[arg(long)]
+        agent: Option<String>,
+    },
+    /// Print the guidance an agent receives: pages, selection, open notes, recent user edits.
+    Guidance {
+        dir: PathBuf,
+        /// Pretend these nodes are selected (a front end holds the real selection).
+        #[arg(long, value_delimiter = ',')]
+        select: Vec<String>,
+    },
 }
 
 #[derive(Debug, Error)]
@@ -231,8 +273,89 @@ fn run(cli: Cli) -> Result<(), CliError> {
                 println!("{}\t{}", p.id, p.description);
             }
         }
+        Command::Annotate {
+            dir,
+            note,
+            node,
+            page,
+            region,
+            agent,
+        } => {
+            let mut ws = Workspace::open(&dir)?;
+            let target = annotation_target(node, page, region)?;
+            let id = ws
+                .annotations
+                .add(ws.session.document(), target, &note, actor(agent)?)?;
+            ws.save()?;
+            println!("annotation {id}");
+        }
+        Command::Annotations { dir, all } => {
+            let ws = Workspace::open(&dir)?;
+            for a in ws.annotations.all() {
+                if all || a.status == od_core::AnnotationStatus::Open {
+                    println!("{}", serde_json::to_string(a).map_err(json_err)?);
+                }
+            }
+        }
+        Command::Resolve {
+            dir,
+            id,
+            note,
+            agent,
+        } => {
+            let mut ws = Workspace::open(&dir)?;
+            ws.annotations.resolve(id, actor(agent)?, note.as_deref())?;
+            ws.save()?;
+            println!("resolved {id}");
+        }
+        Command::Guidance { dir, select } => {
+            let mut ws = Workspace::open(&dir)?;
+            let ids = select
+                .iter()
+                .map(|s| NodeId::parse(s))
+                .collect::<Result<Vec<_>, _>>()?;
+            ws.select(ids)?;
+            let json = serde_json::to_string_pretty(&ws.guidance()).map_err(json_err)?;
+            println!("{json}");
+        }
     }
     Ok(())
+}
+
+fn json_err(e: serde_json::Error) -> CliError {
+    CliError::Invalid(e.to_string())
+}
+
+fn annotation_target(
+    node: Option<String>,
+    page: Option<String>,
+    region: Option<String>,
+) -> Result<AnnotationTarget, CliError> {
+    if let (Some(page), Some(region)) = (page, region) {
+        let parts: Vec<f64> = region
+            .split(',')
+            .map(|p| p.trim().parse::<f64>())
+            .collect::<Result<_, _>>()
+            .map_err(|_| CliError::Invalid("--region takes x,y,width,height numbers".into()))?;
+        let [x, y, width, height] = parts[..] else {
+            return Err(CliError::Invalid("--region takes x,y,width,height".into()));
+        };
+        return Ok(AnnotationTarget::Region {
+            page: NodeId::parse(&page)?,
+            x,
+            y,
+            width,
+            height,
+        });
+    }
+    match node {
+        Some(id) => Ok(AnnotationTarget::Node {
+            id: NodeId::parse(&id)?,
+        }),
+        None => Err(CliError::Invalid(
+            "give --node, or --page with --region".into(),
+        )),
+    }
 }
 
 fn print_node(node: &Node, depth: usize) {

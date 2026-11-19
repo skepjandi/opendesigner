@@ -8,6 +8,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use crate::annotations::Annotations;
 use crate::error::ProjectError;
 use crate::history::{Checkpoint, Session, Transaction};
 use crate::limits::MAX_FILE_BYTES;
@@ -70,6 +71,24 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), ProjectError> {
 
 fn json_line<T: Serialize>(value: &T, path: &Path) -> Result<String, ProjectError> {
     serde_json::to_string(value).map_err(|e| parse_err(path, e))
+}
+
+const ANNOTATIONS: &str = "annotations.json";
+
+pub fn save_annotations(dir: &Path, annotations: &Annotations) -> Result<(), ProjectError> {
+    let path = dir.join(ANNOTATIONS);
+    let mut json = serde_json::to_string_pretty(annotations).map_err(|e| parse_err(&path, e))?;
+    json.push('\n');
+    write_atomic(&path, json.as_bytes())
+}
+
+/// Annotations are optional: a project without the file has none.
+pub fn load_annotations(dir: &Path) -> Result<Annotations, ProjectError> {
+    let path = dir.join(ANNOTATIONS);
+    if !path.exists() {
+        return Ok(Annotations::default());
+    }
+    serde_json::from_str(&read_limited(&path)?).map_err(|e| parse_err(&path, e))
 }
 
 /// Creates a new project folder with one empty page and returns its session.

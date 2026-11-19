@@ -40,6 +40,10 @@ pub enum OpError {
     NothingTo(&'static str),
     #[error("checkpoint {0} does not exist")]
     NoSuchCheckpoint(u64),
+    #[error("annotation {0} does not exist")]
+    NoSuchAnnotation(u64),
+    #[error("page {0} does not exist")]
+    NoSuchPage(String),
     #[error("internal error: {0}")]
     Internal(String),
 }
