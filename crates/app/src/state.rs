@@ -1467,6 +1467,13 @@ impl EditorState {
     }
 
     /// Sends `prompt` to the agent as soon as it is ready (after [`EditorState::chat_start`]).
+    /// The model and effort picked on the start screen ("" keeps the agent's own).
+    pub fn chat_wanted(&mut self, model: &str, effort: &str) {
+        if let Some(chat) = self.chat.as_mut() {
+            chat.set_wanted(model, effort);
+        }
+    }
+
     pub fn chat_first_prompt(&mut self, prompt: &str) {
         if let Some(chat) = self.chat.as_mut() {
             chat.set_first_prompt(prompt);
@@ -3146,6 +3153,22 @@ mod tests {
         assert_eq!(brief(&s)["chosen_by"], "none");
         let all: Value = serde_json::from_str(&EditorState::formats()).unwrap();
         assert_eq!(all[0]["section"], "Video");
+    }
+
+    #[test]
+    fn the_start_screen_can_read_an_agents_models_and_the_picks_apply_once_it_is_up() {
+        let line = format!("\"{}\" settings", mock_agent().display());
+        let probed = crate::chat::probe_options(&line);
+        let config = probed["config"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{probed}"));
+        assert!(
+            config
+                .iter()
+                .any(|o| o["category"] == "model" && o["choices"].as_array().unwrap().len() == 2)
+        );
+        assert!(config.iter().any(|o| o["category"] == "thought_level"));
+        assert!(crate::chat::probe_options("definitely-not-an-agent-xyz")["error"].is_string());
     }
 
     #[test]

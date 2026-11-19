@@ -34,6 +34,7 @@ pub mod qobject {
         #[qproperty(QString, workspaces)]
         #[qproperty(QString, brief)]
         #[qproperty(QString, layout)]
+        #[qproperty(QString, agent_probe)]
         #[qproperty(QString, checkerboard)]
         #[qproperty(QString, tokens)]
         #[qproperty(QString, languages)]
@@ -81,7 +82,16 @@ pub mod qobject {
         fn recent_projects(self: &Self) -> QString;
         #[qinvokable]
         #[cxx_name = "chatStartWith"]
-        fn chat_start_with(self: Pin<&mut Self>, command: &QString, prompt: &QString);
+        fn chat_start_with(
+            self: Pin<&mut Self>,
+            command: &QString,
+            prompt: &QString,
+            model: &QString,
+            effort: &QString,
+        );
+        #[qinvokable]
+        #[cxx_name = "probeAgent"]
+        fn probe_agent(self: Pin<&mut Self>, command: &QString);
         #[qinvokable]
         #[cxx_name = "saveProject"]
         fn save_project(self: Pin<&mut Self>);
@@ -416,6 +426,7 @@ pub struct EditorRust {
     workspaces: QString,
     brief: QString,
     layout: QString,
+    agent_probe: QString,
     checkerboard: QString,
     tokens: QString,
     languages: QString,
@@ -626,10 +637,35 @@ impl qobject::Editor {
         q(&EditorState::recent_projects().to_string())
     }
 
-    pub fn chat_start_with(mut self: Pin<&mut Self>, command: &QString, prompt: &QString) {
+    pub fn chat_start_with(
+        mut self: Pin<&mut Self>,
+        command: &QString,
+        prompt: &QString,
+        model: &QString,
+        effort: &QString,
+    ) {
         self.as_mut().chat_start(command);
         let prompt = prompt.to_string();
-        self.as_mut().rust_mut().state.chat_first_prompt(&prompt);
+        let (model, effort) = (model.to_string(), effort.to_string());
+        let mut rust = self.as_mut().rust_mut();
+        rust.state.chat_first_prompt(&prompt);
+        rust.state.chat_wanted(&model, &effort);
+    }
+
+    /// Reads the settings an agent offers by starting it briefly; the answer arrives in
+    /// `agentProbe` as `{command, config}` or `{command, error}`.
+    pub fn probe_agent(mut self: Pin<&mut Self>, command: &QString) {
+        let command = command.to_string();
+        self.as_mut().set_agent_probe(q(
+            &serde_json::json!({"command": command, "loading": true}).to_string()
+        ));
+        let qt = self.qt_thread();
+        std::thread::spawn(move || {
+            let mut result = crate::chat::probe_options(&command);
+            result["command"] = serde_json::json!(command);
+            let text = result.to_string();
+            let _ = qt.queue(move |editor| editor.set_agent_probe(q(&text)));
+        });
     }
 
     pub fn open_project(mut self: Pin<&mut Self>, path: &QString) {

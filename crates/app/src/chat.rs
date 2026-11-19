@@ -66,6 +66,9 @@ pub struct Chat {
     first_prompt: bool,
     /// Sent as soon as the agent is ready (the task the user typed on the start screen).
     waiting_prompt: Option<String>,
+    /// Settings picked before the agent started, `(category, value)`; each is applied once the
+    /// agent offers that setting.
+    wanted: Vec<(String, String)>,
     /// Messages typed while the agent was working; each goes out when the turn ends.
     queued: std::collections::VecDeque<String>,
     /// Answer the agent's permission requests with "allow" without asking.
@@ -120,6 +123,62 @@ const PRESETS: &[Preset] = &[
         needs: &[],
     },
 ];
+
+/// The settings an agent offers, as JSON for the window.
+pub fn config_json(options: &[od_agent::acp::ConfigOption]) -> Vec<Value> {
+    options
+        .iter()
+        .map(|o| {
+            json!({
+                "id": o.id, "name": o.name, "category": o.category, "current": o.current,
+                "choices": o.choices.iter().map(|c| json!({
+                    "value": c.value, "name": c.name, "description": c.description,
+                })).collect::<Vec<_>>(),
+            })
+        })
+        .collect()
+}
+
+/// Starts the agent just long enough to read the settings it offers (its models and efforts),
+/// then stops it. Blocks; run it on a thread. Returns `{config: [...]}` or `{error}`.
+pub fn probe_options(command_line: &str) -> Value {
+    let run = || -> Result<Vec<Value>, String> {
+        let (program, args) = split_command(command_line)?;
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| e.to_string())?;
+        runtime.block_on(async {
+            let (tx, mut rx) = mpsc::unbounded_channel::<ChatEvent>();
+            let command = AgentCommand {
+                program,
+                args,
+                cwd: std::env::temp_dir(),
+            };
+            // there is no editor to connect to yet: a placeholder the agent never needs
+            let mcp = McpEndpoint {
+                url: "http://127.0.0.1:9/mcp".into(),
+                token: "probe".into(),
+            };
+            let session = AcpSession::start(&command, &mcp, &[], tx)
+                .await
+                .map_err(|e| e.to_string())?;
+            tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+            let mut found = Vec::new();
+            while let Ok(event) = rx.try_recv() {
+                if let ChatEvent::Config(o) = event {
+                    found = config_json(&o);
+                }
+            }
+            session.shutdown().await;
+            Ok(found)
+        })
+    };
+    match run() {
+        Ok(config) => json!({"config": config}),
+        Err(error) => json!({"error": error}),
+    }
+}
 
 /// Whether an executable called `program` is in one of the `PATH` directories.
 fn on_path(program: &str) -> bool {
@@ -210,6 +269,7 @@ impl Chat {
             plan: Vec::new(),
             first_prompt: true,
             waiting_prompt: None,
+            wanted: Vec::new(),
             queued: Default::default(),
             auto_allow: false,
             config: Vec::new(),
@@ -244,6 +304,7 @@ impl Chat {
         self.plan.clear();
         self.first_prompt = true;
         self.waiting_prompt = None;
+        self.wanted.clear();
         self.queued.clear();
         self.config.clear();
         self.commands.clear();
@@ -268,6 +329,43 @@ impl Chat {
     /// Says something in the conversation that is not the agent's words.
     pub fn note(&mut self, text: &str) {
         self.push(json!({"role": "note", "text": text}));
+    }
+
+    /// Settings to apply when the agent is up: its model and how hard it thinks, as chosen on the
+    /// start screen. Empty values are left at the agent's default.
+    pub fn set_wanted(&mut self, model: &str, effort: &str) {
+        self.wanted = [("model", model), ("thought_level", effort)]
+            .into_iter()
+            .filter(|(_, v)| !v.is_empty())
+            .map(|(c, v)| (c.to_string(), v.to_string()))
+            .collect();
+        self.apply_wanted();
+    }
+
+    fn apply_wanted(&mut self) {
+        if self.session.is_none() || self.wanted.is_empty() {
+            return;
+        }
+        let todo: Vec<(String, String)> = self
+            .wanted
+            .iter()
+            .filter_map(|(cat, value)| {
+                let o = self.config.iter().find(|o| &o.category == cat)?;
+                o.choices
+                    .iter()
+                    .any(|c| &c.value == value)
+                    .then(|| (o.id.clone(), value.clone()))
+            })
+            .collect();
+        for (id, value) in todo {
+            if let Err(e) = self.set_config(&id, &value) {
+                self.push(json!({"role": "error", "text": e}));
+            }
+        }
+        // once the agent has told us what it offers, what it does not offer is dropped
+        if !self.config.is_empty() {
+            self.wanted.clear();
+        }
     }
 
     /// Has the agent start on `prompt` once it is connected.
@@ -400,6 +498,7 @@ impl Chat {
             ChatInput::Started(Ok(session)) => {
                 self.session = Some(Arc::new(session));
                 self.status = Status::Ready;
+                self.apply_wanted();
                 self.push(json!({"role": "note", "text": "Connected. Ask for a change."}));
                 if !self.servers.is_empty() {
                     let names: Vec<String> = self
@@ -505,7 +604,10 @@ impl Chat {
                 self.push(json!({"role": "error", "text": message}));
                 self.send_queued();
             }
-            ChatEvent::Config(options) => self.config = options,
+            ChatEvent::Config(options) => {
+                self.config = options;
+                self.apply_wanted();
+            }
             ChatEvent::ConfigSet { id, value } => {
                 if let Some(o) = self.config.iter_mut().find(|o| o.id == id) {
                     o.current = value;
@@ -560,12 +662,7 @@ impl Chat {
             "plan": self.plan,
             "auto_allow": self.auto_allow,
             "queued": self.queued.len(),
-            "config": self.config.iter().map(|o| json!({
-                "id": o.id, "name": o.name, "category": o.category, "current": o.current,
-                "choices": o.choices.iter().map(|c| json!({
-                    "value": c.value, "name": c.name, "description": c.description,
-                })).collect::<Vec<_>>(),
-            })).collect::<Vec<_>>(),
+            "config": config_json(&self.config),
             "commands": self.commands.iter().map(|c| json!({
                 "name": c.name, "description": c.description, "hint": c.hint,
             })).collect::<Vec<_>>(),

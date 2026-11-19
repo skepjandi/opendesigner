@@ -8,6 +8,16 @@ All notable changes to OpenDesigner are documented here.
 
 ## 2026-11-19
 
+### feat(app): the start screen has a model and an effort selector
+
+**Area:** `feat(app)`
+
+**Why:** The model and effort could only be changed after connecting. **Change:** on the start screen, once an agent is chosen, the app starts it briefly to read the models and efforts it offers (a spinner and a Refresh button), lists them next to the agent, and applies the picks as soon as the real session is up, before the first task is sent. Agents that offer neither say so.
+
+**Verified:** the app builds, clippy and the window session pass (the session's agent offers no settings, so the selectors' content was not driven). **Not verified:** the probe against a real agent from the window (the same ACP call was read from omp by hand earlier), the selectors by eye, and that every agent honours a setting made right after `session/new`.
+
+**PR:** n/a
+
 ### fix(app): /model, /effort and /mode open a chooser instead of being sent to the model
 
 **Area:** `fix(app)`
