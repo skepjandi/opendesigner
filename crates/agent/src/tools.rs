@@ -67,6 +67,8 @@ pub struct Turns {
     checkpoint_by_turn: HashMap<String, u64>,
     counter: u64,
     seen: HashSet<String>,
+    /// For each frame, how long the history was when `review_frame` last looked at it.
+    reviewed: HashMap<NodeId, usize>,
 }
 
 pub struct CallCtx<'a> {
@@ -824,9 +826,53 @@ struct ReviewArgs {
     frame: NodeId,
 }
 
+/// What to tell an agent that is about to call a frame finished: frames that were never reviewed,
+/// or changed after their last review. A nudge, not a gate: an export still goes through.
+fn unreviewed(ctx: &CallCtx, frames: &[NodeId]) -> Vec<String> {
+    fn collect(n: &od_core::Node, out: &mut HashSet<NodeId>) {
+        out.insert(n.id.clone());
+        n.children.iter().for_each(|c| collect(c, out));
+    }
+    let doc = ctx.ws.session.document();
+    let log = ctx.ws.session.log();
+    let mut notes = Vec::new();
+    for f in frames {
+        let Some(node) = doc.node(f) else { continue };
+        let mut ids = HashSet::new();
+        collect(node, &mut ids);
+        let last_touch = log.iter().rposition(|tx| {
+            tx.ops
+                .iter()
+                .any(|a| a.touched.iter().any(|t| ids.contains(t)))
+        });
+        match (ctx.turns.reviewed.get(f), last_touch) {
+            (None, _) => notes.push(format!("{} was never checked with review_frame", node.name)),
+            (Some(at), Some(i)) if i >= *at => {
+                notes.push(format!("{} changed after its last review_frame", node.name));
+            }
+            _ => {}
+        }
+    }
+    notes
+}
+
+fn with_review_note(ctx: &CallCtx, frames: &[NodeId], mut v: Value) -> Value {
+    let notes = unreviewed(ctx, frames);
+    if !notes.is_empty() {
+        v["before_you_call_it_done"] = json!(format!(
+            "{}. Run review_frame and look at render_preview, fix what they find, then export again.",
+            notes.join("; ")
+        ));
+    }
+    v
+}
+
 fn review_frame_tool(ctx: &mut CallCtx, a: ReviewArgs) -> Result<Output, ToolError> {
     let doc = ctx.ws.session.document();
     let mut v = crate::review::review_frame(doc, &a.frame).map_err(ToolError)?;
+    ctx.turns
+        .reviewed
+        .insert(a.frame.clone(), ctx.ws.session.log().len());
     let brief = brief_of(ctx);
     if let (Some(f), Some(size)) = (
         brief.format.as_ref().filter(|f| f.kind == "image"),
@@ -1115,7 +1161,7 @@ fn export(ctx: &mut CallCtx, a: ExportArgs) -> Result<Output, ToolError> {
     let Some(file) = out.files.first() else {
         return fail("nothing was exported");
     };
-    Ok(Output::json(&json!({
+    let v = json!({
         "path": file.path,
         "width": file.width,
         "height": file.height,
@@ -1123,7 +1169,8 @@ fn export(ctx: &mut CallCtx, a: ExportArgs) -> Result<Output, ToolError> {
         "preset": a.preset,
         "preset_verified_against_primary_source": out.preset_verified,
         "warnings": out.warnings,
-    })))
+    });
+    Ok(Output::json(&with_review_note(ctx, &[id], v)))
 }
 
 fn set_json(out: &ExportOutcome, preset: Option<&str>) -> Value {
@@ -1173,7 +1220,8 @@ fn export_set(ctx: &mut CallCtx, a: ExportSetArgs) -> Result<Output, ToolError> 
         a.alpha,
         a.locale.as_deref(),
     )?;
-    Ok(Output::json(&set_json(&out, a.preset.as_deref())))
+    let v = set_json(&out, a.preset.as_deref());
+    Ok(Output::json(&with_review_note(ctx, &frames, v)))
 }
 
 #[derive(Deserialize)]
@@ -1207,7 +1255,8 @@ fn export_panorama(ctx: &mut CallCtx, a: PanoramaArgs) -> Result<Output, ToolErr
         a.alpha,
         a.locale.as_deref(),
     )?;
-    Ok(Output::json(&set_json(&out, a.preset.as_deref())))
+    let v = set_json(&out, a.preset.as_deref());
+    Ok(Output::json(&with_review_note(ctx, &[id], v)))
 }
 
 #[derive(Deserialize)]

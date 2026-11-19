@@ -1319,3 +1319,45 @@ fn the_formats_list_is_in_sections() {
             .any(|f| f["id"] == "reel" && f["width"] == 1080)
     );
 }
+
+#[test]
+fn an_export_says_when_the_frame_was_never_reviewed_or_changed_since() {
+    let f = fixture();
+    let frame = f.create_frame();
+    let export = |file: &str| f.ok("export", json!({"frame": frame, "file": file}));
+
+    let r = export("a.png");
+    let note = r["before_you_call_it_done"].as_str().unwrap();
+    assert!(
+        note.contains("never checked with review_frame") && note.contains("iPhone 6.9"),
+        "{note}"
+    );
+
+    f.ok("review_frame", json!({"frame": frame}));
+    assert!(
+        export("b.png").get("before_you_call_it_done").is_none(),
+        "reviewed: nothing to say"
+    );
+
+    // an unrelated change elsewhere does not make the review stale; a change inside the frame does
+    f.ok(
+        "apply_ops",
+        json!({"ops": [{"op":"create","parent":f.root,"node":{"kind":"frame","name":"Other","width":100,"height":100}}]}),
+    );
+    assert!(export("c.png").get("before_you_call_it_done").is_none());
+    f.ok(
+        "apply_ops",
+        json!({"ops": [{"op":"create","parent":frame,"node":{"kind":"rect","name":"New","x":0,"y":0,"width":50,"height":50,"fill":"#ffffff"}}]}),
+    );
+    let note = export("d.png")["before_you_call_it_done"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(
+        note.contains("changed after its last review_frame"),
+        "{note}"
+    );
+    // sets and panoramas say it too
+    let set = f.ok("export_set", json!({"frames": [frame], "prefix": "s"}));
+    assert!(set["before_you_call_it_done"].is_string());
+}
