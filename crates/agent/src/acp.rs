@@ -26,7 +26,8 @@ use tokio::sync::{mpsc, oneshot};
 use crate::error::AgentError;
 
 const PROTOCOL_VERSION: u64 = 1;
-const SETUP_TIMEOUT: Duration = Duration::from_secs(60);
+/// Long enough for `npx` to download an adapter the first time (measured: over a minute).
+const SETUP_TIMEOUT: Duration = Duration::from_secs(240);
 const STDERR_LINES: usize = 40;
 /// Longest line read from the agent (a guard against an agent that never ends one).
 const MAX_LINE_BYTES: usize = 8 * 1024 * 1024;

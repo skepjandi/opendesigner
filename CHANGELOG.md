@@ -8,6 +8,18 @@ All notable changes to OpenDesigner are documented here.
 
 ## 2026-11-19
 
+### test(agent): the chat's ACP setup checked against real agents; MCP checked with real Claude Code
+
+**Area:** `test(agent)`, `docs(wiki)`
+
+**Problem:** The earlier entries said no real agent was installed. That was wrong: I had not looked. Claude Code, Codex, Gemini CLI and opencode are installed on this machine (none is signed in).
+
+**Change:** Added `examples/acp_probe` (starts a real ACP agent and runs the chat's setup, no prompt). Findings: the first run of `npx -y @agentclientprotocol/claude-agent-acp` takes over a minute (it downloads the adapter), so the 60-second setup timeout failed on a cold cache even though the adapter was fine; it is now 4 minutes. Real Claude Code 2.1.318 connected to `serve-mcp` over HTTP with the bearer token (`claude -p --mcp-config --strict-mcp-config --debug mcp`, which does not touch your Claude config): "Successfully connected", tools advertised, protocol 2025-06-18.
+
+**Verified:** the probes above, run once each. **Not verified:** any prompt turn or MCP tool call by a real agent (all three agents' model calls fail with an expired sign-in), Codex and opencode against MCP, ACP v2.
+
+**PR:** n/a
+
 ### docs(repo): status banners and README match what is built
 
 **Area:** `docs(repo)`

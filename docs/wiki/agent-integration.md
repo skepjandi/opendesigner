@@ -1,6 +1,6 @@
 # Agent Integration
 
-> **Status: Partially implemented.** The MCP server and the skill generator/installer (`crates/agent`, `opendesigner skill …`) are built and tested. The Qt app runs the MCP server in-process, has a Connect tab that previews and installs the skill, and a Chat tab (see [In-app chat](#in-app-chat)); an automatic first-run offer to install the skill is not built, and nothing here has been tried against a real Claude Code, Codex, Gemini CLI or opencode. Skill locations for the supported agents were verified against each agent's own docs on 2026-11-19 (see the target table).
+> **Status: Partially implemented.** The MCP server and the skill generator/installer (`crates/agent`, `opendesigner skill …`) are built and tested. The Qt app runs the MCP server in-process, has a Connect tab that previews and installs the skill, and a Chat tab (see [In-app chat](#in-app-chat)); an automatic first-run offer to install the skill is not built. **Checked against real agents (2026-11-19, none of them signed in on the test machine):** Claude Code 2.1.318 connected to the server over HTTP with the bearer token and listed it as connected with tools (`--mcp-config` and `--debug mcp`); Gemini CLI 0.38.2 (`gemini --acp`), the Claude adapter (`@agentclientprotocol/claude-agent-acp`) and the Codex adapter (`@agentclientprotocol/codex-acp`) all answered the chat's ACP handshake, the first one and the last one with a sign-in error that the chat reports with the agent's own hint, and the Claude adapter opened a session with the editor's MCP server. **Not checked:** a real tool call or prompt turn with any agent (every model call needed a sign-in that only you can do), Codex and opencode connecting to MCP, and the skill being loaded by a real agent. Skill locations for the supported agents were verified against each agent's own docs on 2026-11-19 (see the target table).
 
 The point of OpenDesigner is that the user guides an agent *with the GUI*. Three mechanisms carry that, and the app installs the first two on first run.
 
@@ -110,7 +110,7 @@ The agent's output is shown, not applied silently: changed nodes are outlined, a
 
 ## In-app chat
 
-> **Status: Partially implemented.** Built: an ACP v1 client (`od_agent::acp`), the Chat tab, and tests against a scripted agent. **Not verified against any real agent** (Claude Code, Codex or Gemini CLI adapters were not installed or signed in here), so treat the presets below as unproven.
+> **Status: Partially implemented.** Built: an ACP v1 client (`od_agent::acp`), the Chat tab, tests against a scripted agent, and `cargo run -p opendesigner-agent --example acp_probe -- <agent command>` to run the session setup against a real agent (no prompt is sent). Setup was checked with Gemini CLI, the Claude adapter and the Codex adapter as described above; a prompt turn was not, because none of them is signed in here. The setup timeout is 4 minutes because the first `npx` start of an adapter downloads it (over a minute here).
 
 A chat panel (Kino's "chat panel in your project") that drives an agent over the **Agent Client Protocol**: the user picks the agent they already use and are signed in to (their own subscription); OpenDesigner starts it as a child process and shows its turns, tool calls and permission requests inline.
 
