@@ -55,6 +55,8 @@ pub struct Chat {
     /// The agent's current plan: `[{content, status, priority}]`, replaced whole by each update.
     plan: Vec<Value>,
     first_prompt: bool,
+    /// Sent as soon as the agent is ready (the task the user typed on the start screen).
+    waiting_prompt: Option<String>,
 }
 
 /// A coding agent the chat knows how to start.
@@ -186,6 +188,7 @@ impl Chat {
             permission: None,
             plan: Vec::new(),
             first_prompt: true,
+            waiting_prompt: None,
         })
     }
 
@@ -207,6 +210,7 @@ impl Chat {
         self.permission = None;
         self.plan.clear();
         self.first_prompt = true;
+        self.waiting_prompt = None;
         self.status = Status::Starting;
         let (tx, mut rx) = mpsc::unbounded_channel::<ChatEvent>();
         self.events = Some(tx.clone());
@@ -222,6 +226,12 @@ impl Chat {
                 .map_err(|e| e.to_string());
             hook(ChatInput::Started(started));
         });
+    }
+
+    /// Has the agent start on `prompt` once it is connected.
+    pub fn set_first_prompt(&mut self, prompt: &str) {
+        let prompt = prompt.trim();
+        self.waiting_prompt = (!prompt.is_empty()).then(|| prompt.to_string());
     }
 
     pub fn send(&mut self, text: &str) -> Result<(), String> {
@@ -279,6 +289,11 @@ impl Chat {
                 self.session = Some(Arc::new(session));
                 self.status = Status::Ready;
                 self.push(json!({"role": "note", "text": "Connected. Ask for a change."}));
+                if let Some(prompt) = self.waiting_prompt.take() {
+                    if let Err(e) = self.send(&prompt) {
+                        self.push(json!({"role": "error", "text": e}));
+                    }
+                }
             }
             ChatInput::Started(Err(message)) => {
                 self.status = Status::Off;

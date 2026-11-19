@@ -43,7 +43,15 @@ pub struct EditorState {
     chat: Option<Chat>,
     agent_changed: BTreeSet<NodeId>,
     server: Option<Server>,
+    /// The folder the user chose to work in (usually a repository); the agent starts there. The
+    /// project itself lives in `<repo>/opendesigner`.
+    repo: Option<PathBuf>,
 }
+
+/// The project folder inside a chosen working folder.
+pub const PROJECT_DIR: &str = "opendesigner";
+const RECENT_FILE: &str = "recent.json";
+const MAX_RECENT: usize = 8;
 
 /// Everything the panels show, as JSON strings QML parses.
 #[derive(Debug, Default, Clone, PartialEq)]
@@ -99,6 +107,7 @@ impl EditorState {
             chat: None,
             agent_changed: BTreeSet::new(),
             server: None,
+            repo: None,
         }
     }
 
@@ -151,6 +160,111 @@ impl EditorState {
         self.adopt(ws);
         self.active_frame = receipt.created.first().cloned();
         Ok(())
+    }
+
+    /// What the start screen should say about `folder`: it is a project itself, it holds one in
+    /// `opendesigner/`, or it has none yet (one would be set up in `opendesigner/`).
+    pub fn inspect_folder(folder: &Path) -> Value {
+        let nested = folder.join(PROJECT_DIR);
+        let name = folder
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("Project");
+        let (found, project) = if folder.join("od.toml").is_file() {
+            ("project", folder.to_path_buf())
+        } else if nested.join("od.toml").is_file() {
+            ("nested", nested)
+        } else {
+            ("none", nested)
+        };
+        json!({
+            "found": found,
+            "folder": folder.display().to_string(),
+            "project": project.display().to_string(),
+            "name": name,
+            "exists": folder.is_dir(),
+        })
+    }
+
+    /// Opens the project in `folder` (see [`EditorState::inspect_folder`]), setting one up there
+    /// when it has none and `create` is true. The agent will work in `folder`. The first frame is
+    /// not made: what exists is up to the agent.
+    pub fn open_workspace(&mut self, folder: &Path, create: bool) -> Res<()> {
+        self.open_workspace_in(folder, create, token::config_dir().ok().as_deref())
+    }
+
+    /// [`EditorState::open_workspace`] remembering the folder in `config` (`None`: not at all).
+    pub fn open_workspace_in(
+        &mut self,
+        folder: &Path,
+        create: bool,
+        config: Option<&Path>,
+    ) -> Res<()> {
+        let info = Self::inspect_folder(folder);
+        if !folder.is_dir() {
+            return Err(format!("{} is not a folder", folder.display()));
+        }
+        let project = PathBuf::from(info["project"].as_str().unwrap_or_default());
+        match info["found"].as_str() {
+            Some("project" | "nested") => self.open_project(&project)?,
+            _ if create => {
+                let name = info["name"].as_str().unwrap_or("Project").to_string();
+                let ws = Workspace::create(&project, &name).map_err(|e| e.to_string())?;
+                self.adopt(ws);
+            }
+            _ => {
+                return Err(format!(
+                    "{} has no OpenDesigner project yet",
+                    folder.display()
+                ));
+            }
+        }
+        self.repo = Some(folder.to_path_buf());
+        if let Some(dir) = config {
+            remember_recent(folder, dir);
+        }
+        Ok(())
+    }
+
+    /// The working folders opened before, newest first, that still exist.
+    pub fn recent_projects() -> Value {
+        token::config_dir()
+            .map(|d| Self::recent_projects_in(&d))
+            .unwrap_or_else(|_| Value::Array(Vec::new()))
+    }
+
+    pub fn recent_projects_in(config: &Path) -> Value {
+        let list = std::fs::read_to_string(config.join(RECENT_FILE))
+            .ok()
+            .and_then(|t| serde_json::from_str::<Vec<String>>(&t).ok())
+            .unwrap_or_default();
+        Value::Array(
+            list.iter()
+                .filter(|p| Path::new(p).is_dir())
+                .map(|p| Self::inspect_folder(Path::new(p)))
+                .collect(),
+        )
+    }
+
+    /// Chooses the open frame when none is chosen, or the chosen one is gone: the project may
+    /// start empty and get its first frame from the agent.
+    pub fn ensure_active_frame(&mut self) {
+        let Some(ws) = self.ws.clone() else {
+            return;
+        };
+        let Ok(ws) = ws.lock() else {
+            return;
+        };
+        let doc = ws.session.document();
+        let valid = self
+            .active_frame
+            .as_ref()
+            .is_some_and(|f| doc.node(f).is_some_and(|n| n.kind == NodeKind::Frame));
+        if !valid {
+            self.active_frame = view::frames(doc)
+                .first()
+                .and_then(|f| NodeId::parse(&f.id).ok());
+        }
     }
 
     pub fn open_project(&mut self, dir: &Path) -> Res<()> {
@@ -970,11 +1084,14 @@ impl EditorState {
     /// must be on.
     pub fn chat_start(&mut self, command_line: &str, hook: ChatHook) -> Res<()> {
         let (program, args) = split_command(command_line)?;
-        let cwd = self.with_ws(|ws| {
+        let project_dir = self.with_ws(|ws| {
             ws.dir()
                 .map(Path::to_path_buf)
                 .ok_or_else(|| "the project has no folder".to_string())
         })?;
+        // The agent works in the folder the user chose (a repository, so it can run the app and
+        // take screenshots); the project is a folder inside it.
+        let cwd = self.repo.clone().unwrap_or(project_dir);
         let server = self
             .server
             .as_ref()
@@ -990,6 +1107,13 @@ impl EditorState {
             chat.start(AgentCommand { program, args, cwd }, mcp, hook);
         }
         Ok(())
+    }
+
+    /// Sends `prompt` to the agent as soon as it is ready (after [`EditorState::chat_start`]).
+    pub fn chat_first_prompt(&mut self, prompt: &str) {
+        if let Some(chat) = self.chat.as_mut() {
+            chat.set_first_prompt(prompt);
+        }
     }
 
     pub fn chat_send(&mut self, text: &str) -> Res<()> {
@@ -1366,6 +1490,22 @@ pub fn skill_status_in(home: &Path) -> Res<Value> {
         })
         .collect();
     Ok(Value::Array(rows))
+}
+
+/// Puts `folder` first in the list of recent working folders (kept in the config folder).
+fn remember_recent(folder: &Path, dir: &Path) {
+    let path = dir.join(RECENT_FILE);
+    let mut list: Vec<String> = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or_default();
+    let this = folder.display().to_string();
+    list.retain(|p| *p != this);
+    list.insert(0, this);
+    list.truncate(MAX_RECENT);
+    if std::fs::create_dir_all(dir).is_ok() {
+        let _ = std::fs::write(&path, serde_json::to_string(&list).unwrap_or_default());
+    }
 }
 
 const SKILL_OFFER_MARKER: &str = "skill-offer-answered";
@@ -2041,6 +2181,120 @@ mod tests {
                 .expect("the agent should keep talking");
             s.chat_apply(input);
         }
+    }
+
+    #[test]
+    fn a_working_folder_opens_its_project_or_sets_one_up_empty_and_the_agent_starts_there() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (repo, config) = (tmp.path().join("my-app"), tmp.path().join("cfg"));
+        std::fs::create_dir_all(&repo).unwrap();
+
+        let info = EditorState::inspect_folder(&repo);
+        assert_eq!(info["found"], "none");
+        assert_eq!(info["name"], "my-app");
+        assert_eq!(
+            info["project"],
+            repo.join("opendesigner").display().to_string()
+        );
+
+        let mut s = EditorState::new();
+        let err = s
+            .open_workspace_in(&repo, false, Some(&config))
+            .unwrap_err();
+        assert!(err.contains("no OpenDesigner project yet"), "{err}");
+        assert!(
+            !repo.join("opendesigner").exists(),
+            "nothing is made without a yes"
+        );
+
+        s.open_workspace_in(&repo, true, Some(&config)).unwrap();
+        assert!(repo.join("opendesigner/od.toml").is_file());
+        assert!(s.snapshot().has_project);
+        assert_eq!(s.snapshot().frames, "[]", "the agent decides what to make");
+        assert_eq!(s.snapshot().project_name, "my-app");
+        assert_eq!(s.repo.as_deref(), Some(repo.as_path()));
+        assert_eq!(EditorState::inspect_folder(&repo)["found"], "nested");
+
+        // opening again (also from the project folder itself) finds it
+        let mut again = EditorState::new();
+        again
+            .open_workspace_in(&repo, false, Some(&config))
+            .unwrap();
+        again
+            .open_workspace_in(&repo.join("opendesigner"), false, None)
+            .unwrap();
+        assert_eq!(
+            EditorState::inspect_folder(&repo.join("opendesigner"))["found"],
+            "project"
+        );
+
+        let recent = EditorState::recent_projects_in(&config);
+        assert_eq!(recent[0]["folder"], repo.display().to_string());
+        assert_eq!(recent.as_array().map(Vec::len), Some(1), "listed once");
+        std::fs::remove_dir_all(&repo).unwrap();
+        assert_eq!(
+            EditorState::recent_projects_in(&config),
+            json!([]),
+            "gone folders are not offered"
+        );
+        assert!(s.open_workspace_in(&repo, true, None).is_err());
+    }
+
+    #[test]
+    fn the_first_frame_the_agent_makes_becomes_the_open_one() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut s = EditorState::new();
+        s.open_workspace_in(tmp.path(), true, None).unwrap();
+        s.ensure_active_frame();
+        assert_eq!(s.snapshot().active_frame, "");
+        s.apply_user(&[Operation::Create {
+            parent: s
+                .with_ws(|ws| Ok(ws.session.document().pages[0].root.id.clone()))
+                .unwrap(),
+            index: None,
+            node: {
+                let mut f = NewNode::new(NodeKind::Frame);
+                f.width = 100.0;
+                f.height = 100.0;
+                f
+            },
+        }])
+        .unwrap();
+        s.ensure_active_frame();
+        assert!(
+            s.snapshot().active_frame.starts_with("n_"),
+            "{}",
+            s.snapshot().active_frame
+        );
+    }
+
+    #[test]
+    fn the_task_typed_on_the_start_screen_goes_to_the_agent_once_it_is_connected() {
+        let (mut s, t) = state();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let hook: ChatHook = Arc::new(move |input| {
+            let _ = tx.send(input);
+        });
+        let command = format!("\"{}\" normal", mock_agent().display());
+        s.start_mcp(&t.path().join("token"), Arc::new(|_| {}))
+            .unwrap();
+        s.chat_start(&command, hook).unwrap();
+        s.chat_first_prompt("  start the app and make the store set  ");
+        let chat = pump(&mut s, &rx, |c| {
+            c["messages"]
+                .as_array()
+                .is_some_and(|m| m.iter().any(|m| m["role"] == "user"))
+        });
+        let said: Vec<&str> = chat["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|m| m["role"] == "user")
+            .map(|m| m["text"].as_str().unwrap())
+            .collect();
+        assert_eq!(said, ["start the app and make the store set"]);
+        assert_eq!(chat["status"], "busy", "the agent is working on it");
+        s.chat_stop();
     }
 
     #[test]

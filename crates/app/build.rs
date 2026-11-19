@@ -18,6 +18,7 @@ fn main() {
             "qml/Btn.qml",
             "qml/Field.qml",
             "qml/JsonModel.qml",
+            "qml/StartPanel.qml",
             "qml/LayersPanel.qml",
             "qml/InspectorPanel.qml",
             "qml/AgentPanel.qml",
