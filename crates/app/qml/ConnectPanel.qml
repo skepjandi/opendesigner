@@ -3,8 +3,8 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Dialogs
 
-// Connecting an agent (what to paste into it), the skill that teaches it OpenDesigner, and what
-// it may read on this computer.
+// Connecting an agent (what to paste into it), the MCP servers the agent may call, the skill that
+// teaches it OpenDesigner, and what it may read on this computer.
 Rectangle {
     id: root
     required property var editor
@@ -15,8 +15,36 @@ Rectangle {
     readonly property var recipes: editor.mcpRunning ? JSON.parse(editor.connectRecipes()) : []
     readonly property var recipe: recipes.length > recipeBox.currentIndex ? recipes[recipeBox.currentIndex] : null
     property string skillResult: ""
+    property var servers: []
+    property string serverError: ""
+    // the name of the server being changed, empty when a new one is added
+    property string editing: ""
     function refreshSkill() { skillRows = JSON.parse(editor.skillStatus()) }
-    Component.onCompleted: refreshSkill()
+    function refreshServers() { servers = JSON.parse(editor.mcpServers()) }
+    // where a server runs and which variables it is given, by name only
+    function serverDetail(server) {
+        const bits = []
+        if (server.env && server.env.length > 0) bits.push(server.env.join(", "))
+        return bits.join(" · ")
+    }
+    function newServer() {
+        root.editing = ""
+        root.serverError = ""
+        serverDialog.nameField.text = ""
+        serverDialog.commandField.text = ""
+        serverDialog.envField.text = ""
+        serverDialog.open()
+    }
+    function editServer(server) {
+        root.editing = server.name
+        root.serverError = ""
+        serverDialog.nameField.text = server.name
+        serverDialog.commandField.text = server.command
+        // the values are never shown again: a name on its own keeps the stored one
+        serverDialog.envField.text = (server.env || []).join("\n")
+        serverDialog.open()
+    }
+    Component.onCompleted: { refreshSkill(); refreshServers() }
 
     function copy(text) {
         clipboard.text = text
@@ -129,6 +157,91 @@ Rectangle {
 
                 Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: Theme.border }
 
+                Label { text: "Other MCP servers"; color: Theme.text; font.pixelSize: Theme.fontSize; font.bold: true }
+                Label {
+                    Layout.fillWidth: true
+                    wrapMode: Text.WordWrap
+                    color: Theme.muted
+                    font.pixelSize: 12
+                    text: "MCP servers the agent may call besides the editor's own. They are programs on this computer: the agent starts one when it needs it, and it runs as you, with your rights. Only you can add or change them here; no agent can."
+                }
+                Label {
+                    Layout.fillWidth: true
+                    wrapMode: Text.WordWrap
+                    color: Theme.muted
+                    font.pixelSize: 11
+                    text: "minimax-mcp: the MiniMax MCP server gives the agent speech models (text to speech, transcription). Install it the way MiniMax documents (`npx -y minimax-mcp` or `uvx minimax-mcp`, check their README for the current command), then add it here with the name `minimax-mcp`. Put your MINIMAX_API_KEY in the environment variables: it is kept in the app's config folder and given to that server only."
+                }
+                Repeater {
+                    model: root.servers
+                    delegate: Rectangle {
+                        required property var modelData
+                        Layout.fillWidth: true
+                        implicitHeight: serverColumn.implicitHeight + 12
+                        radius: Theme.radius
+                        color: Theme.panelRaised
+                        border.width: 1
+                        border.color: Theme.border
+                        ColumnLayout {
+                            id: serverColumn
+                            anchors.fill: parent
+                            anchors.margins: 6
+                            spacing: 2
+                            Label {
+                                Layout.fillWidth: true
+                                text: modelData.name
+                                color: Theme.text
+                                font.pixelSize: 12
+                                font.bold: true
+                                elide: Text.ElideRight
+                            }
+                            Label {
+                                Layout.fillWidth: true
+                                text: modelData.command
+                                color: Theme.muted
+                                font.pixelSize: 11
+                                font.family: "Menlo"
+                                elide: Text.ElideMiddle
+                            }
+                            Label {
+                                Layout.fillWidth: true
+                                visible: root.serverDetail(modelData) !== ""
+                                text: root.serverDetail(modelData)
+                                color: Theme.muted
+                                font.pixelSize: 11
+                                elide: Text.ElideMiddle
+                            }
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Btn { text: "Edit…"; onClicked: root.editServer(modelData) }
+                                Btn { text: "Remove"; onClicked: { removeDialog.serverName = modelData.name; removeDialog.open() } }
+                                Item { Layout.fillWidth: true }
+                            }
+                        }
+                    }
+                }
+                RowLayout {
+                    Layout.fillWidth: true
+                    Btn { text: "Add a server…"; primary: true; onClicked: root.newServer() }
+                    Label {
+                        Layout.fillWidth: true
+                        color: Theme.muted
+                        font.pixelSize: 11
+                        wrapMode: Text.WordWrap
+                        text: "The agent is given these when a chat starts."
+                    }
+                }
+                Label {
+                    visible: root.serverError !== ""
+                    Layout.fillWidth: true
+                    wrapMode: Text.WordWrap
+                    color: Theme.danger
+                    font.pixelSize: 11
+                    text: root.serverError
+                }
+
+                Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: Theme.border }
+
                 Label { text: "Teach your agents"; color: Theme.text; font.pixelSize: Theme.fontSize; font.bold: true }
                 Label {
                     Layout.fillWidth: true
@@ -218,6 +331,111 @@ Rectangle {
             const r = JSON.parse(root.editor.installSkill())
             root.skillResult = r.error ? "" : "Installed for " + r.map(x => x.target).join(", ") + "."
             root.refreshSkill()
+        }
+    }
+
+    Dialog {
+        id: serverDialog
+        modal: true
+        anchors.centerIn: Overlay.overlay
+        width: Math.min(560, Overlay.overlay ? Overlay.overlay.width - 40 : 560)
+        title: root.editing === "" ? "Add an MCP server" : "Change the MCP server"
+        background: Rectangle { radius: Theme.radius; color: Theme.panelRaised; border.width: 1; border.color: Theme.border }
+        header: Label { text: serverDialog.title; color: Theme.text; font.pixelSize: 15; font.bold: true; padding: 14 }
+        contentItem: ColumnLayout {
+            spacing: 6
+            Label { text: "Name"; color: Theme.muted; font.pixelSize: 11 }
+            Field {
+                id: nameField
+                Layout.fillWidth: true
+                placeholderText: "for example minimax-mcp"
+            }
+            Label { text: "Command"; color: Theme.muted; font.pixelSize: 11 }
+            Field {
+                id: commandField
+                Layout.fillWidth: true
+                placeholderText: "for example npx -y minimax-mcp"
+            }
+            Label { text: "Environment variables (optional)"; color: Theme.muted; font.pixelSize: 11 }
+            TextArea {
+                id: envField
+                Layout.fillWidth: true
+                Layout.preferredHeight: 72
+                wrapMode: TextEdit.Wrap
+                color: Theme.text
+                font.pixelSize: Theme.fontSize
+                placeholderText: "one KEY=value per line, for example MINIMAX_API_KEY=..."
+                placeholderTextColor: Theme.muted
+                background: Rectangle { radius: 4; color: Theme.field; border.width: 1; border.color: envField.activeFocus ? Theme.accent : Theme.border }
+            }
+            Label {
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+                color: Theme.muted
+                font.pixelSize: 11
+                text: "The command is run as it is written, without a shell. A value is kept in the app's config folder and given to that server only; it is never shown again, so write the name on its own to keep the value that is stored. Empty the field to take the variables away."
+            }
+            Label {
+                visible: root.serverError !== ""
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+                color: Theme.danger
+                font.pixelSize: 11
+                text: root.serverError
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                Item { Layout.fillWidth: true }
+                Btn { text: "Cancel"; onClicked: serverDialog.close() }
+                Btn {
+                    text: "Save"
+                    primary: true
+                    onClicked: {
+                        const err = root.editor.saveMcpServer(root.editing, nameField.text, commandField.text, envField.text)
+                        if (err !== "") { root.serverError = err; return }
+                        root.serverError = ""
+                        root.refreshServers()
+                        serverDialog.close()
+                    }
+                }
+            }
+        }
+    }
+
+    Dialog {
+        id: removeDialog
+        property string serverName: ""
+        modal: true
+        anchors.centerIn: Overlay.overlay
+        width: Math.min(460, Overlay.overlay ? Overlay.overlay.width - 40 : 460)
+        title: "Remove the MCP server?"
+        background: Rectangle { radius: Theme.radius; color: Theme.panelRaised; border.width: 1; border.color: Theme.border }
+        header: Label { text: removeDialog.title; color: Theme.text; font.pixelSize: 15; font.bold: true; padding: 14 }
+        contentItem: ColumnLayout {
+            spacing: 8
+            Label {
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+                color: Theme.muted
+                font.pixelSize: Theme.fontSize
+                text: "The server " + removeDialog.serverName + " and the variables it was given are removed from the app's config folder."
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                Item { Layout.fillWidth: true }
+                Btn { text: "Keep it"; onClicked: removeDialog.close() }
+                Btn {
+                    text: "Remove"
+                    primary: true
+                    onClicked: {
+                        const err = root.editor.removeMcpServer(removeDialog.serverName)
+                        removeDialog.close()
+                        if (err !== "") { root.serverError = err; return }
+                        root.serverError = ""
+                        root.refreshServers()
+                    }
+                }
+            }
         }
     }
 }

@@ -340,6 +340,21 @@ pub mod qobject {
         #[cxx_name = "connectRecipes"]
         fn connect_recipes(self: &Self) -> QString;
         #[qinvokable]
+        #[cxx_name = "mcpServers"]
+        fn mcp_servers(self: &Self) -> QString;
+        #[qinvokable]
+        #[cxx_name = "saveMcpServer"]
+        fn save_mcp_server(
+            self: Pin<&mut Self>,
+            previous: &QString,
+            name: &QString,
+            command: &QString,
+            env: &QString,
+        ) -> QString;
+        #[qinvokable]
+        #[cxx_name = "removeMcpServer"]
+        fn remove_mcp_server(self: Pin<&mut Self>, name: &QString) -> QString;
+        #[qinvokable]
         #[cxx_name = "skillStatus"]
         fn skill_status(self: &Self) -> QString;
         #[qinvokable]
@@ -1230,6 +1245,47 @@ impl qobject::Editor {
 
     pub fn connect_recipes(&self) -> QString {
         q(&self.state.connect_recipes())
+    }
+
+    /// The MCP servers the user added, as the window shows them.
+    pub fn mcp_servers(&self) -> QString {
+        q(&EditorState::mcp_servers_json())
+    }
+
+    /// Adds or changes one of the MCP servers the user added. The answer is the reason it could
+    /// not be saved, empty when it was.
+    pub fn save_mcp_server(
+        mut self: Pin<&mut Self>,
+        previous: &QString,
+        name: &QString,
+        command: &QString,
+        env: &QString,
+    ) -> QString {
+        let (previous, name, command, env) = (
+            previous.to_string(),
+            name.to_string(),
+            command.to_string(),
+            env.to_string(),
+        );
+        match EditorState::save_mcp_server(&previous, &name, &command, &env) {
+            Ok(()) => q(""),
+            Err(e) => {
+                self.as_mut().show(&e, true);
+                q(&e)
+            }
+        }
+    }
+
+    /// Removes one of the MCP servers the user added.
+    pub fn remove_mcp_server(mut self: Pin<&mut Self>, name: &QString) -> QString {
+        let name = name.to_string();
+        match EditorState::remove_mcp_server(&name) {
+            Ok(()) => q(""),
+            Err(e) => {
+                self.as_mut().show(&e, true);
+                q(&e)
+            }
+        }
     }
 
     pub fn skill_status(&self) -> QString {

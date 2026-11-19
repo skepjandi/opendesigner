@@ -1429,8 +1429,8 @@ impl EditorState {
     }
 
     /// Starts the agent in `command_line` (a program and arguments, no shell) with the project
-    /// folder as its working directory and the editor's MCP server as its tool. The agent connection
-    /// must be on.
+    /// folder as its working directory and the editor's MCP server as its tool. The agent
+    /// connection must be on. The MCP servers the user added are given to the agent as well.
     pub fn chat_start(&mut self, command_line: &str, hook: ChatHook) -> Res<()> {
         let (program, args) = split_command(command_line)?;
         let project_dir = self.with_ws(|ws| {
@@ -1449,11 +1449,19 @@ impl EditorState {
             url: server.url.clone(),
             token: token::load_or_create(&server.token_file).map_err(|e| e.to_string())?,
         };
+        // the servers the user added; a list that cannot be read is said in the chat, not fatal
+        let (servers, broken) = match crate::servers::load() {
+            Ok(list) => (list, None),
+            Err(e) => (Vec::new(), Some(e)),
+        };
         if self.chat.is_none() {
             self.chat = Some(Chat::new()?);
         }
         if let Some(chat) = self.chat.as_mut() {
-            chat.start(AgentCommand { program, args, cwd }, mcp, hook);
+            chat.start(AgentCommand { program, args, cwd }, mcp, servers, hook);
+            if let Some(e) = broken {
+                chat.note(&format!("The MCP servers could not be read: {e}"));
+            }
         }
         Ok(())
     }
@@ -1509,6 +1517,22 @@ impl EditorState {
         if let Some(c) = self.chat.as_mut() {
             c.apply(input);
         }
+    }
+
+    /// The MCP servers the user added for the chat, as the window shows them.
+    pub fn mcp_servers_json() -> String {
+        crate::servers::list_json()
+    }
+
+    /// Adds an MCP server the user described, or replaces the one with that name. `previous` is
+    /// the name it had before, so a rename does not leave the old one behind.
+    pub fn save_mcp_server(previous: &str, name: &str, command: &str, env: &str) -> Res<()> {
+        crate::servers::save(previous, name, command, env)
+    }
+
+    /// Removes an MCP server the user added.
+    pub fn remove_mcp_server(name: &str) -> Res<()> {
+        crate::servers::remove(name)
     }
 
     /// How to connect each supported agent, as a JSON array; empty while the server is off.

@@ -6,6 +6,7 @@
 use std::sync::Arc;
 
 use od_agent::acp::{AcpSession, AgentCommand, ChatEvent, McpEndpoint};
+use od_agent::mcp_servers::McpServer;
 use serde_json::{Value, json};
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
@@ -73,6 +74,8 @@ pub struct Chat {
     config: Vec<od_agent::acp::ConfigOption>,
     /// The slash commands the agent understands.
     commands: Vec<od_agent::acp::SlashCommand>,
+    /// The MCP servers the user added, which the agent may call as well.
+    servers: Vec<McpServer>,
 }
 
 /// A coding agent the chat knows how to start.
@@ -120,19 +123,7 @@ const PRESETS: &[Preset] = &[
 
 /// Whether an executable called `program` is in one of the `PATH` directories.
 fn on_path(program: &str) -> bool {
-    let Some(path) = std::env::var_os("PATH") else {
-        return false;
-    };
-    let names: &[&str] = if cfg!(windows) {
-        &[".exe", ".cmd", ".bat"]
-    } else {
-        &[""]
-    };
-    std::env::split_paths(&path).any(|dir| {
-        names
-            .iter()
-            .any(|ext| dir.join(format!("{program}{ext}")).is_file())
-    })
+    od_agent::program::which(program).is_some()
 }
 
 /// The chat's agent choices as JSON: `[{label, command, found}]`. `found` is whether the agent
@@ -223,6 +214,7 @@ impl Chat {
             auto_allow: false,
             config: Vec::new(),
             commands: Vec::new(),
+            servers: Vec::new(),
         })
     }
 
@@ -237,8 +229,15 @@ impl Chat {
         }
     }
 
-    /// Starts the agent in the background; `Started` arrives through `hook`.
-    pub fn start(&mut self, command: AgentCommand, mcp: McpEndpoint, hook: ChatHook) {
+    /// Starts the agent in the background; `Started` arrives through `hook`. The agent is given
+    /// the editor's MCP server and the MCP servers the user added.
+    pub fn start(
+        &mut self,
+        command: AgentCommand,
+        mcp: McpEndpoint,
+        servers: Vec<McpServer>,
+        hook: ChatHook,
+    ) {
         self.stop();
         self.messages.clear();
         self.permission = None;
@@ -248,6 +247,7 @@ impl Chat {
         self.queued.clear();
         self.config.clear();
         self.commands.clear();
+        self.servers = servers.clone();
         self.status = Status::Starting;
         let (tx, mut rx) = mpsc::unbounded_channel::<ChatEvent>();
         self.events = Some(tx.clone());
@@ -258,11 +258,16 @@ impl Chat {
             }
         });
         self.runtime.spawn(async move {
-            let started = AcpSession::start(&command, &mcp, tx)
+            let started = AcpSession::start(&command, &mcp, &servers, tx)
                 .await
                 .map_err(|e| e.to_string());
             hook(ChatInput::Started(started));
         });
+    }
+
+    /// Says something in the conversation that is not the agent's words.
+    pub fn note(&mut self, text: &str) {
+        self.push(json!({"role": "note", "text": text}));
     }
 
     /// Has the agent start on `prompt` once it is connected.
@@ -396,6 +401,27 @@ impl Chat {
                 self.session = Some(Arc::new(session));
                 self.status = Status::Ready;
                 self.push(json!({"role": "note", "text": "Connected. Ask for a change."}));
+                if !self.servers.is_empty() {
+                    let names: Vec<String> = self
+                        .servers
+                        .iter()
+                        .map(|server| {
+                            let mut line = server.name.clone();
+                            line.push_str(" (");
+                            line.push_str(&server.command);
+                            for arg in &server.args {
+                                line.push(' ');
+                                line.push_str(arg);
+                            }
+                            line.push(')');
+                            line
+                        })
+                        .collect();
+                    self.push(json!({
+                        "role": "note",
+                        "text": format!("The agent can also use these MCP servers: {}", names.join(", ")),
+                    }));
+                }
                 if let Some(prompt) = self.waiting_prompt.take() {
                     if let Err(e) = self.send(&prompt) {
                         self.push(json!({"role": "error", "text": e}));
@@ -486,7 +512,19 @@ impl Chat {
                 }
             }
             ChatEvent::Commands(list) => self.commands = list,
-            ChatEvent::Notice(text) => self.push(json!({"role": "error", "text": text})),
+            ChatEvent::Notice {
+                severity,
+                title,
+                detail,
+            } => {
+                let text = if detail.is_empty() {
+                    title
+                } else {
+                    format!("{title}: {detail}")
+                };
+                let role = if severity == "error" { "error" } else { "note" };
+                self.push(json!({"role": role, "text": text}));
+            }
             ChatEvent::Exited(why) => {
                 self.session = None;
                 self.events = None;

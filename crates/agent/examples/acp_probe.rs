@@ -52,13 +52,14 @@ async fn main() {
         cwd,
     };
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-    let session = match AcpSession::start(&command, &McpEndpoint { url, token }, tx.clone()).await {
-        Ok(session) => std::sync::Arc::new(session),
-        Err(e) => {
-            println!("setup failed: {e}");
-            return;
-        }
-    };
+    let session =
+        match AcpSession::start(&command, &McpEndpoint { url, token }, &[], tx.clone()).await {
+            Ok(session) => std::sync::Arc::new(session),
+            Err(e) => {
+                println!("setup failed: {e}");
+                return;
+            }
+        };
     println!("session opened");
     if let Some(text) = prompt {
         session.prompt(&text, tx);
