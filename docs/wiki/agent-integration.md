@@ -1,0 +1,90 @@
+# Agent Integration
+
+> **Status: Design.** Per-agent skill directories other than `~/.agents/skills/` and `~/.claude/skills/` (both present on the maintainer's machine and the first from the Agent Skills guidance) are `[INFERENCE]` until the Phase 0 spike checks each agent.
+
+The point of OpenDesigner is that the user guides an agent *with the GUI*. Three mechanisms carry that, and the app installs the first two on first run.
+
+| Mechanism | What it is | Who uses it |
+|-----------|------------|-------------|
+| **Skill** | An [Agent Skill](https://agentskills.io/specification) (`SKILL.md` plus references) teaching an agent how to work with OpenDesigner | CLI agents the user already runs |
+| **MCP server** | A local HTTP MCP endpoint exposing the editor's operations and the user's guidance context | The same agents, after the skill points them at it |
+| **In-app chat** | A chat panel that drives an agent over the Agent Client Protocol | Users who would rather not leave the app |
+
+## Why a skill and an MCP server
+
+Kino shows the shape: an MCP server inside the desktop app (`http://127.0.0.1:45680/mcp`, "keep the desktop app open while the agent works"; marketed as 40 tools) that Claude Code, Codex, ChatGPT, Cursor and others connect to with one command, and skills such as a brand-clone skill that tell the agent *how* to edit well. Penpot and Figma both ship MCP servers too (Penpot's runs through its Plugin API; Figma's remote server can write to the canvas). A tool surface alone leaves the agent to guess conventions; a skill alone cannot touch the document. We ship both, and add what none of them has as a first-class idea: the user's **pointing** as input ([Guidance context](#guidance-context)).
+
+## The skill
+
+Layout, following the Agent Skills specification (`name` equals the directory name, lowercase and hyphens; `description` says when to use it):
+
+```
+opendesigner/
+├── SKILL.md                     # when to use OpenDesigner; connect, read guidance first, work in ops
+└── references/
+    ├── tools.md                 # the MCP tool list with examples
+    ├── store-specs.md           # generated from presets: sizes and rules per store slot
+    └── style-guide.md           # how to write headlines, spacing, contrast for store art
+```
+
+`SKILL.md` is short (the guidance is tier 2 of progressive disclosure, under ~5000 tokens) and tells the agent to: confirm the app is running and the MCP server answers; call `get_guidance` before anything else; prefer small operations over regenerating a frame; end every turn by describing what changed in the user's terms; never export without running `validate_export`. The text is generated from the same tool schemas and presets the app uses, so it cannot drift from what the server accepts. The skill carries the app version that wrote it.
+
+### The installer
+
+On first run (and from Settings → Agents) the app detects agents and offers to install.
+
+1. **Detect.** Look for each agent's configuration or skills directory. Detection reads directory existence only.
+2. **Preview.** Show every path that will be written, per agent, and let the user uncheck any.
+3. **Write.** Write only `<skills dir>/opendesigner/`. Write the cross-client directory once, and native directories for agents that do not scan it.
+4. **Record.** Store a manifest of written files and hashes in the app's data directory.
+5. **Update and uninstall.** On app update, rewrite files whose hash still matches the manifest; if the user edited a file, leave it and say so. Uninstall removes exactly the manifest's files.
+
+It never edits an agent's config, credentials or history, never overwrites a skill named `opendesigner` it did not create without consent, and registers the MCP endpoint only by showing the user the one-line command or settings snippet for their agent, or by running that agent's documented `mcp add` command after consent (see [Security](./security.md#skill-installer)).
+
+### Target table
+
+| Target | User-level skills directory | Status |
+|--------|----------------------------|--------|
+| Cross-client convention | `~/.agents/skills/` | Documented convention in the Agent Skills client guide; present on the maintainer's machine |
+| Claude Code | `~/.claude/skills/` | Present on the maintainer's machine |
+| Codex CLI | `~/.codex/` exists; skills location `[INFERENCE]`, may read `~/.agents/skills/` | Verify in spike |
+| Gemini CLI, opencode, Cursor, others | `[INFERENCE]` | Verify in spike; add rows as verified |
+| Project-level | `<project>/.agents/skills/` | Optional: the project can carry its own skill so a cloned repo teaches the agent. Clients may gate project skills on trust |
+
+Each row is data in `agent`'s target table, not code, so adding an agent is a one-row change with a test that the installer writes only inside that row's directory.
+
+## The MCP server
+
+- Streamable HTTP on `127.0.0.1`, fixed default port with fallback, **bearer token** per install, `Host` and `Origin` checks, off until enabled. See [Security](./security.md#mcp-endpoint).
+- Tools are thin wrappers over `core` operations; the schema is generated from the operation types. Read tools are free; write tools return the changed node ids and the new checkpoint id.
+- Limits per call: operations count, payload size, rendered-image size. Every rejection carries a reason.
+
+### Tool surface (intended)
+
+| Group | Tools |
+|-------|-------|
+| Guidance | `get_guidance` (selection, annotations, viewport, active page), `get_selection`, `get_annotations`, `resolve_annotation` |
+| Read | `list_pages`, `get_node`, `get_tree`, `find_nodes`, `render_preview` (PNG of a node or region, so the agent can *look*), `list_tokens`, `list_fonts` |
+| Write | `apply_ops`, `create_page`, `import_media`, `set_tokens` |
+| History | `list_checkpoints`, `diff_checkpoints`, `restore_checkpoint` |
+| Store | `list_export_presets`, `export`, `validate_export` ([Store Assets](./store-assets.md)) |
+| Video | `get_timeline`, `apply_timeline_ops`, `render_frame`, `transcribe` `[INFERENCE: scope decided in Phase 5]` ([Video Editing](./video-editing.md)) |
+
+## Guidance context
+
+This is the feature the whole app exists for. The editor maintains, and exposes to agents, what the user is pointing at:
+
+- **Selection.** Node ids, with each node's data and a rendered crop, so "make this bigger" is unambiguous.
+- **Annotations.** The user drops a pin or draws a box on the canvas (or a timeline range) and types a note. An annotation is `{ id, target (node id or canvas rect), note, status }`. The agent reads open annotations, works them, and marks them resolved; the user sees pins close.
+- **Hand edits as signal.** When the user fixes what the agent did, the operations are in the log with `actor: user`; the agent can read them to learn the correction (`get_guidance` includes the last user operations after the agent's last checkpoint).
+- **Reference.** The user can attach a reference image or another project's frame ("make it feel like this") that the agent can fetch.
+
+The agent's output is shown, not applied silently: changed nodes are outlined, a one-line summary of each turn sits in the chat/history panel, and a checkpoint exists to restore.
+
+## In-app chat
+
+A chat panel (Kino's "chat panel in your project") that drives an agent over the **Agent Client Protocol**, as GitNotēs' `gitnotes-bridge` does for its mobile chat: the user picks a locally installed agent (Claude Code, Codex, …) signed in with their own subscription; we spawn or attach to it and show its turns, tool calls, plans and approvals inline. The chat sends the guidance context with each prompt. We never read the agent's credentials ([Security](./security.md)). A scripted demo agent makes the app testable without any agent installed. Scope and sequencing: Phase 6.
+
+## Headless
+
+`opendesigner` CLI runs the same operations against a project folder without a window: `export`, `validate`, `apply` (a file of operations), `serve-mcp`. Used in CI and by agents on machines with no display (Kino documents headless use on Linux servers; OpenCut lists a headless mode in its plans).
