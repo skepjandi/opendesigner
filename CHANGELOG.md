@@ -8,6 +8,18 @@ All notable changes to OpenDesigner are documented here.
 
 ## 2026-11-19
 
+### feat(core): selection, annotations and the guidance context
+
+**Area:** `feat(core)`, `feat(cli)`
+
+**Problem:** The point of the editor is that the user guides an agent by pointing, but the core had no model for what the user points at.
+
+**Change:** `core` gains `Annotations` (pins on a node or a page region, open/resolved, attributed, persisted in `annotations.json`) and `Workspace` (session + annotations + selection + project folder) with `guidance()`: pages, selected nodes, open notes with an orphan flag, and the user's edits since the agent's last turn. The CLI gains `annotate`, `annotations`, `resolve` and `guidance`.
+
+**Verified:** `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test --workspace` (43 tests, including a CLI test of pin → read → act → resolve). **Not verified:** Windows and Linux; selection is in memory only (a front end holds it); the MCP and Qt front ends that will use it are not built yet.
+
+**PR:** n/a
+
 ### feat(core): headless core, renderer, store presets and CLI
 
 **Area:** `feat(core)`, `feat(render)`, `feat(store)`, `feat(cli)`
