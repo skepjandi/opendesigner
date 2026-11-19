@@ -223,8 +223,8 @@ pub fn definitions() -> Vec<Value> {
         tool(
             "list_media",
             "Images the user has imported into the project (media/), with their size in pixels. Use \
-             a path as the `image` of an image node. You cannot import files yourself: ask the user \
-             to add the image in the app.",
+             a path as the `image` of an image node. If the one you need is not here, use find_files \
+             and import_file (when the user allows it) or ask the user to add it in the app.",
             json!({}),
             &[],
             true,
@@ -322,10 +322,32 @@ pub fn definitions() -> Vec<Value> {
             true,
         ),
         tool(
+            "find_files",
+            "Look for pictures and videos anywhere under the user's home folder (the user allows \
+             this; hidden folders and caches are skipped). Returns paths, sizes and dates, newest \
+             first, at most 200. Use `import_file` to bring one into the project.",
+            json!({
+                "kind": {"type": "string", "enum": ["image", "video", "any"], "description": "Default any."},
+                "name_contains": {"type": "string", "description": "Part of the file name."},
+                "folder": id("A folder to search instead of the whole home folder, for example ~/Pictures or an absolute path under your home folder.")
+            }),
+            &[],
+            true,
+        ),
+        tool(
+            "import_file",
+            "Copy one picture or video from the user's computer into this project's media/ folder \
+             (it is checked to be a real PNG, JPEG, WebP or MP4/MOV first) and return its media/ \
+             reference. The original is never changed.",
+            json!({"path": id("Absolute path (or ~/...) of the file, from find_files.")}),
+            &["path"],
+            false,
+        ),
+        tool(
             "list_footage",
             "Videos the user imported into the project (media/): reference, size on disk and, when \
              ffmpeg is installed, length, picture size, frame rate and whether it has sound. Play \
-             one in a video with add_clip footage:{file, in_ms}. You cannot import files yourself.",
+             one in a video with add_clip footage:{file, in_ms}. Bring in another with find_files and import_file.",
             json!({}),
             &[],
             true,
@@ -407,6 +429,8 @@ pub fn call(ctx: &mut CallCtx, name: &str, args: Value) -> Result<Output, ToolEr
         ))?)),
         "list_video_presets" => Ok(Output::json(&video_presets_json())),
         "list_footage" => list_footage(ctx),
+        "find_files" => find_files(ctx, parse(args)?),
+        "import_file" => import_file(ctx, parse(args)?),
         "render_video_frame" => render_video_frame(ctx, parse(args)?),
         "export_video" => export_video_tool(ctx, parse(args)?),
         "list_locales" => {
@@ -1013,7 +1037,7 @@ struct VideoFrameArgs {
 fn render_video_frame(ctx: &mut CallCtx, a: VideoFrameArgs) -> Result<Output, ToolError> {
     let id = node_id(&a.video)?;
     let (png, width, height, warnings) = crate::video_export::video_frame_png(
-        ctx.ws,
+        &crate::video_export::Source::of(ctx.ws),
         &id,
         a.time_ms,
         a.locale.as_deref(),
@@ -1049,23 +1073,37 @@ struct ExportVideoArgs {
 }
 
 fn export_video_tool(ctx: &mut CallCtx, a: ExportVideoArgs) -> Result<Output, ToolError> {
+    run_export_video(&crate::video_export::Source::of(ctx.ws), a, &mut |_, _| {
+        true
+    })
+}
+
+/// Runs `export_video` on a copy of the project (see [`crate::video_export::Source`]) so the
+/// caller need not hold the editor while it works. `progress(done, total)` returns false to stop.
+pub fn export_video_detached(
+    src: &crate::video_export::Source,
+    args: Value,
+    progress: &mut dyn FnMut(u64, u64) -> bool,
+) -> Result<Output, ToolError> {
+    run_export_video(src, parse(args)?, progress)
+}
+
+fn run_export_video(
+    src: &crate::video_export::Source,
+    a: ExportVideoArgs,
+    progress: &mut dyn FnMut(u64, u64) -> bool,
+) -> Result<Output, ToolError> {
     let id = node_id(&a.video)?;
-    crate::video_export::check_export(
-        ctx.ws,
-        &id,
-        &a.file,
-        a.locale.as_deref(),
-        a.preset.as_deref(),
-    )?;
+    crate::video_export::check_export(src, &id, &a.file, a.locale.as_deref(), a.preset.as_deref())?;
     let ffmpeg = od_media::Ffmpeg::locate().map_err(|e| ToolError(e.to_string()))?;
     let out = crate::video_export::export_video(
-        ctx.ws,
+        src,
         &id,
         &a.file,
         a.locale.as_deref(),
         a.preset.as_deref(),
         &ffmpeg,
-        &mut |_, _| true,
+        progress,
     )?;
     Ok(Output::json(&video_outcome_json(&out)))
 }
@@ -1136,4 +1174,87 @@ fn list_footage(ctx: &mut CallCtx) -> Result<Output, ToolError> {
         })
         .collect();
     Ok(Output::json(&Value::Array(rows)))
+}
+
+fn expand_home(path: &str) -> Result<std::path::PathBuf, ToolError> {
+    let home =
+        crate::device::home().ok_or_else(|| ToolError("cannot find the home folder".into()))?;
+    let p = match path.strip_prefix("~/") {
+        Some(rest) => home.join(rest),
+        None if path == "~" => home.clone(),
+        None => std::path::PathBuf::from(path),
+    };
+    if !p.is_absolute() {
+        return fail("give an absolute path (or one starting with ~/)");
+    }
+    Ok(p)
+}
+
+fn device_enabled() -> Result<(), ToolError> {
+    if crate::device::enabled() {
+        Ok(())
+    } else {
+        fail(
+            "the user turned off the agent's access to files outside the project (Connect tab); ask them to add the file in the app instead",
+        )
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FindFilesArgs {
+    #[serde(default)]
+    kind: Option<String>,
+    #[serde(default)]
+    name_contains: Option<String>,
+    #[serde(default)]
+    folder: Option<String>,
+}
+
+fn find_files(_ctx: &mut CallCtx, a: FindFilesArgs) -> Result<Output, ToolError> {
+    device_enabled()?;
+    let kind = crate::device::Kind::parse(a.kind.as_deref().unwrap_or("any"))
+        .ok_or_else(|| ToolError("kind is image, video or any".into()))?;
+    let home =
+        crate::device::home().ok_or_else(|| ToolError("cannot find the home folder".into()))?;
+    let root = match &a.folder {
+        Some(f) => {
+            let p = expand_home(f)?;
+            let real = std::fs::canonicalize(&p).map_err(|e| ToolError(format!("{f}: {e}")))?;
+            let home_real = std::fs::canonicalize(&home).unwrap_or(home);
+            if !real.starts_with(&home_real) {
+                return fail("search inside the user's home folder only");
+            }
+            real
+        }
+        None => home,
+    };
+    let found = crate::device::find(&[root], kind, a.name_contains.as_deref().unwrap_or(""));
+    let rows: Vec<Value> = found
+        .iter()
+        .map(|f| json!({"path": f.path.display().to_string(), "kind": f.kind, "bytes": f.bytes, "modified_unix": f.modified_secs}))
+        .collect();
+    Ok(Output::json(&json!({"count": rows.len(), "files": rows})))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ImportFileArgs {
+    path: String,
+}
+
+fn import_file(ctx: &mut CallCtx, a: ImportFileArgs) -> Result<Output, ToolError> {
+    device_enabled()?;
+    let p = expand_home(&a.path)?;
+    let real = std::fs::canonicalize(&p).map_err(|e| ToolError(format!("{}: {e}", a.path)))?;
+    if !real.is_file() {
+        return fail(format!("{} is not a file", a.path));
+    }
+    let reference = match ctx.ws.import_media(&real) {
+        Ok(r) => r,
+        Err(_) => ctx.ws.import_footage(&real)?,
+    };
+    Ok(Output::json(
+        &json!({"reference": reference, "copied_from": real.display().to_string()}),
+    ))
 }

@@ -32,6 +32,50 @@ pub struct ChangeEvent {
 
 pub type ChangeHook = Arc<dyn Fn(ChangeEvent) + Send + Sync>;
 
+/// How far a long job (a video export) has got.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JobUpdate {
+    pub id: u64,
+    pub label: String,
+    pub done: u64,
+    pub total: u64,
+    pub state: JobState,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum JobState {
+    Running,
+    Finished,
+    Cancelled,
+    Failed(String),
+}
+
+pub type JobHook = Arc<dyn Fn(JobUpdate) + Send + Sync>;
+
+/// Ids of long jobs and which of them the user asked to stop.
+#[derive(Default)]
+pub struct Jobs {
+    next: std::sync::atomic::AtomicU64,
+    cancelled: Mutex<std::collections::HashSet<u64>>,
+}
+
+impl Jobs {
+    fn begin(&self) -> u64 {
+        self.next.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1
+    }
+
+    /// Asks job `id` to stop at its next frame.
+    pub fn cancel(&self, id: u64) {
+        if let Ok(mut c) = self.cancelled.lock() {
+            c.insert(id);
+        }
+    }
+
+    fn is_cancelled(&self, id: u64) -> bool {
+        self.cancelled.lock().is_ok_and(|c| c.contains(&id))
+    }
+}
+
 pub struct Outcome {
     pub status: u16,
     pub body: Option<Value>,
@@ -85,6 +129,8 @@ pub struct Handler {
     ws: Arc<Mutex<Workspace>>,
     state: Mutex<State>,
     on_change: Option<ChangeHook>,
+    on_job: Option<JobHook>,
+    jobs: Arc<Jobs>,
 }
 
 fn sanitize_client_name(name: &str) -> String {
@@ -110,7 +156,16 @@ impl Handler {
                 turns: Turns::default(),
             }),
             on_change: None,
+            on_job: None,
+            jobs: Arc::new(Jobs::default()),
         }
+    }
+
+    /// Reports the progress of long jobs through `hook`; `jobs` lets the owner cancel them.
+    pub fn with_job_hook(mut self, hook: JobHook, jobs: Arc<Jobs>) -> Handler {
+        self.on_job = Some(hook);
+        self.jobs = jobs;
+        self
     }
 
     pub fn with_change_hook(mut self, hook: ChangeHook) -> Handler {
@@ -259,11 +314,69 @@ impl Handler {
         }
     }
 
+    /// `export_video` can take minutes. It works on a copy of the project, so the editor stays
+    /// usable, and reports its progress as a job the user can watch and stop.
+    fn export_video_call(&self, id: Value, args: Value) -> Value {
+        let Ok(ws) = self.ws.lock() else {
+            return rpc_error(id, -32603, "the editor state is unavailable");
+        };
+        let src = crate::video_export::Source::of(&ws);
+        drop(ws);
+        let job = self.jobs.begin();
+        let label = format!(
+            "Exporting {}",
+            args.get("file").and_then(Value::as_str).unwrap_or("video")
+        );
+        let report = |done: u64, total: u64, state: JobState| {
+            if let Some(hook) = &self.on_job {
+                hook(JobUpdate {
+                    id: job,
+                    label: label.clone(),
+                    done,
+                    total,
+                    state,
+                });
+            }
+        };
+        report(0, 0, JobState::Running);
+        let mut last = std::time::Instant::now();
+        let mut progress = |done: u64, total: u64| {
+            if last.elapsed() >= std::time::Duration::from_millis(150) || done == total {
+                last = std::time::Instant::now();
+                report(done, total, JobState::Running);
+            }
+            !self.jobs.is_cancelled(job)
+        };
+        let result = tools::export_video_detached(&src, args, &mut progress);
+        match &result {
+            Ok(_) => report(1, 1, JobState::Finished),
+            Err(e) if self.jobs.is_cancelled(job) => {
+                let _ = e;
+                report(0, 0, JobState::Cancelled);
+            }
+            Err(e) => report(0, 0, JobState::Failed(e.0.clone())),
+        }
+        match result {
+            Ok(out) => rpc_result(
+                id,
+                json!({"content": out.content.iter().map(content_json).collect::<Vec<_>>(),
+                       "isError": false}),
+            ),
+            Err(e) => rpc_result(
+                id,
+                json!({"content": [{"type": "text", "text": e.0}], "isError": true}),
+            ),
+        }
+    }
+
     fn tools_call(&self, id: Value, actor: Actor, params: &Value) -> Value {
         let Some(name) = params.get("name").and_then(Value::as_str) else {
             return rpc_error(id, -32602, "tools/call needs a tool name");
         };
         let args = params.get("arguments").cloned().unwrap_or(Value::Null);
+        if name == "export_video" {
+            return self.export_video_call(id, args);
+        }
         let (Ok(mut ws), Ok(mut state)) = (self.ws.lock(), self.state.lock()) else {
             return rpc_error(id, -32603, "the editor state is unavailable");
         };

@@ -185,8 +185,9 @@ memory are listed by `list_media`: use them when the work needs one, and say whi
 - If a call is rejected, read the reason. It names the rule (bounds, applicability, unknown id).
   Fix the call; do not retry unchanged.
 - Images come from `media/` only: call `list_media` for the files the user imported (with sizes)
-  and use a path as an image node's `image`. You cannot import files; ask the user to add the
-  image in the app. A missing or unreadable image is reported by the preview and is not drawn. Text that wraps to more rows than its box is tall is reported too (`warnings`); fix it before exporting.
+  and use a path as an image node's `image`. If the picture you need is not there, look for it
+  with `find_files` (pictures and videos anywhere under the user's home folder, if they allow it)
+  and bring it in with `import_file`; if that is switched off, ask the user to add it in the app. A missing or unreadable image is reported by the preview and is not drawn. Text that wraps to more rows than its box is tall is reported too (`warnings`); fix it before exporting.
 - Text is drawn; the default font is the bundled Lato, and `font_family` may name a font installed
   on the user's machine (an unknown family falls back to Lato, so check the preview).
 - The preset rules for store assets are listed in `references/store-specs.md`; the full tool list

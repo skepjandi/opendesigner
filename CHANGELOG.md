@@ -8,6 +8,18 @@ All notable changes to OpenDesigner are documented here.
 
 ## 2026-11-19
 
+### fix(video): the window no longer freezes during a video export; progress bars and spinners; agents can use pictures from anywhere
+
+**Area:** `fix(mcp)`, `feat(app)`, `feat(mcp)`
+
+**Bug:** The agent's `export_video` call held the editor's state for the whole export (minutes), and the window reads that same state, so it hung until the export ended. **Fix:** the export now works on a copy of the project, reports progress, and can be stopped; a strip at the bottom-left of the window shows a bar with a percentage and a Stop button. Copying a large video into the agent's memory now happens on a thread with a spinner, the chat shows a spinner while the agent works or starts.
+
+**New:** `find_files` and `import_file` let the agent search the home folder for pictures and videos and copy one into the project (a switch in the Connect tab turns it off). Invariant 5 is reworded and the decision and risks are written down (security.md, roadmap).
+
+**Verified:** an MCP test with a real ffmpeg that the editor's state is free at every progress report, progress reaches the total, and a stopped export leaves no file; app tests for the job rows; device tools tests (copy, refuse a fake picture, refuse paths, search limited to home). **Not verified:** the bar and spinners by eye, a very long export, the Stop button by hand, the search over a real home folder.
+
+**PR:** n/a
+
 ### feat(video): footage clips with sound, overlays, and a Video tab
 
 **Area:** `feat(core)`, `feat(render)`, `feat(media)`, `feat(mcp)`, `feat(app)`
