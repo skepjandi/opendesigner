@@ -57,9 +57,12 @@ Rectangle {
         visible: !!root.node
         anchors.fill: parent
         contentWidth: availableWidth
+        contentHeight: inspectorColumn.implicitHeight + 2 * Theme.pad + 80
         clip: true
+        ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
         ColumnLayout {
+            id: inspectorColumn
             width: root.width - 2 * Theme.pad
             x: Theme.pad
             y: Theme.pad

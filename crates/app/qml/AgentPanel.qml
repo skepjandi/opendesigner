@@ -434,8 +434,13 @@ Rectangle {
             ScrollView {
                 id: connectScroll
                 contentWidth: availableWidth
+                // The layout cannot know how tall wrapped text will be at its final width, so
+                // leave room below it: the last control must always be reachable.
+                contentHeight: connectColumn.implicitHeight + 2 * Theme.pad + 80
                 clip: true
+                ScrollBar.vertical: ScrollBar { policy: ScrollBar.AlwaysOn }
                 ColumnLayout {
+                    id: connectColumn
                     width: connectScroll.availableWidth - 2 * Theme.pad
                     x: Theme.pad
                     y: Theme.pad

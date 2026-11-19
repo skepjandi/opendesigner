@@ -286,16 +286,26 @@ pub fn export_video(
         renderer = renderer.with_footage(s);
     }
     let total = v.frame_count();
+    // While nothing moves the picture is the same: draw it once and send it again.
+    let mut held: Option<(Vec<i64>, Vec<u8>)> = None;
     for n in 0..total {
         let time_ms = n * 1000 / u64::from(v.fps);
-        let sent = renderer
-            .frame_at(time_ms)
-            .map_err(|e| ToolError(e.to_string()))
-            .and_then(|p| {
-                writer
-                    .write_frame(p.data())
-                    .map_err(|e| ToolError(e.to_string()))
-            });
+        let sig = renderer.signature(time_ms);
+        let sent = match (&sig, &held) {
+            (Some(s), Some((last, pixels))) if s == last => writer
+                .write_frame(pixels)
+                .map_err(|e| ToolError(e.to_string())),
+            _ => renderer
+                .frame_at(time_ms)
+                .map_err(|e| ToolError(e.to_string()))
+                .and_then(|p| {
+                    let sent = writer
+                        .write_frame(p.data())
+                        .map_err(|e| ToolError(e.to_string()));
+                    held = sig.map(|s| (s, p.data().to_vec()));
+                    sent
+                }),
+        };
         if let Err(e) = sent {
             writer.abort();
             return Err(e);

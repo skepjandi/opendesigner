@@ -233,6 +233,9 @@ pub mod qobject {
         #[cxx_name = "chatAnswer"]
         fn chat_answer(self: Pin<&mut Self>, request: &QString, option: &QString);
         #[qinvokable]
+        #[cxx_name = "chatAutoAllow"]
+        fn chat_auto_allow(self: Pin<&mut Self>, on: bool);
+        #[qinvokable]
         #[cxx_name = "chatCancel"]
         fn chat_cancel(self: Pin<&mut Self>);
         #[qinvokable]
@@ -890,6 +893,13 @@ impl qobject::Editor {
     pub fn chat_answer(mut self: Pin<&mut Self>, request: &QString, option: &QString) {
         let (request, option) = (request.to_string(), option.to_string());
         self.as_mut().act(|s| s.chat_answer(&request, &option));
+    }
+
+    pub fn chat_auto_allow(mut self: Pin<&mut Self>, on: bool) {
+        self.as_mut().act(|s| {
+            s.chat_auto_allow(on);
+            Ok(())
+        });
     }
 
     pub fn chat_cancel(mut self: Pin<&mut Self>) {

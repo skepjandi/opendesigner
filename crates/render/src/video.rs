@@ -78,6 +78,58 @@ impl<'a> VideoRenderer<'a> {
         &self.warnings
     }
 
+    /// A value that is the same for two moments exactly when the picture is: while a clip of a
+    /// design frame holds still (no zoom, no transition, no fade) every frame is identical, and
+    /// an export can reuse the last one instead of drawing it again. `None` when the picture
+    /// changes all the time (footage).
+    pub fn signature(&self, time_ms: u64) -> Option<Vec<i64>> {
+        let placed = self.video.placed();
+        let Some(last) = placed.last() else {
+            return Some(Vec::new());
+        };
+        let time = time_ms.min(last.end_ms.saturating_sub(1));
+        let mut sig = Vec::new();
+        for (n, p) in placed
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| p.start_ms <= time && time < p.end_ms)
+        {
+            let clip = &self.video.clips[p.index];
+            if clip.footage.is_some() {
+                return None;
+            }
+            sig.push(n as i64);
+            let into = time - p.start_ms;
+            if into < u64::from(p.overlap_ms) {
+                sig.push(into as i64);
+            }
+            // while a zoom runs, every moment differs
+            if (clip.motion.scale_to - clip.motion.scale_from).abs() > f64::EPSILON {
+                sig.push(time as i64);
+            }
+            // a clip arriving later changes how this one is pushed or faded
+            if placed
+                .get(p.index + 1)
+                .is_some_and(|next| next.start_ms <= time && time < p.end_ms)
+            {
+                sig.push(time as i64);
+            }
+        }
+        for (n, o) in self.video.overlays.iter().enumerate() {
+            let end = o.start_ms + u64::from(o.duration_ms);
+            if o.start_ms <= time && time < end {
+                sig.push(1_000 + n as i64);
+                let fading = o.fade_ms > 0
+                    && (time - o.start_ms < u64::from(o.fade_ms)
+                        || end - time <= u64::from(o.fade_ms));
+                if fading {
+                    sig.push(time as i64);
+                }
+            }
+        }
+        Some(sig)
+    }
+
     /// The picture at `time_ms` from the start. Past the end it is the last picture; an empty
     /// video is black.
     pub fn frame_at(&mut self, time_ms: u64) -> Result<Pixmap, RenderError> {
@@ -685,5 +737,36 @@ mod tests {
             [240, 240, 240],
             "after the overlay"
         );
+    }
+
+    #[test]
+    fn the_signature_is_equal_while_the_picture_holds_and_differs_while_it_moves() {
+        let (mut s, v, ..) = two_clips();
+        set_transition(
+            &mut s,
+            &v,
+            1,
+            Transition {
+                kind: TransitionKind::Fade,
+                duration_ms: 1000,
+            },
+        );
+        let doc = s.document();
+        let r = VideoRenderer::new(doc, doc.video(&v).unwrap(), None);
+        assert_eq!(r.signature(100), r.signature(900), "clip one holds still");
+        assert_ne!(r.signature(1100), r.signature(1200), "during the fade");
+        assert_eq!(r.signature(2100), r.signature(3000), "clip two holds still");
+        assert_ne!(r.signature(900), r.signature(2100), "different clips");
+        // and a held moment really is the same picture
+        let mut r2 = VideoRenderer::new(doc, doc.video(&v).unwrap(), None);
+        assert_eq!(
+            r2.frame_at(100).unwrap().data(),
+            r2.frame_at(900).unwrap().data()
+        );
+
+        let (s, v, _) = footage_video();
+        let doc = s.document();
+        let r = VideoRenderer::new(doc, doc.video(&v).unwrap(), None);
+        assert_eq!(r.signature(500), None, "footage changes every frame");
     }
 }

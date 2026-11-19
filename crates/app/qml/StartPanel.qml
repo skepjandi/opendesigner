@@ -6,7 +6,7 @@ import QtQuick.Dialogs
 // Where to work, which agent to start and what to ask it first. Used on launch and from the
 // project menu. The folder is usually a repository: the agent starts there (so it can run the
 // app and take screenshots) and the design lives in an `opendesigner/` folder inside it.
-ColumnLayout {
+ScrollView {
     id: root
     required property var editor
     signal started()
@@ -17,7 +17,6 @@ ColumnLayout {
     readonly property var recent: JSON.parse(editor.recentProjects())
     readonly property bool agentChosen: agentBox.currentIndex >= 0 && presets[agentBox.currentIndex].command !== "" || customCommand.text.trim() !== ""
     readonly property string command: presets[agentBox.currentIndex].command !== "" ? presets[agentBox.currentIndex].command : customCommand.text.trim()
-    spacing: 12
 
     function choose(url) {
         folderUrl = url
@@ -39,143 +38,156 @@ ColumnLayout {
         onAccepted: root.choose(selectedFolder.toString())
     }
 
-    Label { text: "Where are you working?"; color: Theme.text; font.pixelSize: 15; font.bold: true }
-    Label {
-        Layout.fillWidth: true
-        wrapMode: Text.WordWrap
-        color: Theme.muted
-        font.pixelSize: 12
-        text: "Choose the folder of your project (a repository, say). The agent starts there, so it can run your app and take screenshots; the designs, notes and exports are kept in an opendesigner folder inside it."
-    }
-    RowLayout {
-        Layout.fillWidth: true
-        Label {
-            Layout.fillWidth: true
-            text: root.info ? root.editor.localPath(root.folderUrl) : "No folder chosen"
-            color: root.info ? Theme.text : Theme.muted
-            elide: Text.ElideMiddle
-        }
-        Btn { text: "Choose folder…"; primary: !root.info; onClicked: folderDialog.open() }
-    }
-    // One workspace per deliverable: an app store set, a reel, a landing page. Pick one that
-    // exists or name a new one.
     readonly property var existing: info && info.found === "workspaces" ? info.workspaces : []
     readonly property bool direct: info !== null && info.found === "project"
     property bool makeNew: existing.length === 0
-    RowLayout {
-        Layout.fillWidth: true
-        visible: root.info !== null && !root.direct
-        Label { text: "Workspace"; color: Theme.muted; font.pixelSize: 12 }
-        ComboBox {
-            id: workspaceBox
-            Layout.preferredWidth: 180
-            visible: root.existing.length > 0
-            model: root.existing.concat(["New workspace…"])
-            onActivated: i => root.makeNew = i === root.existing.length
-            onModelChanged: { currentIndex = 0; root.makeNew = root.existing.length === 0 }
-        }
-        Field {
-            id: newName
-            Layout.fillWidth: true
-            visible: root.makeNew
-            placeholderText: "name it after what it is, for example app store or instagram reel"
-        }
-    }
-    Label {
-        Layout.fillWidth: true
-        visible: root.info !== null
-        wrapMode: Text.WordWrap
-        font.pixelSize: 11
-        color: root.makeNew && !root.direct ? Theme.accent : Theme.success
-        text: !root.info ? "" :
-              root.direct ? "This folder is an OpenDesigner project; it will be opened."
-            : root.makeNew ? "A new, empty workspace is set up in opendesigner/workspaces/ here. The agent decides what to make, and can start more workspaces for other deliverables."
-            : "The workspace is opened as you left it."
-    }
+    clip: true
+    implicitWidth: 540
+    contentWidth: availableWidth
+    contentHeight: column.implicitHeight + 40
+    implicitHeight: Math.min(column.implicitHeight + 40, 640)
+    ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
-    Label {
-        visible: root.recent.length > 0
-        text: "Recent"
-        color: Theme.muted
-        font.pixelSize: 11
-        font.bold: true
-    }
-    Flow {
-        Layout.fillWidth: true
-        spacing: 6
-        Repeater {
-            model: root.recent
-            delegate: Btn {
-                required property var modelData
-                text: modelData.name
-                onClicked: root.choose("file://" + modelData.folder)
-                ToolTip.visible: hovered
-                ToolTip.text: modelData.folder
+    ColumnLayout {
+        id: column
+        width: root.availableWidth
+        spacing: 12
+
+        Label { text: "Where are you working?"; color: Theme.text; font.pixelSize: 15; font.bold: true }
+        Label {
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+            color: Theme.muted
+            font.pixelSize: 12
+            text: "Choose the folder of your project (a repository, say). The agent starts there, so it can run your app and take screenshots; the designs, notes and exports are kept in an opendesigner folder inside it."
+        }
+        RowLayout {
+            Layout.fillWidth: true
+            Label {
+                Layout.fillWidth: true
+                text: root.info ? root.editor.localPath(root.folderUrl) : "No folder chosen"
+                color: root.info ? Theme.text : Theme.muted
+                elide: Text.ElideMiddle
             }
+            Btn { text: "Choose folder…"; primary: !root.info; onClicked: folderDialog.open() }
         }
-    }
-
-    Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: Theme.border }
-
-    Label { text: "Your agent"; color: Theme.text; font.pixelSize: 15; font.bold: true }
-    RowLayout {
-        Layout.fillWidth: true
-        ComboBox {
-            id: agentBox
-            Layout.preferredWidth: 190
-            model: root.presets.map(p => p.found ? p.label + "  (found)" : p.label)
-        }
-        Field {
-            id: customCommand
+        // One workspace per deliverable: an app store set, a reel, a landing page. Pick one that
+        // exists or name a new one.
+                    RowLayout {
             Layout.fillWidth: true
-            visible: root.presets[agentBox.currentIndex].command === ""
-            placeholderText: "command that starts your agent"
+            visible: root.info !== null && !root.direct
+            Label { text: "Workspace"; color: Theme.muted; font.pixelSize: 12 }
+            ComboBox {
+                id: workspaceBox
+                Layout.preferredWidth: 180
+                visible: root.existing.length > 0
+                model: root.existing.concat(["New workspace…"])
+                onActivated: i => root.makeNew = i === root.existing.length
+                onModelChanged: { currentIndex = 0; root.makeNew = root.existing.length === 0 }
+            }
+            Field {
+                id: newName
+                Layout.fillWidth: true
+                visible: root.makeNew
+                placeholderText: "name it after what it is, for example app store or instagram reel"
+            }
         }
         Label {
             Layout.fillWidth: true
-            visible: root.presets[agentBox.currentIndex].command !== ""
-            text: root.presets[agentBox.currentIndex].command
+            visible: root.info !== null
+            wrapMode: Text.WordWrap
+            font.pixelSize: 11
+            color: root.makeNew && !root.direct ? Theme.accent : Theme.success
+            text: !root.info ? "" :
+                  root.direct ? "This folder is an OpenDesigner project; it will be opened."
+                : root.makeNew ? "A new, empty workspace is set up in opendesigner/workspaces/ here. The agent decides what to make, and can start more workspaces for other deliverables."
+                : "The workspace is opened as you left it."
+        }
+
+        Label {
+            visible: root.recent.length > 0
+            text: "Recent"
             color: Theme.muted
             font.pixelSize: 11
-            elide: Text.ElideRight
+            font.bold: true
         }
-    }
-    Label {
-        Layout.fillWidth: true
-        wrapMode: Text.WordWrap
-        color: Theme.muted
-        font.pixelSize: 11
-        text: "You stay signed in to the agent yourself. It is started on this computer when you press the button, and its work appears here live."
-    }
-
-    Label { text: "What should it make first?"; color: Theme.text; font.pixelSize: 15; font.bold: true }
-    ScrollView {
-        Layout.fillWidth: true
-        Layout.preferredHeight: 96
-        TextArea {
-            id: prompt
-            wrapMode: TextEdit.Wrap
-            color: Theme.text
-            font.pixelSize: Theme.fontSize
-            placeholderText: "For example: start the app, take screenshots of its main screens and make the App Store set. Or: cut the footage I imported into a 30 second teaser with titles."
-            placeholderTextColor: Theme.muted
-            enabled: root.agentChosen
-            background: Rectangle { radius: 4; color: Theme.field; border.width: 1; border.color: prompt.activeFocus ? Theme.accent : Theme.border }
+        Flow {
+            Layout.fillWidth: true
+            spacing: 6
+            Repeater {
+                model: root.recent
+                delegate: Btn {
+                    required property var modelData
+                    text: modelData.name
+                    onClicked: root.choose("file://" + modelData.folder)
+                    ToolTip.visible: hovered
+                    ToolTip.text: modelData.folder
+                }
+            }
         }
-    }
 
-    RowLayout {
-        Layout.fillWidth: true
-        Item { Layout.fillWidth: true }
-        Btn {
-            text: root.agentChosen && root.info ? "Open and start the agent" : "Open"
-            primary: true
-            enabled: root.info !== null && root.info.exists && (root.direct || !root.makeNew || newName.text.trim() !== "")
-            onClicked: {
-                const name = root.direct ? "" : (root.makeNew ? newName.text.trim() : root.existing[workspaceBox.currentIndex])
-                if (!root.editor.openWorkspace(root.folderUrl, name, true)) return
-                if (root.agentChosen) root.editor.chatStartWith(root.command, prompt.text)
-                root.started()
+        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: Theme.border }
+
+        Label { text: "Your agent"; color: Theme.text; font.pixelSize: 15; font.bold: true }
+        RowLayout {
+            Layout.fillWidth: true
+            ComboBox {
+                id: agentBox
+                Layout.preferredWidth: 190
+                model: root.presets.map(p => p.found ? p.label + "  (found)" : p.label)
+            }
+            Field {
+                id: customCommand
+                Layout.fillWidth: true
+                visible: root.presets[agentBox.currentIndex].command === ""
+                placeholderText: "command that starts your agent"
+            }
+            Label {
+                Layout.fillWidth: true
+                visible: root.presets[agentBox.currentIndex].command !== ""
+                text: root.presets[agentBox.currentIndex].command
+                color: Theme.muted
+                font.pixelSize: 11
+                elide: Text.ElideRight
+            }
+        }
+        Label {
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+            color: Theme.muted
+            font.pixelSize: 11
+            text: "You stay signed in to the agent yourself. It is started on this computer when you press the button, and its work appears here live."
+        }
+
+        Label { text: "What should it make first?"; color: Theme.text; font.pixelSize: 15; font.bold: true }
+        ScrollView {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 96
+            TextArea {
+                id: prompt
+                wrapMode: TextEdit.Wrap
+                color: Theme.text
+                font.pixelSize: Theme.fontSize
+                placeholderText: "For example: start the app, take screenshots of its main screens and make the App Store set. Or: cut the footage I imported into a 30 second teaser with titles."
+                placeholderTextColor: Theme.muted
+                enabled: root.agentChosen
+                background: Rectangle { radius: 4; color: Theme.field; border.width: 1; border.color: prompt.activeFocus ? Theme.accent : Theme.border }
+            }
+        }
+
+        RowLayout {
+            Layout.fillWidth: true
+            Item { Layout.fillWidth: true }
+            Btn {
+                text: root.agentChosen && root.info ? "Open and start the agent" : "Open"
+                primary: true
+                enabled: root.info !== null && root.info.exists && (root.direct || !root.makeNew || newName.text.trim() !== "")
+                onClicked: {
+                    const name = root.direct ? "" : (root.makeNew ? newName.text.trim() : root.existing[workspaceBox.currentIndex])
+                    if (!root.editor.openWorkspace(root.folderUrl, name, true)) return
+                    if (root.agentChosen) root.editor.chatStartWith(root.command, prompt.text)
+                    root.started()
+                }
             }
         }
     }

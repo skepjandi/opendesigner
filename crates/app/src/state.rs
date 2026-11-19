@@ -1358,9 +1358,15 @@ impl EditorState {
         chat.answer(request, (!option.is_empty()).then_some(option))
     }
 
-    pub fn chat_cancel(&self) {
-        if let Some(c) = &self.chat {
+    pub fn chat_cancel(&mut self) {
+        if let Some(c) = self.chat.as_mut() {
             c.cancel();
+        }
+    }
+
+    pub fn chat_auto_allow(&mut self, on: bool) {
+        if let Some(c) = self.chat.as_mut() {
+            c.set_auto_allow(on);
         }
     }
 
@@ -2251,6 +2257,52 @@ mod tests {
     }
 
     #[test]
+    fn a_message_typed_while_the_agent_works_is_queued_and_always_allow_answers_its_questions() {
+        let (mut s, t) = state();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let hook: ChatHook = Arc::new(move |input| {
+            let _ = tx.send(input);
+        });
+        let command = format!("\"{}\" normal", mock_agent().display());
+        s.start_mcp(&t.path().join("token"), Arc::new(|_| {}))
+            .unwrap();
+        s.chat_start(&command, hook).unwrap();
+        pump(&mut s, &rx, |c| c["status"] == "ready");
+
+        s.chat_send("first").unwrap();
+        pump(&mut s, &rx, |c| !c["permission"].is_null());
+        s.chat_send("second").unwrap();
+        let chat: Value = serde_json::from_str(&s.snapshot().chat).unwrap();
+        assert_eq!(chat["queued"], 1, "typed while busy");
+        assert_eq!(chat["status"], "busy");
+
+        // allowing for good answers the waiting question and the next turn's
+        s.chat_auto_allow(true);
+        let chat = pump(&mut s, &rx, |c| {
+            c["status"] == "ready"
+                && c["queued"] == 0
+                && c["messages"]
+                    .as_array()
+                    .is_some_and(|m| m.iter().filter(|m| m["role"] == "user").count() == 2)
+        });
+        assert!(chat["permission"].is_null());
+        assert_eq!(chat["auto_allow"], true);
+        let users: Vec<(&str, bool)> = chat["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|m| m["role"] == "user")
+            .map(|m| (m["text"].as_str().unwrap(), m["queued"] == true))
+            .collect();
+        assert_eq!(
+            users,
+            [("first", false), ("second", false)],
+            "in order, none left queued"
+        );
+        s.chat_stop();
+    }
+
+    #[test]
     fn a_running_job_shows_progress_and_its_end_says_what_happened() {
         let mut s = EditorState::new();
         let update = |state, done, total| JobUpdate {
@@ -2576,7 +2628,7 @@ mod tests {
             }
             let input = rx
                 .recv_timeout(std::time::Duration::from_secs(30))
-                .expect("the agent should keep talking");
+                .unwrap_or_else(|_| panic!("the agent should keep talking; the chat is {chat}"));
             s.chat_apply(input);
         }
     }
@@ -2784,7 +2836,6 @@ mod tests {
         s.chat_send("make the headline bigger").unwrap();
         let waiting = pump(&mut s, &rx, |c| !c["permission"].is_null());
         assert_eq!(waiting["status"], "busy");
-        assert!(s.chat_send("again").is_err(), "one turn at a time");
         let request = waiting["permission"]["request"]
             .as_str()
             .unwrap()
