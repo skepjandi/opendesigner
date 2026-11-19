@@ -11,7 +11,7 @@ generated is not done.\n\
 the product's own repository, screens, colors and copy, and use the user's media (list_media, \
 find_files, import_file). Never invent facts, numbers, reviews or features.\n\
 2. Read the craft: call get_playbook with `design` for images, `video` and `motion` for video, \
-`formats` to choose sizes, `style` to pick a named look. Say which look you chose and its rules.\n\
+`formats` to choose sizes, `style` to pick a named look, `logo` for marks. Say which look you chose and its rules.\n\
 3. Build a system first (tokens, one or two type families and a scale, a grid, named layers), then \
 one hero frame, look at it, fix it, and only then the rest.\n\
 4. Check, do not hope: render_preview (also at 160 to 320 px), review_frame on every frame and fix \
@@ -52,6 +52,11 @@ pub const TOPICS: &[(&str, &str, &str)] = &[
         "motion",
         "timings, easing, transitions, stagger, recipes for overlays, pre-export checks",
         include_str!("../skill/motion-playbook.md"),
+    ),
+    (
+        "logo",
+        "logos and marks: brief, concepts, SVG construction, tests, icon sets",
+        include_str!("../skill/logo-design.md"),
     ),
     (
         "formats",

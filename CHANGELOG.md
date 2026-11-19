@@ -15,6 +15,13 @@ All notable changes to OpenDesigner are documented here.
 **Change:** Look, Colors, Type, Mood, Motion, Layout and Imagery each end with a "Let the agent decide" button that clears that section (it shows as chosen when nothing is picked). The picker no longer pre-selects a default in each section, so an untouched section adds nothing to the prompt.
 
 **Verified:** the window session passes with no QML warning. **Not verified:** by eye.
+### feat(agent): logo design: a playbook, `import_svg` and `export_icon_set`
+
+**Area:** `feat(agent)`
+
+**Why:** "need logo design capabilities too, use kaankiziltug/logo-design-skill". **Change:** a `logo` playbook (also a skill reference) paraphrases that MIT-licensed skill's method for our tools: brief, category clichés, word map, 8 to 12 one-line concepts, three built in SVG black first, test and refine twice, a concept checkpoint, then the kit; plus SVG construction rules, optical corrections, the test list and red flags. Two tools: `import_svg` (checks an agent-written SVG for live text, embedded pictures, filters, many colors, gradients, no viewBox; draws it crisp into `media/`, keeps the master) and `export_icon_set` (11 PNG sizes from 1024 to 16 into `exports/<name>-icons/`, opaque with a background, optional padding). The skill's Python tools and its 1,400-logo library are not bundled (size, and the editor has its own preview).
+
+**Verified:** unit tests for the audit and for import then export (sizes, refusals), the playbook tool-name test. **Not verified:** that an agent produces a good logo with it; the PNG sizes by eye; no `.ico` or web manifest is written.
 
 **PR:** n/a
 
