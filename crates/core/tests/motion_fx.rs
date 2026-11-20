@@ -453,3 +453,50 @@ fn new_clip_fields_leave_old_projects_byte_identical() {
         assert!(!text.contains(field), "{field}");
     }
 }
+
+#[test]
+fn the_agent_can_write_a_grade_as_json_and_read_it_back() {
+    let op: Operation = serde_json::from_str(
+        r#"{"op":"set","id":"n_1","prop":{"name":"grade","value":{"look":"warm","exposure":0.25}}}"#,
+    )
+    .unwrap();
+    match op {
+        Operation::Set { prop, .. } => match prop {
+            Property::Grade(Some(g)) => {
+                assert_eq!(g.exposure, 0.25);
+                assert_eq!(g.temperature, 0.35);
+                assert_eq!(g.saturation, 0.1);
+            }
+            other => panic!("{other:?}"),
+        },
+        other => panic!("{other:?}"),
+    }
+    let op: Operation = serde_json::from_str(
+        r#"{"op":"set_clip","video":"v_1","clip":"c_1","prop":{"name":"speed_ramp","value":[{"at_ms":0,"rate":0.5},{"at_ms":1000,"rate":2}]}}"#,
+    )
+    .unwrap();
+    match op {
+        Operation::SetClip { prop, .. } => match prop {
+            ClipProperty::SpeedRamp(keys) => {
+                assert_eq!(keys.len(), 2);
+                assert_eq!((keys[0].rate, keys[1].rate), (0.5, 2.0));
+            }
+            other => panic!("{other:?}"),
+        },
+        other => panic!("{other:?}"),
+    }
+    let op: Operation = serde_json::from_str(
+        r#"{"op":"set_clip","video":"v_1","clip":"c_1","prop":{"name":"transition","value":{"kind":"glitch_slice","duration_ms":400}}}"#,
+    )
+    .unwrap();
+    match op {
+        Operation::SetClip { prop, .. } => match prop {
+            ClipProperty::Transition(t) => {
+                assert_eq!(t.kind, TransitionKind::GlitchSlice);
+                assert_eq!(t.duration_ms, 400);
+            }
+            other => panic!("{other:?}"),
+        },
+        other => panic!("{other:?}"),
+    }
+}
