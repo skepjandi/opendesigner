@@ -6,6 +6,14 @@ All notable changes to OpenDesigner are documented here.
 >
 > **Wiki**: the [GitHub Wiki](https://github.com/skepjandi/opendesigner/wiki) is the public-facing main wiki — architecture, document format, agent integration, security model, roadmap. Source-controlled editing surface is `docs/wiki/` in this repo; CI (`.github/workflows/sync-wiki.yml`) mirrors it to the GitHub Wiki on every merge to `main`. New single-PR changes belong here, not as new wiki pages.
 
+## 2026-11-22
+
+### fix(agent): memory and chat context no longer bleed between workspaces
+
+**Area:** `fix(agent)`, `fix(app)`
+
+Agent notes are kept per workspace (`.opendesigner/workspaces/<name>/memory/`) instead of once per repository, and the in-app chat starts the agent in the workspace's own folder. Notes written before this change stay with the legacy `main` project.
+
 ## 2026-11-21
 
 ### feat: close the gap to Hyperframes: blocks, captions, multi-track audio, motion, lint, variables, faster preview and export
