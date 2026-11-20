@@ -621,7 +621,7 @@ fn core_definitions() -> Vec<Value> {
             json!({
                 "kind": {"type": "string", "enum": synth::Kind::NAMES, "description": "Which sound."},
                 "duration_ms": {"type": "integer", "minimum": synth::MIN_DURATION_MS, "maximum": synth::MAX_DURATION_MS, "description": "How long. Optional: each kind has a fitting default. A beat takes its length from bpm and bars."},
-                "seed": {"type": "integer", "minimum": 0, "description": "Another seed gives another variation (noise, and the notes of a stinger). Default 1."},
+                "seed": {"type": "integer", "minimum": 0, "description": "Another seed gives another variation (noise, the notes of a stinger, and the pitch or tempo when you give none). Default: a new random seed each call, returned as `seed` and kept in the sidecar. Pass the same seed to make the same sound again."},
                 "pitch_hz": {"type": "number", "minimum": 20, "maximum": 8000, "description": "The base pitch of chime, drone, tick, pop, riser, hit and stinger."},
                 "bpm": {"type": "number", "minimum": 40, "maximum": 240, "description": "Beat only: tempo, default 120."},
                 "bars": {"type": "integer", "minimum": 1, "maximum": 16, "description": "Beat only: bars of four beats."},
@@ -1955,6 +1955,14 @@ struct MakeSoundArgs {
     name: Option<String>,
 }
 
+/// A seed nobody asked for is a new one each time, so two sounds made without one differ; it is
+/// written to the sound's sidecar, so the sound can still be made again.
+fn fresh_seed() -> Result<u64, ToolError> {
+    let mut bytes = [0u8; 4];
+    getrandom::fill(&mut bytes).map_err(|e| ToolError(e.to_string()))?;
+    Ok(u64::from(u32::from_le_bytes(bytes)))
+}
+
 fn make_sound(ctx: &mut CallCtx, a: MakeSoundArgs) -> Result<Output, ToolError> {
     let kind = synth::Kind::parse(&a.kind)
         .ok_or_else(|| ToolError(format!("kind is one of {}", synth::Kind::NAMES.join(", "))))?;
@@ -1968,7 +1976,10 @@ fn make_sound(ctx: &mut CallCtx, a: MakeSoundArgs) -> Result<Output, ToolError> 
     let spec = synth::Spec {
         kind,
         duration_ms: a.duration_ms.unwrap_or_else(|| kind.default_ms()),
-        seed: a.seed.unwrap_or(1),
+        seed: match a.seed {
+            Some(seed) => seed,
+            None => fresh_seed()?,
+        },
         pitch_hz: a.pitch_hz,
         bpm: a.bpm,
         bars: a.bars,
@@ -1981,6 +1992,7 @@ fn make_sound(ctx: &mut CallCtx, a: MakeSoundArgs) -> Result<Output, ToolError> 
         "duration_ms": made.duration_ms,
         "channels": made.channels,
         "bytes": made.bytes,
+        "seed": spec.seed,
         "source": "synthesized",
         "note": "synthesized here: no licence, nothing to attribute. Set it with set_video prop {name: \"audio\", value: {file, start_ms, gain, fade_in_ms, fade_out_ms}}.",
     })))

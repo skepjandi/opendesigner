@@ -6,6 +6,14 @@ All notable changes to OpenDesigner are documented here.
 >
 > **Wiki**: the [GitHub Wiki](https://github.com/skepjandi/opendesigner/wiki) is the public-facing main wiki — architecture, document format, agent integration, security model, roadmap. Source-controlled editing surface is `docs/wiki/` in this repo; CI (`.github/workflows/sync-wiki.yml`) mirrors it to the GitHub Wiki on every merge to `main`. New single-PR changes belong here, not as new wiki pages.
 
+## 2026-11-23
+
+### fix(agent): sounds differ between videos
+
+**Area:** `fix(agent)`
+
+`make_sound` defaulted to seed 1 and most kinds ignored the seed, so every video got the same sounds. An omitted seed is now random (returned, kept in the sidecar), and a seed varies pitch and beat tempo when none is given. The motion playbook tells agents to vary sounds and to use sound packs and Freesound.
+
 ## 2026-11-22
 
 ### fix(agent): memory and chat context no longer bleed between workspaces
