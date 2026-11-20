@@ -6,12 +6,17 @@
 //! output needs and reused for every moment of the clip. A frame that holds animated nodes or a
 //! screen playing a recording is "live": it is drawn again whenever what it shows changes.
 
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::path::Path as FsPath;
+use std::sync::{Arc, Mutex, PoisonError};
 
+use od_core::speed::SpeedMap;
 use od_core::{Document, Entrance, Node, NodeId, NodeKind, Overlay, TransitionKind, Video};
 use tiny_skia::{FilterQuality, Pixmap, PixmapPaint, Transform};
 
+use crate::grade;
+use crate::transitions::{self, Reveal};
 use crate::{Media, RenderError, Warning, render_frame_with};
 
 /// Frames kept drawn: a transition shows two clips and a second transition may start under it.
@@ -27,7 +32,7 @@ pub trait FootageSource {
     -> Result<Vec<u8>, String>;
 }
 
-struct Drawn {
+pub struct DrawnFrame {
     frame: NodeId,
     scale_bits: u32,
     /// For a live frame: the animated values and recording times it was drawn with.
@@ -64,11 +69,20 @@ pub struct VideoRenderer<'a> {
     /// The size of the pictures drawn, the video's own unless a smaller one was asked for.
     width: u32,
     height: u32,
-    drawn: Vec<Drawn>,
+    drawn: Vec<DrawnFrame>,
+    /// A cache shared with other renderers (the parallel export), so a design frame is drawn
+    /// once for the whole export and not once per thread.
+    shared: Option<Arc<Mutex<Vec<DrawnFrame>>>>,
     warnings: Vec<Warning>,
     footage: Option<&'a mut dyn FootageSource>,
     live: HashMap<NodeId, Liveness>,
+    /// Where each clip's footage time comes from (`od_core::speed`), by clip index.
+    speeds: Vec<SpeedMap>,
 }
+
+/// How far a blur dissolve blurs at most, in thousandths of the shorter side (a grade's blur
+/// unit).
+const BLUR_DISSOLVE: f64 = 40.0;
 
 impl<'a> VideoRenderer<'a> {
     pub fn new(
@@ -83,15 +97,24 @@ impl<'a> VideoRenderer<'a> {
             width: video.width,
             height: video.height,
             drawn: Vec::new(),
+            shared: None,
             warnings: Vec::new(),
             footage: None,
             live: live_frames(doc, video),
+            speeds: video.clips.iter().map(SpeedMap::new).collect(),
         }
     }
 
     /// Lets clips of footage, and screens that play recordings, be drawn.
     pub fn with_footage(mut self, source: &'a mut dyn FootageSource) -> VideoRenderer<'a> {
         self.footage = Some(source);
+        self
+    }
+
+    /// Shares the cache of drawn design frames with other renderers, so a frame that several
+    /// threads show at once is drawn once (the parallel export does this).
+    pub fn with_shared_cache(mut self, cache: Arc<Mutex<Vec<DrawnFrame>>>) -> VideoRenderer<'a> {
+        self.shared = Some(cache);
         self
     }
 
@@ -351,7 +374,13 @@ impl<'a> VideoRenderer<'a> {
                         pose.opacity = e;
                         pose.scale = 1.2 - 0.2 * e;
                     }
+                    TransitionKind::BlurDissolve => {
+                        pose.opacity = e;
+                        pose.blur = grade::blur_sigma(BLUR_DISSOLVE, w, h) * (1.0 - e);
+                    }
+                    TransitionKind::Flash => pose.opacity = f32::from(e >= 0.5),
                     TransitionKind::Cut => {}
+                    masked => pose.reveal = Reveal::of(masked, e, p.index as u64),
                 }
             }
             // The clip arriving after this one pushes it out, or fades it to black.
@@ -364,11 +393,22 @@ impl<'a> VideoRenderer<'a> {
                     TransitionKind::SlideUp => pose.dy -= e * height,
                     TransitionKind::SlideDown => pose.dy += e * height,
                     TransitionKind::Dip => pose.opacity *= (1.0 - 2.0 * e).clamp(0.0, 1.0),
+                    TransitionKind::BlurDissolve => {
+                        pose.blur = grade::blur_sigma(BLUR_DISSOLVE, w, h) * e;
+                    }
+                    TransitionKind::Flash => pose.opacity *= f32::from(e < 0.5),
                     _ => {}
                 }
             }
             pose.opacity = pose.opacity.clamp(0.0, 1.0);
             self.draw_clip(&mut canvas, p.index, &moment, pose)?;
+        }
+        for (n, t) in arriving.iter().enumerate() {
+            let tr = self.video.clips[active[n].index].transition;
+            if let (Some(t), TransitionKind::Flash) = (t, tr.kind) {
+                let e = tr.ease.apply(f64::from(*t)) as f32;
+                flash_white(&mut canvas, 1.0 - (2.0 * e - 1.0).abs());
+            }
         }
         let overlays: Vec<Overlay> = self.video.overlays.clone();
         for o in overlays
@@ -431,7 +471,7 @@ impl<'a> VideoRenderer<'a> {
             ((w - pw * s) / 2.0 + pose.dx).round(),
             ((h - ph * s) / 2.0 + pose.dy).round(),
         );
-        canvas.draw_pixmap(0, 0, drawn.as_ref(), &paint, transform, None);
+        canvas.draw_pixmap(0, 0, drawn.as_ref().as_ref(), &paint, transform, None);
         Ok(())
     }
 
@@ -458,22 +498,17 @@ impl<'a> VideoRenderer<'a> {
         let played = moment.footage_time.saturating_sub(p.start_ms);
         // The picture is made at `widest` times the size that covers the video; shrink it to this
         // moment's zoom.
-        let drawn: std::borrow::Cow<'_, Pixmap> = match (&clip.frame, &clip.footage) {
+        let drawn: Cow<'_, Pixmap> = match (&clip.frame, &clip.footage) {
             (Some(frame), _) => {
                 let node = self
                     .doc
                     .node(frame)
                     .ok_or_else(|| RenderError::NoSuchNode(frame.to_string()))?;
                 let cover = (w / node.width as f32).max(h / node.height as f32);
-                std::borrow::Cow::Borrowed(self.drawn_frame(
-                    frame,
-                    cover * widest,
-                    moment,
-                    played,
-                )?)
+                self.drawn_frame(frame, cover * widest, moment, played)?
             }
             (None, Some(f)) => {
-                let at = f.in_ms + played;
+                let at = f.in_ms + self.speeds[index].source_ms(played);
                 let (pw, ph) = (
                     (w * widest).round().max(2.0) as u32,
                     (h * widest).round().max(2.0) as u32,
@@ -500,6 +535,14 @@ impl<'a> VideoRenderer<'a> {
             }
             (None, None) => return Ok(()),
         };
+        let drawn = match clip.grade.as_ref().filter(|g| !g.is_neutral()) {
+            Some(g) => {
+                let mut graded = drawn.into_owned();
+                grade::apply(&mut graded, g);
+                std::borrow::Cow::Owned(graded)
+            }
+            None => drawn,
+        };
         let k = zoom / widest * pose.scale;
         let (pw, ph) = (drawn.width() as f32 * k, drawn.height() as f32 * k);
         let transform = Transform::from_row(
@@ -521,7 +564,31 @@ impl<'a> VideoRenderer<'a> {
             quality,
             ..PixmapPaint::default()
         };
-        canvas.draw_pixmap(0, 0, drawn.as_ref().as_ref(), &paint, transform, None);
+        if pose.reveal.is_none() && pose.blur <= 0.0 {
+            canvas.draw_pixmap(0, 0, drawn.as_ref().as_ref(), &paint, transform, None);
+            return Ok(());
+        }
+        let mut layer =
+            Pixmap::new(canvas.width(), canvas.height()).ok_or(RenderError::TooLarge {
+                width: u64::from(canvas.width()),
+                height: u64::from(canvas.height()),
+            })?;
+        let plain = PixmapPaint {
+            quality,
+            ..PixmapPaint::default()
+        };
+        layer.draw_pixmap(0, 0, drawn.as_ref().as_ref(), &plain, transform, None);
+        if pose.blur > 0.0 {
+            grade::blur(&mut layer, pose.blur);
+        }
+        if let Some(r) = pose.reveal {
+            transitions::reveal(&mut layer, r);
+        }
+        let over = PixmapPaint {
+            opacity: pose.opacity,
+            ..PixmapPaint::default()
+        };
+        canvas.draw_pixmap(0, 0, layer.as_ref(), &over, Transform::identity(), None);
         Ok(())
     }
 
@@ -552,9 +619,32 @@ impl<'a> VideoRenderer<'a> {
         scale: f32,
         moment: &Moment,
         played_ms: u64,
-    ) -> Result<&Pixmap, RenderError> {
+    ) -> Result<Cow<'_, Pixmap>, RenderError> {
         let bits = scale.to_bits();
         let state = self.state_of(frame, moment, played_ms);
+        if let Some(shared) = self.shared.clone() {
+            {
+                let cache = shared.lock().unwrap_or_else(PoisonError::into_inner);
+                if let Some(d) = cache
+                    .iter()
+                    .find(|d| &d.frame == frame && d.scale_bits == bits && d.state == state)
+                {
+                    return Ok(Cow::Owned(d.pixmap.clone()));
+                }
+            }
+            let pixmap = self.render_drawn(frame, scale, moment, played_ms)?;
+            let mut cache = shared.lock().unwrap_or_else(PoisonError::into_inner);
+            if cache.len() >= KEPT {
+                cache.remove(0);
+            }
+            cache.push(DrawnFrame {
+                frame: frame.clone(),
+                scale_bits: bits,
+                state,
+                pixmap: pixmap.clone(),
+            });
+            return Ok(Cow::Owned(pixmap));
+        }
         if let Some(at) = self
             .drawn
             .iter()
@@ -564,43 +654,55 @@ impl<'a> VideoRenderer<'a> {
             let d = self.drawn.remove(at);
             self.drawn.push(d);
         } else {
-            let doc = match moment.doc {
-                Some(animated) if self.live.contains_key(frame) => animated,
-                _ => self.doc,
-            };
-            let mut media = Media {
-                footage: self
-                    .footage
-                    .as_deref_mut()
-                    .map(|f| f as &mut dyn FootageSource),
-                played_ms,
-            };
-            let rendered = render_frame_with(
-                doc,
-                frame,
-                scale.clamp(0.01, 16.0),
-                self.project_dir,
-                &mut media,
-            )?;
-            for warning in rendered.warnings {
-                if !self.warnings.contains(&warning) {
-                    self.warnings.push(warning);
-                }
-            }
+            let pixmap = self.render_drawn(frame, scale, moment, played_ms)?;
             if self.drawn.len() >= KEPT {
                 self.drawn.remove(0);
             }
-            self.drawn.push(Drawn {
+            self.drawn.push(DrawnFrame {
                 frame: frame.clone(),
                 scale_bits: bits,
                 state,
-                pixmap: rendered.pixmap,
+                pixmap,
             });
         }
         self.drawn
             .last()
-            .map(|d| &d.pixmap)
+            .map(|d| Cow::Borrowed(&d.pixmap))
             .ok_or_else(|| RenderError::NoSuchNode(frame.to_string()))
+    }
+
+    /// Draws the design frame at `scale` as it looks at the moment.
+    fn render_drawn(
+        &mut self,
+        frame: &NodeId,
+        scale: f32,
+        moment: &Moment,
+        played_ms: u64,
+    ) -> Result<Pixmap, RenderError> {
+        let doc = match moment.doc {
+            Some(animated) if self.live.contains_key(frame) => animated,
+            _ => self.doc,
+        };
+        let mut media = Media {
+            footage: self
+                .footage
+                .as_deref_mut()
+                .map(|f| f as &mut dyn FootageSource),
+            played_ms,
+        };
+        let rendered = render_frame_with(
+            doc,
+            frame,
+            scale.clamp(0.01, 16.0),
+            self.project_dir,
+            &mut media,
+        )?;
+        for warning in rendered.warnings {
+            if !self.warnings.contains(&warning) {
+                self.warnings.push(warning);
+            }
+        }
+        Ok(rendered.pixmap)
     }
 }
 
@@ -669,6 +771,24 @@ struct Pose {
     dy: f32,
     scale: f32,
     opacity: f32,
+    /// Blur of the picture, as a sigma in pixels (blur dissolve).
+    blur: f32,
+    /// A mask over the picture (wipes, iris, glitch).
+    reveal: Option<Reveal>,
+}
+
+/// Washes the picture towards white by `amount` (0 leaves it, 1 is all white).
+fn flash_white(canvas: &mut Pixmap, amount: f32) {
+    let mut paint = tiny_skia::Paint::default();
+    paint.set_color(
+        tiny_skia::Color::from_rgba(1.0, 1.0, 1.0, amount.clamp(0.0, 1.0))
+            .unwrap_or(tiny_skia::Color::WHITE),
+    );
+    if let Some(rect) =
+        tiny_skia::Rect::from_xywh(0.0, 0.0, canvas.width() as f32, canvas.height() as f32)
+    {
+        canvas.fill_rect(rect, &paint, Transform::identity(), None);
+    }
 }
 
 impl Pose {
@@ -677,6 +797,8 @@ impl Pose {
         dy: 0.0,
         scale: 1.0,
         opacity: 1.0,
+        blur: 0.0,
+        reveal: None,
     };
 
     /// Combines another pose with this one (offsets add, scales and opacities multiply).
@@ -1425,5 +1547,176 @@ mod tests {
             at(&sharp, &v1, 1500).data(),
             "a still moment is not blurred"
         );
+    }
+
+    fn transition_of(kind: TransitionKind, ms: u32) -> Transition {
+        Transition {
+            kind,
+            duration_ms: ms,
+            ease: od_core::Ease::Linear,
+        }
+    }
+
+    fn near(a: [u8; 3], b: [u8; 3], tolerance: u8) -> bool {
+        a.iter().zip(b).all(|(x, y)| x.abs_diff(y) <= tolerance)
+    }
+
+    const RED: [u8; 3] = [255, 0, 0];
+    const BLUE: [u8; 3] = [0, 0, 255];
+
+    #[test]
+    fn wipes_uncover_the_new_clip_from_their_edge() {
+        for (kind, new_at, old_at) in [
+            (TransitionKind::WipeLeft, (75, 100), (25, 100)),
+            (TransitionKind::WipeRight, (25, 100), (75, 100)),
+            (TransitionKind::WipeUp, (50, 150), (50, 50)),
+            (TransitionKind::WipeDown, (50, 50), (50, 150)),
+        ] {
+            let (mut s, v, ..) = two_clips();
+            set_transition(&mut s, &v, 1, transition_of(kind, 1000));
+            let p = at(&s, &v, 1500);
+            assert_eq!(px(&p, new_at.0, new_at.1), BLUE, "{kind:?} new");
+            assert_eq!(px(&p, old_at.0, old_at.1), RED, "{kind:?} old");
+            assert_eq!(px(&at(&s, &v, 999), 50, 100), RED);
+            assert_eq!(px(&at(&s, &v, 2000), 50, 100), BLUE);
+        }
+    }
+
+    #[test]
+    fn an_iris_opens_from_the_middle_of_the_picture() {
+        let (mut s, v, ..) = two_clips();
+        set_transition(&mut s, &v, 1, transition_of(TransitionKind::Iris, 1000));
+        let p = at(&s, &v, 1300);
+        assert_eq!(px(&p, 50, 100), BLUE);
+        assert_eq!(px(&p, 1, 1), RED);
+        assert_eq!(px(&at(&s, &v, 1900), 1, 1), RED, "corners go last");
+    }
+
+    #[test]
+    fn a_flash_passes_through_white_between_the_clips() {
+        let (mut s, v, ..) = two_clips();
+        set_transition(&mut s, &v, 1, transition_of(TransitionKind::Flash, 1000));
+        assert!(near(px(&at(&s, &v, 1250), 50, 100), [255, 128, 128], 2));
+        assert!(near(px(&at(&s, &v, 1500), 50, 100), [255, 255, 255], 1));
+        assert!(near(px(&at(&s, &v, 1750), 50, 100), [128, 128, 255], 2));
+        assert_eq!(px(&at(&s, &v, 999), 50, 100), RED);
+    }
+
+    #[test]
+    fn a_blur_dissolve_mixes_and_blurs_both_clips_and_a_glitch_repeats_exactly() {
+        let (mut s, v, ..) = two_clips();
+        set_transition(
+            &mut s,
+            &v,
+            1,
+            transition_of(TransitionKind::BlurDissolve, 1000),
+        );
+        let mid = at(&s, &v, 1500);
+        assert!(
+            near(px(&mid, 50, 100), [128, 0, 128], 3),
+            "{:?}",
+            px(&mid, 50, 100)
+        );
+        set_transition(&mut s, &v, 1, transition_of(TransitionKind::Fade, 1000));
+        assert_eq!(
+            mid.data(),
+            at(&s, &v, 1500).data(),
+            "blurring flat colour changes nothing, so it dissolves like a fade"
+        );
+        assert_eq!(mid.data(), at(&s, &v, 1500).data());
+
+        set_transition(
+            &mut s,
+            &v,
+            1,
+            transition_of(TransitionKind::GlitchSlice, 1000),
+        );
+        let glitch = at(&s, &v, 1500);
+        assert_eq!(glitch.data(), at(&s, &v, 1500).data());
+        let blue = glitch
+            .data()
+            .chunks_exact(4)
+            .filter(|c| c[2] == 255 && c[0] == 0)
+            .count();
+        assert!(
+            blue > 0 && blue < 100 * 200,
+            "part of the new clip shows: {blue}"
+        );
+    }
+
+    fn set_clip_prop(s: &mut Session, v: &NodeId, prop: ClipProperty) {
+        let id = s.document().video(v).unwrap().clips[0].id.clone();
+        s.apply(
+            Actor::User,
+            None,
+            &[Operation::SetClip {
+                video: v.clone(),
+                clip: id,
+                prop,
+            }],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn footage_speed_reads_the_file_faster_or_slower_than_the_clip_plays() {
+        let (mut s, v, _) = footage_video();
+        set_clip_prop(&mut s, &v, ClipProperty::Speed(2.0));
+        let doc = s.document();
+        let video = doc.video(&v).unwrap();
+        let mut fake = Fake(Vec::new());
+        let mut r = VideoRenderer::new(doc, video, None).with_footage(&mut fake);
+        // 1 s into the clip at 2x is 2 s into the file after the 3 s in point: shade 200
+        assert_eq!(px(&r.frame_at(1000).unwrap(), 5, 5), [200, 200, 200]);
+        drop(r);
+        assert_eq!(fake.0, [("media/talk.mp4".to_string(), 5000)]);
+        set_clip_prop(&mut s, &v, ClipProperty::Speed(0.5));
+        let doc = s.document();
+        let mut fake = Fake(Vec::new());
+        let mut r = VideoRenderer::new(doc, doc.video(&v).unwrap(), None).with_footage(&mut fake);
+        r.frame_at(2000).unwrap();
+        drop(r);
+        assert_eq!(fake.0, [("media/talk.mp4".to_string(), 4000)]);
+    }
+
+    #[test]
+    fn a_speed_ramp_reads_the_integral_of_its_rate() {
+        let (mut s, v, _) = footage_video();
+        let key = |at_ms, rate| od_core::SpeedKey {
+            at_ms,
+            rate,
+            ease: od_core::Ease::Linear,
+        };
+        set_clip_prop(
+            &mut s,
+            &v,
+            ClipProperty::SpeedRamp(vec![key(0, 1.0), key(2000, 3.0)]),
+        );
+        let doc = s.document();
+        let mut fake = Fake(Vec::new());
+        let mut r = VideoRenderer::new(doc, doc.video(&v).unwrap(), None).with_footage(&mut fake);
+        for ms in [0, 1000, 2000, 3000] {
+            r.frame_at(ms).unwrap();
+        }
+        drop(r);
+        // the rate is 1 + t/1000: 1.5 s of file after 1 s, 4 s after 2 s, then 3x
+        let asked: Vec<u64> = fake.0.iter().map(|(_, t)| *t).collect();
+        assert_eq!(asked, [3000, 4500, 7000, 10000]);
+    }
+
+    #[test]
+    fn a_clip_grade_changes_the_picture_and_a_neutral_one_does_not() {
+        let (mut s, v, ..) = two_clips();
+        let plain = at(&s, &v, 500);
+        set_clip_prop(
+            &mut s,
+            &v,
+            ClipProperty::Grade(Some(od_core::Look::Mono.grade())),
+        );
+        let [r, g, b] = px(&at(&s, &v, 500), 50, 100);
+        assert!(r.abs_diff(g) <= 1 && g.abs_diff(b) <= 1, "{r} {g} {b}");
+        assert_eq!(px(&at(&s, &v, 2500), 50, 100), BLUE, "only the graded clip");
+        set_clip_prop(&mut s, &v, ClipProperty::Grade(None));
+        assert_eq!(at(&s, &v, 500).data(), plain.data());
     }
 }

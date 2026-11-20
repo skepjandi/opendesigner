@@ -380,10 +380,12 @@ for motion, use several overlays or `set_overlay` over time. Match the video's s
 
 The ids of a created video and clips come back in `created` (`v_...`, `c_...`). Width and height
 are even numbers; a frame of another shape is scaled to cover the video and cropped in the middle,
-so use frames of the video's shape. A transition (`cut`, `fade`, `slide_left`, `slide_right`)
+so use frames of the video's shape. A transition (`cut`, `fade`, `slide_left`, `slide_right`, `slide_up`, `slide_down`, `dip`, `zoom_in`,
+`wipe_left`, `wipe_right`, `wipe_up`, `wipe_down`, `iris`, `flash`, `blur_dissolve`, `glitch_slice`)
 overlaps the end of the clip before it, so it makes the video shorter by its length; the first
 clip's transition is not shown. `motion` zooms slowly from `scale_from` to `scale_to` (1 to 3) over
-the clip. Change a clip with `set_clip` (`duration_ms`, `frame`, `transition`, `motion`), reorder
+the clip. Change a clip with `set_clip` (`duration_ms`, `frame`, `source`, `transition`, `motion`, and for footage
+`speed`, `speed_ramp`; for any clip `grade`), reorder
 with `move_clip`, remove with `remove_clip`. A frame that a clip shows cannot be deleted until the
 clip is removed. Look at a moment with `render_video_frame` (try the middle of a transition) and
 write the file with `export_video`, which needs `ffmpeg` on the user's computer and tells you if it

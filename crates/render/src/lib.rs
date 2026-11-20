@@ -3,9 +3,12 @@
 //! image) is reported as a warning so an export never silently drops content.
 
 mod device;
+pub mod export;
+pub mod grade;
 mod images;
 mod text;
 pub mod three_d;
+pub mod transitions;
 pub mod video;
 
 pub use device::Media;
@@ -378,7 +381,10 @@ fn draw(
             }
             NodeKind::Image => {
                 match load_image(ctx, node) {
-                    Ok(image) => images::draw_image(pixmap, mask, node, transform, opacity, &image),
+                    Ok(image) => {
+                        let image = grade::graded(image, node.grade.as_ref());
+                        images::draw_image(pixmap, mask, node, transform, opacity, &image);
+                    }
                     Err(reason) => ctx.warnings.push(Warning::ImageNotRendered {
                         id: node.id.clone(),
                         reason,
@@ -838,6 +844,45 @@ mod tests {
         assert_eq!(px(&contained, 15, 25), [0, 255, 0, 255]);
         assert_eq!(px(&contained, 15, 8), [255, 0, 0, 255]);
         assert_eq!(px(&contained, 15, 42), [255, 0, 0, 255]);
+    }
+
+    #[test]
+    fn a_graded_image_node_is_drawn_graded() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut s, frame) = frame_session();
+        let mut n = NewNode::new(NodeKind::Image);
+        n.image = Some(two_tone(dir.path(), "shot.png", 20, 10));
+        n.width = 100.0;
+        n.height = 25.0;
+        n.image_fit = Some(od_core::ImageFit::Fill);
+        let id = add(&mut s, &frame, n);
+        let plain = render_frame(s.document(), &frame, 1.0, Some(dir.path())).unwrap();
+        s.apply(
+            Actor::User,
+            None,
+            &[Operation::Set {
+                id,
+                prop: od_core::Property::Grade(Some(od_core::Grade {
+                    exposure: -1.0,
+                    saturation: -1.0,
+                    ..od_core::Grade::default()
+                })),
+            }],
+        )
+        .unwrap();
+        let graded = render_frame(s.document(), &frame, 1.0, Some(dir.path())).unwrap();
+        assert_eq!(px(&plain, 20, 12), [0, 255, 0, 255]);
+        let [r, g, b, a] = px(&graded, 20, 12);
+        assert!(
+            r.abs_diff(g) <= 1 && g.abs_diff(b) <= 1 && a == 255,
+            "{r} {g} {b}"
+        );
+        assert!(g.abs_diff(91) <= 2, "half the green's luma: {g}");
+        assert_eq!(
+            px(&graded, 20, 40),
+            [255, 0, 0, 255],
+            "below the image is not graded"
+        );
     }
 
     #[test]

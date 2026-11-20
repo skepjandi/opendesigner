@@ -6,9 +6,25 @@ whole video process; this page is about movement.
 
 ## What the engine gives you
 
-- **Clips** of a design frame or of footage, in order, each with a **transition** into it (cut, fade,
-  slide_left/right/up/down, dip, zoom_in) and a slow **motion** (zoom from `scale_from` to
-  `scale_to`, 1 to 3) with an **ease**.
+- **Clips** of a design frame or of footage, in order, each with a **transition** into it (`cut`,
+  `fade`, `slide_left/right/up/down` which push the old clip out, `dip` through black, `flash`
+  through white, `zoom_in`, `wipe_left/right/up/down` which uncover the new clip from an edge,
+  `iris` which opens a circle from the middle, `blur_dissolve`, `glitch_slice`) and a slow
+  **motion** (zoom from `scale_from` to `scale_to`, 1 to 3) with an **ease**.
+- **Speed** of footage: `set_clip` `speed` (0.25 to 4) plays the file faster or slower, and
+  `speed_ramp` (keys `{at_ms, rate, ease?}` in clip time) eases the rate for a slow-motion
+  moment or a speed-up. The clip's `duration_ms` is its length on the timeline; it plays
+  `duration_ms * speed` of the file, and its sound follows (pitch kept).
+- **Grade**: `set_clip` `grade` on a clip of footage or a frame, and `set` `grade` on an image
+  node, take numbers `exposure` (-3 to 3 stops), `contrast`, `saturation`, `temperature` (cool to
+  warm), `tint` (green to magenta) all -1 to 1, `vignette` 0 to 1 and `blur` 0 to 50, or a
+  `look` (`warm`, `cool`, `mono`, `faded`, `punchy`) that fills them in (numbers you add win). Keep
+  one look across a piece. The numbers of an image node's grade can be keyframed with `animate`
+  (`grade_exposure`, `grade_contrast`, `grade_saturation`, `grade_temperature`, `grade_tint`,
+  `grade_vignette`, `grade_blur`), for example a pull-focus blur from 20 to 0.
+- **Time snaps to frames.** Every start, duration, in point, transition and key you give is rounded
+  to the video's frame grid (at 24 fps, 1010 ms becomes 1000 and 1030 becomes 1042); the result of
+  the operation and `list_videos` show the value that was kept.
 - **Overlays**: any design frame laid over the whole video for a time, with an **enter** and **exit**
   (fade, slide_up/down/left/right, pop, zoom, none), a duration for each (`fade_ms`) and an **ease**.
   A frame without a fill is transparent, so an overlay can be one headline, one badge, one arrow.
@@ -44,7 +60,7 @@ whole video process; this page is about movement.
 - **One thing moves at a time** unless it is a group; a group staggers, in reading order.
 - **Match the transition to the meaning.** Slide for "next", fade for "and then", dip for a chapter
   change, zoom_in for "closer look", cut for energy and for beats. Use one or two kinds in a
-  piece, not all eight. Prefer cuts on the beat of the story over fancy transitions.
+  piece, not all of them. Prefer cuts on the beat of the story over fancy transitions.
 - **The camera is the clip's zoom.** Use a slow push on every static frame; vary the direction
   (some push in, some pull out from 1.08 to 1.0) so it feels directed, not automatic.
 - **Frame 0 is not empty.** Start with something on screen; open on the strongest picture.

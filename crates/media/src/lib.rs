@@ -5,6 +5,8 @@
 //! Media Foundation on Windows, and so on), so no GPL encoder library is needed. FFmpeg runs as a
 //! separate program: nothing is linked into this process, and the app never sends media anywhere.
 
+pub mod retime;
+
 use std::collections::{HashMap, HashSet};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -387,13 +389,16 @@ impl Ffmpeg {
 
 struct Reader {
     child: Child,
-    next_ms: f64,
+    /// The tick of the next picture the reader will read.
+    next_tick: u64,
     last: Vec<u8>,
     done: bool,
 }
 
-/// Decodes footage a picture at a time. Playing forward (what an export does) keeps one
-/// `ffmpeg` per file running; asking for another moment starts it again there.
+/// Decodes footage a picture at a time on the project's frame grid. A moment is the picture
+/// that file shows at the nearest tick (a whole number of `1 / fps` seconds from the start of the
+/// file), and that picture is the same however the reader got there. Playing forward keeps one
+/// `ffmpeg` per file running; anything else starts it again at the moment asked for.
 pub struct FootageDecoder {
     ffmpeg: Ffmpeg,
     /// The folder the `media/<name>` references are relative to.
@@ -403,6 +408,11 @@ pub struct FootageDecoder {
 }
 
 const MAX_READERS: usize = 4;
+/// Pictures read and thrown away to reach a later moment before starting `ffmpeg` there instead.
+const MAX_SKIPPED_FRAMES: u64 = 90;
+/// How far before a tick `ffmpeg` starts decoding, so the picture shown at it is among those
+/// decoded (a picture is shown until the next one, which may be seconds in a slow file).
+const SEEK_MARGIN_S: f64 = 2.0;
 
 impl FootageDecoder {
     pub fn new(ffmpeg: Ffmpeg, project: PathBuf, fps: u32) -> FootageDecoder {
@@ -414,15 +424,24 @@ impl FootageDecoder {
         }
     }
 
-    fn start(&self, path: &Path, at_ms: u64, w: u32, h: u32) -> Result<Reader, MediaError> {
+    fn tick_of(&self, at_ms: u64) -> u64 {
+        (at_ms * u64::from(self.fps) + 500) / 1000
+    }
+
+    /// Starts `ffmpeg` writing the pictures shown at ticks `tick`, `tick + 1`, ...: the file's
+    /// pictures resampled to `fps` with each tick showing the last picture at or before it,
+    /// those before `tick` dropped before they are scaled.
+    fn start(&self, path: &Path, tick: u64, w: u32, h: u32) -> Result<Reader, MediaError> {
+        let at = tick as f64 / f64::from(self.fps);
         let filter = format!(
-            "fps={},scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h}",
-            self.fps
+            "fps={}:round=up,select=gte(t\\,{:.6}),scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h}",
+            self.fps,
+            at - 0.0005
         );
         let child = Command::new(&self.ffmpeg.path)
             .args(["-hide_banner", "-loglevel", "error", "-ss"])
-            .arg(format!("{:.3}", at_ms as f64 / 1000.0))
-            .arg("-i")
+            .arg(format!("{:.6}", (at - SEEK_MARGIN_S).max(0.0)))
+            .args(["-copyts", "-i"])
             .arg(path)
             .args([
                 "-an", "-vf", &filter, "-f", "rawvideo", "-pix_fmt", "rgba", "-",
@@ -434,64 +453,78 @@ impl FootageDecoder {
             .map_err(|e| MediaError::Io(format!("cannot start ffmpeg: {e}")))?;
         Ok(Reader {
             child,
-            next_ms: at_ms as f64,
+            next_tick: tick,
             last: Vec::new(),
             done: false,
         })
     }
 
+    /// How many pictures the reader must read to reach `tick`: none to repeat the last one it
+    /// gave (slow motion, or the same moment twice), one for the next, more to skip some (fast
+    /// motion). `None` when `tick` is before the last picture or too far ahead for reading to
+    /// beat starting again.
+    fn steps(r: &Reader, tick: u64) -> Option<u64> {
+        let steps = (tick + 1).checked_sub(r.next_tick)?;
+        (steps <= MAX_SKIPPED_FRAMES).then_some(steps)
+    }
+
+    fn discard(&mut self, key: &(String, u32, u32)) {
+        if let Some(mut old) = self.readers.remove(key) {
+            let _ = old.child.kill();
+            let _ = old.child.wait();
+        }
+    }
+
     /// The RGBA picture of `file` (`media/<name>`) at `at_ms`, scaled to cover `w` x `h` and
-    /// cropped in the middle. Past the end it is the last picture.
+    /// cropped in the middle. Past the end it is the last picture. A clip played faster skips
+    /// pictures and one played slower repeats them, all from one running `ffmpeg`.
     pub fn frame(&mut self, file: &str, at_ms: u64, w: u32, h: u32) -> Result<Vec<u8>, MediaError> {
         let path = footage_path(&self.project, file)?;
         let key = (file.to_string(), w, h);
-        let period = 1000.0 / f64::from(self.fps);
-        let fits = self
-            .readers
-            .get(&key)
-            .is_some_and(|r| (at_ms as f64 - r.next_ms).abs() <= period * 0.75 + 1.0);
-        if !fits {
-            if let Some(mut old) = self.readers.remove(&key) {
-                let _ = old.child.kill();
-                let _ = old.child.wait();
-            }
-            if self.readers.len() >= MAX_READERS {
-                if let Some(k) = self.readers.keys().next().cloned() {
-                    if let Some(mut old) = self.readers.remove(&k) {
-                        let _ = old.child.kill();
-                        let _ = old.child.wait();
+        let tick = self.tick_of(at_ms);
+        let reuse = self.readers.get(&key).and_then(|r| Self::steps(r, tick));
+        let steps = match reuse {
+            Some(steps) => steps,
+            None => {
+                self.discard(&key);
+                if self.readers.len() >= MAX_READERS {
+                    if let Some(k) = self.readers.keys().next().cloned() {
+                        self.discard(&k);
                     }
                 }
+                let reader = self.start(&path, tick, w, h)?;
+                self.readers.insert(key.clone(), reader);
+                1
             }
-            let reader = self.start(&path, at_ms, w, h)?;
-            self.readers.insert(key.clone(), reader);
-        }
+        };
         let size = w as usize * h as usize * 4;
         let reader = self
             .readers
             .get_mut(&key)
             .ok_or_else(|| MediaError::Io("no reader".into()))?;
-        reader.next_ms += period;
-        if reader.done {
-            return Ok(reader.last.clone());
-        }
-        let mut buf = vec![0u8; size];
-        let got = match reader.child.stdout.as_mut() {
-            Some(out) => read_full(out, &mut buf).map_err(|e| MediaError::Io(e.to_string()))?,
-            None => 0,
-        };
-        if got == size {
-            reader.last = buf.clone();
-            Ok(buf)
-        } else {
-            reader.done = true;
-            if reader.last.is_empty() {
-                return Err(MediaError::Failed(format!(
-                    "{file} has no picture at {at_ms} ms (is that past its end?)"
-                )));
+        reader.next_tick += steps;
+        let mut buf = Vec::new();
+        for _ in 0..steps {
+            if reader.done {
+                break;
             }
-            Ok(reader.last.clone())
+            buf.resize(size, 0);
+            let got = match reader.child.stdout.as_mut() {
+                Some(out) => read_full(out, &mut buf).map_err(|e| MediaError::Io(e.to_string()))?,
+                None => 0,
+            };
+            if got == size {
+                std::mem::swap(&mut buf, &mut reader.last);
+            } else {
+                reader.done = true;
+            }
         }
+        if reader.last.is_empty() {
+            return Err(MediaError::Failed(format!(
+                "{file} has no picture at {at_ms} ms (is that past its end?)"
+            )));
+        }
+        Ok(reader.last.clone())
     }
 }
 
@@ -675,5 +708,89 @@ mod tests {
             let err = Ffmpeg::probe(Path::new("/bin/echo")).unwrap_err();
             assert!(err.to_string().contains("version line"), "{err}");
         }
+    }
+}
+
+#[cfg(test)]
+mod decoder_tests {
+    use super::*;
+
+    fn footage(ffmpeg: &Ffmpeg, dir: &Path, rate: u32) -> bool {
+        std::fs::create_dir_all(dir.join("media")).unwrap();
+        Command::new(&ffmpeg.path)
+            .args(["-hide_banner", "-loglevel", "error", "-y"])
+            .args(["-f", "lavfi", "-i"])
+            .arg(format!("testsrc=size=64x48:rate={rate}:duration=3"))
+            .args(["-c:v", "libx264", "-pix_fmt", "yuv420p", "-g", "12"])
+            .arg(dir.join("media/a.mp4"))
+            .status()
+            .is_ok_and(|s| s.success())
+    }
+
+    /// The moment of frame `n` at `fps`, as the renderer asks for it.
+    fn at(n: u64, fps: u64) -> u64 {
+        (n * 1000 + fps / 2) / fps
+    }
+
+    #[test]
+    fn a_picture_does_not_depend_on_where_the_reader_started() {
+        let Ok(ffmpeg) = Ffmpeg::locate() else {
+            return;
+        };
+        for (source_rate, fps) in [(30, 30), (24, 30), (30, 24), (25, 25)] {
+            let dir = tempfile::tempdir().unwrap();
+            if !footage(&ffmpeg, dir.path(), source_rate) {
+                return;
+            }
+            let moments: Vec<u64> = (0..60).map(|n| 400 + at(n, fps)).collect();
+            let mut straight =
+                FootageDecoder::new(ffmpeg.clone(), dir.path().to_path_buf(), fps as u32);
+            let reference: Vec<Vec<u8>> = moments
+                .iter()
+                .map(|&t| straight.frame("media/a.mp4", t, 64, 48).unwrap())
+                .collect();
+            for start in [3, 7, 16, 41] {
+                let mut fresh =
+                    FootageDecoder::new(ffmpeg.clone(), dir.path().to_path_buf(), fps as u32);
+                for n in start..(start + 4).min(60) {
+                    let got = fresh.frame("media/a.mp4", moments[n], 64, 48).unwrap();
+                    assert!(
+                        got == reference[n],
+                        "{source_rate} fps file at {fps} fps: moment {n} differs when started at {start}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn faster_playback_skips_pictures_and_slower_repeats_them_with_one_reader() {
+        let Ok(ffmpeg) = Ffmpeg::locate() else {
+            return;
+        };
+        let dir = tempfile::tempdir().unwrap();
+        if !footage(&ffmpeg, dir.path(), 30) {
+            return;
+        }
+        let mut one = FootageDecoder::new(ffmpeg.clone(), dir.path().to_path_buf(), 30);
+        let seek = |t| {
+            let mut fresh = FootageDecoder::new(ffmpeg.clone(), dir.path().to_path_buf(), 30);
+            fresh.frame("media/a.mp4", t, 64, 48).unwrap()
+        };
+        // twice as fast: every other picture, read by one running ffmpeg
+        for n in 0..10 {
+            let t = 500 + at(n, 15);
+            assert!(
+                one.frame("media/a.mp4", t, 64, 48).unwrap() == seek(t),
+                "fast {n}"
+            );
+        }
+        // half speed: each picture twice
+        let mut slow = FootageDecoder::new(ffmpeg.clone(), dir.path().to_path_buf(), 30);
+        let a = slow.frame("media/a.mp4", 500, 64, 48).unwrap();
+        let b = slow.frame("media/a.mp4", 508, 64, 48).unwrap();
+        let c = slow.frame("media/a.mp4", 533, 64, 48).unwrap();
+        assert!(a == b && a != c);
+        assert!(c == seek(533));
     }
 }

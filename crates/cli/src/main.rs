@@ -482,8 +482,13 @@ fn run(cli: Cli) -> Result<(), CliError> {
                     v.frame_count
                 );
                 for c in &v.clips {
+                    let speed = if c.speed != 1.0 {
+                        format!(" at {}x", c.speed)
+                    } else {
+                        String::new()
+                    };
                     println!(
-                        "  {}\t{} ({})\tstarts {} ms\t{} ms\t{:?} {} ms\tzoom {} to {}",
+                        "  {}\t{} ({}){}\tstarts {} ms\t{} ms\t{:?} {} ms\tzoom {} to {}",
                         c.id,
                         if c.footage.is_empty() {
                             c.frame_name.clone()
@@ -495,6 +500,7 @@ fn run(cli: Cli) -> Result<(), CliError> {
                         } else {
                             "footage"
                         },
+                        speed,
                         c.start_ms,
                         c.duration_ms,
                         c.transition.kind,
