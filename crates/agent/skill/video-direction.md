@@ -10,6 +10,38 @@
 | Teaser / trailer | 15 to 45 s | any | build to one payoff |
 | Edit of the user's footage | their length | their footage's shape | cut, tighten, title, caption |
 
+## First: take inventory
+
+Before the brief or any `apply_ops`, see what you can already use, then say in one line what you
+will use:
+
+1. `list_media` (pictures, including earlier `import_asset` and `make_asset` results),
+   `list_footage` (videos, with length and sound), `list_sounds` (music and effects).
+2. `list_asset_sources` once, then `search_assets` for what the story needs: icons for each
+   feature (`lucide:...`), shapes, blobs, `background` and `pattern` pictures, illustrations from
+   installed packs, sounds. `list_asset_packs` shows packs `install_asset_pack` can add (the user
+   must approve the download).
+3. `get_guidance` and `list_tokens` for the brand colors the assets must match.
+
+Do not fill a video with flat color rectangles and plain text while icons and generators sit
+unused.
+
+## Using assets in a video
+
+Every picture reaches the timeline the same way: a file in `media/` becomes an `image` node
+inside a design frame, and the frame is a clip or an overlay.
+
+| asset | how |
+|---|---|
+| icon, shape, logo (`import_asset`, `width`/`height` at least the size it is drawn, `color` a token) | `create` an `image` node in a transparent overlay frame (`add_overlay`, `enter` pop or fade) or inside a scene frame next to its caption |
+| background, pattern, aurora, grain, blob (`make_asset`, the video's width and height, token colors, a seed) | `create` an `image` node that fills a scene frame (`image_fit` cover) under the text; one `make_asset` per scene or one for the whole video; grain over footage as an overlay with `opacity` 0.1 to 0.3 |
+| picture or screenshot (`list_media`) | an `image` node in a scene frame, or inside a `device_template` screen; give it `motion` on the clip |
+| footage (`list_footage`) | `add_clip` with `footage:{file, in_ms}`, then overlays above it |
+| sound (`make_sound`, `import_asset`, `import_sound`, `import_file`) | `set_video` prop `audio`: a video has one sound track, so choose the file that carries the video |
+
+The frames must be the video's shape. Credit lines that `import_asset` returned are shown in your
+closing message.
+
 ## The process
 
 1. **Brief, once.** Ask only what changes the result and is not obvious from the repository or the
@@ -28,11 +60,15 @@
 5. **Source material.** Footage: `list_footage` for length and sound; plan in and out points from
    what you know; cut dead air by using several clips of the same file with different `in_ms`.
    Design frames: build each scene as a frame of the video's size (same system as the stills:
-   tokens, type scale, margins) and show real captures inside `device_template` frames.
+   tokens, type scale, margins) and show real captures inside `device_template` frames. Fill
+   frames with the inventory: icons, generated backgrounds and pack art (see "Using assets").
 6. **Build the structure** with one `apply_ops` per beat group (`create_video`, `add_clip`,
    transitions, motion, then overlays). Name clips and overlay frames by what they are.
 7. **Look.** `render_video_frame` at each beat and at the middle of every transition; fix clipped
    text, overlaps, empty frames, weak first and last frames. Read `story` in `list_videos`.
+   Asked for directions first? Build each as its own named video, `offer_variants`, tell the user to
+   pick in the Variants panel and wait; `get_variants` has the pick. Call `show_preview` with the
+   video once it plays well: the Preview panel is where the user watches it.
 8. **Export** with `export_video` and the right `preset`; it shows progress to the user and can be
    stopped. Report the file path, length and what you decided.
 

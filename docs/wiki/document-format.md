@@ -95,6 +95,18 @@ Colors are stored in a perceptual space (OKLCH, as OpenCut's theme tokens do) an
 
 Every transaction carries `actor` (`user` or `agent:<name>`) and a `turn` id grouping one agent response. A *transaction* groups many operations (one drag, one agent turn) into one undo step.
 
+### Arranging a selection (`crates/core/src/arrange.rs`)
+
+The editor's arrange commands add no operation type: `core::arrange` reads the document and returns ordinary `move`, `create`, `reparent` and `delete` operations that the shell applies as one transaction, so one command is one undo step and every limit above still applies (a command that needs more than `MAX_OPS_PER_TRANSACTION` operations fails whole).
+
+- **Selection.** A command acts on the *top-level* selected nodes (a node whose ancestor is also selected is skipped), in stacking order. A **group** has no size of its own: its position is the origin of its children and its bounds are the union of its visible children. Layout is computed in page coordinates and converted back by translation.
+- **Align** (`left`, `hcenter`, `right`, `top`, `vmiddle`, `bottom`) uses the union bounds of the selection; one node aligns to the frame around it (nothing happens outside a frame). **Distribute** (`h`, `v`) needs three or more nodes, keeps the outermost two and equalises the gaps. **Stack** (`row`, `column`) lays the nodes edge to edge with a gap in their current order along the axis, keeps the first node where it is and gives the others its position on the other axis; it is a one-time arrangement, not an auto-layout.
+- **Duplicate** deep-copies each node with new ids into the same parent, directly above the original, offset by 20 px; a frame is placed beside the existing frames (100 px gap) instead. Locale translations are not copied.
+- **Group** needs nodes that share one parent. The new group takes the place of the topmost of them, children keep their order and their page positions. **Ungroup** puts a group's children into the group's parent at its place, preserving page positions.
+- **Z-order** moves the whole selection `n` places forward or backward inside each parent; selected nodes never jump over each other.
+- **Clipboard** (app memory only): `arrange::copy` stores the subtrees as JSON with positions relative to their frame; `arrange::paste` creates them with new ids in the open frame at the same position, shifting by 20 px steps while an identical node already sits there. Frames always paste beside the page's other frames.
+- **Marquee** (`geometry::children_in_rect`) selects the open frame's visible direct children (a group is one node) that the rectangle overlaps. **Snapping** (`geometry::snap_move`) moves a box within 6 px onto the edges and centers of the frame and of its visible direct children (minus the dragged ones), per axis independently, and returns the guide lines to draw.
+
 ### Validation
 
 `core` rejects an operation, with a reason an agent can read, when: an id does not exist or is a descendant of its own new parent; a value is outside bounds (size, coordinates, text length, count of nodes per call); a path escapes the project (`media/` references are resolved inside the project root only); a font or token is unknown; the operation would make a frame larger than the export limit.

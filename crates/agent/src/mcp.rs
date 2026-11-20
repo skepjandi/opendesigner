@@ -463,7 +463,11 @@ impl Handler {
         };
         drop(state);
         drop(ws);
-        if !touched.is_empty() || switched || name == "set_format" {
+        if !touched.is_empty()
+            || switched
+            || name == "set_format"
+            || (tools::changes_showcase(name) && result.is_ok())
+        {
             if let Some(hook) = &self.on_change {
                 hook(ChangeEvent {
                     actor: actor.to_string(),

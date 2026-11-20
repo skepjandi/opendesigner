@@ -114,6 +114,56 @@ Item {
                    check(Icons.source("eye", Theme.text).indexOf("data:image/svg+xml") === 0, "the vendored icons load")
         },
         function () {
+            // a rectangle drawn with the tool: created at the dragged size, selected, tool back to Select
+            window.tool = "rect"
+            window.rulersVisible = true
+            const before = JSON.parse(editor.layers).length
+            canvas.drawShape("rect", Qt.point(20, 20), Qt.point(220, 140), 0, true)
+            ids.drawn = JSON.parse(editor.selection)[0]
+            const b = JSON.parse(editor.selectionBounds)
+            return check(JSON.parse(editor.layers).length === before + 1, "drawing a rectangle adds one layer") &&
+                   check(b.x === 20 && b.y === 20 && b.width === 200 && b.height === 120, "the drawn rectangle has the dragged box: " + editor.selectionBounds) &&
+                   check(window.tool === "select", "the tool returns to Select after drawing")
+        },
+        function () {
+            const before = JSON.parse(editor.layers).length
+            editor.duplicateSelected()
+            return check(JSON.parse(editor.layers).length === before + 1, "duplicate adds one layer") &&
+                   check(JSON.parse(editor.selectionRects).length === 1, "the duplicate is what is selected")
+        },
+        function () {
+            // several layers: align, group, ungroup
+            editor.selectMany(JSON.stringify([ids.drawn, ids.ellipse]))
+            const rects0 = JSON.parse(editor.selectionRects)
+            if (!check(JSON.parse(editor.selection).length === 2 && rects0.length === 2, "two layers are selected")) return false
+            if (!check(editor.canGroup === true, "two layers can be grouped")) return false
+            editor.alignSelected("left")
+            const rects = JSON.parse(editor.selectionRects)
+            if (!check(rects.length === 2 && rects[0].x === rects[1].x && rects[0].x === 20, "align left lines both up on the leftmost edge: " + editor.selectionRects)) return false
+            editor.groupSelected()
+            if (!check(JSON.parse(editor.layers).some(r => r.kind === "group"), "grouping adds a group layer")) return false
+            editor.ungroupSelected()
+            return check(!JSON.parse(editor.layers).some(r => r.kind === "group"), "ungrouping removes the group")
+        },
+        function () {
+            // a box dragged just past the aligned ellipse's right edge (x 20 + 300) snaps to it and reports the guide to draw
+            const s = JSON.parse(editor.snapMove(323, 1000, 100, 100, "[]"))
+            // the box over the whole frame selects every layer in it
+            editor.selectInRect(0, 0, 1320, 2868, false)
+            return check(s.x === 320 && s.guides.some(g => g.axis === "x"), "snapping pulls the box to the ellipse edge: " + JSON.stringify(s)) &&
+                   check(JSON.parse(editor.selection).indexOf(ids.rect) >= 0 && JSON.parse(editor.selection).indexOf(ids.text) >= 0, "the marquee selects the layers it covers: " + editor.selection)
+        },
+        function () {
+            // undo takes all of it back: the layers and the ellipse's place
+            for (let i = 0; i < 12 && (JSON.parse(editor.layers).length !== 5 || JSON.parse(editor.layers).some(r => r.kind === "group")); ++i) editor.undo()
+            editor.select(ids.ellipse)
+            const x = insp().x
+            editor.select(ids.rect)
+            return check(JSON.parse(editor.layers).length === 5, "undo removes the drawn and duplicated layers") &&
+                   check(x === 700, "undo puts the aligned ellipse back: " + x) &&
+                   check(insp().fill === "#ff0000", "undo stops where the session was")
+        },
+        function () {
             probe.sync([{ id: "a", v: 1 }, { id: "b", v: 1 }, { id: "c", v: 1 }])
             const first = st.built
             probe.sync([{ id: "a", v: 1 }, { id: "b", v: 2 }, { id: "c", v: 1 }])
@@ -268,6 +318,24 @@ Item {
             return check(refused, "splitting a panel from itself should be refused") &&
                    check(JSON.parse(editor.layout).floating.length === 0 && dock.groupOf("chat") === dock.groupOf("notes"), "the layout should reset") &&
                    check(canvas !== null, "the canvas should be back after a reset")
+        },
+        function () {
+            // the Preview and Variants panels: shown on reveal, a frame drawn clean, the user's
+            // override, and a pick with nothing offered refused
+            const frame = JSON.parse(editor.frames)[0].id
+            const drawn = editor.renderFrameImage(frame, 64).indexOf("data:image/png;base64,") === 0
+            editor.layoutReveal("variants")
+            editor.layoutReveal("preview")
+            editor.setPreviewOverride("frame", frame)
+            const chosen = JSON.parse(editor.showcase).preview
+            editor.clearPreviewOverride()
+            const back = JSON.parse(editor.showcase).preview
+            editor.pickVariant("v1")
+            return check(drawn, "any frame should render to a picture") &&
+                   check(chosen.chosen_by === "user" && chosen.target === frame, "the user's choice of preview: " + JSON.stringify(chosen)) &&
+                   check(back.chosen_by === "default", "handing the choice back: " + JSON.stringify(back)) &&
+                   check(editor.messageIsError, "picking when nothing is offered should be refused") &&
+                   check(JSON.parse(editor.showcase).variants === null, "no options are open")
         },
         function () {
             // the MCP servers the user added: the agent is given them with the session

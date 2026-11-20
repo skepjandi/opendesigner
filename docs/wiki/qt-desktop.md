@@ -72,7 +72,7 @@ One editor window; the same panel set OpenCut's desktop shell uses (browser, pre
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│ toolbar: select · hand · note · language · zoom · export · ⋯  │
+│ toolbar: workspace · language · format · undo · layout · export│
 ├───────────┬──────────────────────────────────┬───────────────┤
 │ layers /  │                                  │ inspector     │
 │ assets /  │   canvas (design) or             │ (properties,  │
@@ -90,9 +90,10 @@ The agent panel is the core loop, not a sidebar: pins, open/resolved state, the 
 
 ## Customizable layout
 
-The diagram above is only the **default**. Every panel (layers, canvas, inspector, notes, history, memory, video, connect, chat) can be moved anywhere: side by side, stacked, grouped as tabs, in a window of its own, or hidden. Built in `crates/app`: `layout.rs` (pure data and rules, tested without a window) and `qml/Dock*.qml` (drawing and dragging).
+The diagram above is only the **default**. Every panel (layers, canvas, inspector, notes, history, memory, video, connect, chat, variants, preview) can be moved anywhere: side by side, stacked, grouped as tabs, in a window of its own, or hidden. Built in `crates/app`: `layout.rs` (pure data and rules, tested without a window) and `qml/Dock*.qml` (drawing and dragging).
 
 - **Model.** `Layout {main, floating, hidden}`: `main` and each floating window hold a tree of `Split {dir row|column, weights, children}` and `Group {panels, active}` nodes. Rules checked after every change (a refused change leaves the layout as it was): each panel is in exactly one place; a group is never empty and names an active tab; a split has two or more children and positive weights; the main window keeps a panel. Operations: `move_panel(panel, group, zone)` (zone: center = join the tabs, left/right/top/bottom = split next to the group), `dock_edge`, `float`, `hide`/`show`, `dock_window` (a closed window's panels become tabs of the main window's last group), `reveal`, `set_active`, `set_weights`, `set_geometry`, reset. A same-direction split nested in a split is merged; a one-child split disappears.
+- **Default and migration.** `variants` and `preview` start as tabs after Canvas in the canvas group. A `layout.json` saved before they existed keeps its arrangement and gets them as hidden panels (they come back with the Layout menu, or by themselves when the agent offers options or shows a preview). Any other invalid layout falls back to the default.
 - **Doing it.** Drag a tab: over a group's middle (or its tab strip) it joins that group's tabs; over an edge it splits next to it (the drop target is outlined and named while you drag); released outside every panel it gets a window of its own where you let go. Right-click a tab or use its `⋯` menu for the same without dragging (own window, hide, dock at an edge, put in tabs with another group). Drag the thin line between panels to resize. The toolbar's **Layout** menu shows or hides each panel and resets everything. Closing a floating window puts its panels back as tabs.
 - **Kept.** The arrangement is saved to `layout.json` in the app's config folder after every change (window position and size after you stop moving a window) and restored on launch; a file that is missing, from another version or not valid gives the default.
 - **Limits.** Moving a panel between groups recreates it (a half-typed chat message is lost; the chat history is not, it lives in the app). Keyboard shortcuts work in the main window only (a floating window has no shortcuts of its own, so typing in it can never trigger "delete the selection"). Dragging across windows hit-tests the registered groups in creation order, so a window stacked over another may lose a drop to the one underneath. KDDockWidgets would do all of this but is GPL-only, so the dock is ours ([Licensing](#licensing)).
@@ -107,13 +108,14 @@ there.
 
 ## Agent-first interface and shortcuts
 
-> **Status: Implemented (macOS).** The app is for pointing and correcting, not for drawing: an agent creates the frames, shapes, text and videos and decides their names and sizes. The toolbar therefore has **Select**, **Hand** and **Note** (pin) plus undo/redo, the overlay toggle, zoom, language, **Export** and a "more" menu (colors, languages, open another project, save, shortcuts). There are no rectangle, ellipse, text, frame, image or device tools, and the window shows no size or name prompts. What a user can still do by hand: select, move and resize (drag or arrow keys), edit any property in the inspector, delete, pin notes, undo, change colors (tokens) and languages, and drop files in the window, which go to the agent's memory (the project's `media/` folder) and are never placed on the design.
+> **Status: Implemented (macOS), canvas tools added.** The app is still agent-first: an agent creates the frames, shapes, text and videos, and the user points, corrects and, since the canvas overhaul, can also draw and arrange by hand. The **window toolbar** keeps only what is global: logo, workspace picker, language, format, undo/redo, the **Layout** menu and **Export**; the rest of what the old "more" menu held (colors, languages, open another project, save, shortcuts) is in the application [menu bar](#menu-bar). Everything that only means something on the canvas is in the **canvas toolbar**, a bar inside the canvas panel (`qml/CanvasToolbar.qml`, wrapping onto more rows when the panel is narrow): tools **Select**, **Hand**, **Note**, **Rectangle**, **Ellipse**, **Text**, **Frame**; the overlay, snapping, rulers and pixel-grid toggles; zoom out, the percentage (click for 100%), zoom in, fit frame, fit selection; align, distribute and stack buttons (`qml/ArrangeGroup.qml`, also used by the inspector); group, ungroup, duplicate. This reverses the earlier decision that the app has no drawing tools; images and device frames still come from the agent, the menus and drops, not from a tool, and the window shows no size or name prompts. Files dropped in the window go to the agent's memory (the project's `media/` folder) and are never placed on the design.
 
 Keys follow what Figma and Penpot agree on, read on 2026-11-19 from Penpot's shortcut tables (`penpot-docs` `user-guide/introduction/shortcuts.njk`) and Figma's help and community lists. macOS only; Qt writes Command as `Ctrl` in key sequences.
 
 | Action | Keys | Taken from |
 |--------|------|-----------|
 | Select / Hand / pin a Note | `V` / `H` / `C` | Figma and Penpot: V, H, and C for comments (our pins are notes) |
+| Draw a rectangle / ellipse / text / frame | `R` / `O` / `T` / `F` | Figma (`R`, `O`, `T`, `F`); Penpot uses `R`, `E`, `T`, `B` |
 | Pan | two-finger scroll, hold `Space` and drag, `H` and drag, middle-drag | Figma, Penpot |
 | Zoom | pinch, `⌘` or `⌥` + scroll, `⌘+` `⌘-`, `=` `-` | Figma (`⌘`), Penpot (`⌥` scroll, pinch, `+` `-`) |
 | Fit / zoom to selection / 100% | `⇧1` / `⇧2` / `⌘0` | Figma (`⇧1`, `⇧2`), Penpot (`⇧1`, `⇧2`); Figma lists `⌘0` for 100% (Penpot uses `⇧0`) |
@@ -131,7 +133,27 @@ Keys follow what Figma and Penpot agree on, read on 2026-11-19 from Penpot's sho
 | Open / Save | `⌘O` / `⌘S` | macOS |
 | Shortcut list | `?` or `⌘/` | Penpot (`?`), Figma (`⌘/`) |
 
-Gestures: two fingers on the trackpad pan, a pinch zooms around the pointer (Qt's `PinchHandler`), `⌘`/`⌥` + scroll zooms around the pointer, middle-drag pans. Not done: smart zoom (two-finger double tap) and rotation, which Qt does not deliver to QML as gestures; Magic Mouse swipes were not tried. The keys and gestures are not driven by the window session (it calls the editor's functions, not synthesized key events); they were not checked on a real keyboard here.
+Gestures: two fingers on the trackpad pan, a pinch zooms around the pointer (Qt's `PinchHandler`), `⌘`/`⌥` + scroll zooms around the pointer (2% to 3200%), middle-drag pans. Not done: smart zoom (two-finger double tap) and rotation, which Qt does not deliver to QML as gestures; Magic Mouse swipes were not tried. The keys and gestures are not driven by the window session (it calls the editor's functions, not synthesized key events); they were not checked on a real keyboard here.
+
+## Menu bar
+
+> **Status: Implemented (macOS: built, launched and the native bar read back through System Events; Windows and Linux unverified).** `qml/AppMenus.qml` is the window's `menuBar`: File (new/open/recent/save/export/quit), Edit (undo/redo, cut/copy/paste, duplicate, delete, select all, group/ungroup), Insert (tools, device frames, image, languages, colors), Arrange (z-order, align, distribute, stack), View (zoom, overlays, rulers, snapping, panels, layout, full screen), Agent (chat, connect, variants, preview, history), Window and Help. Items are enabled from editor state; with no project open the File, Window and Help items that need none stay usable.
+
+**Mechanism.** QtQuick.Controls `MenuBar`, `Menu` and `Action`. Since Qt 6.8 Qt Quick Controls menus are shown in the platform's menu bar (on macOS the top-of-screen bar, with the system's Services/Hide/Quit entries and Writing Tools in Edit added by the OS); this was checked with the Basic style the app uses, so no style change and no new Qt module are needed (the licensing allowlist is unchanged). `Qt.labs.platform` was not used: it is the "labs" API in a separate plugin with no stability promise. Where a platform has no native bar the same menus are drawn in the window. A native item gets its shortcut, enabled state and check mark from its `Action`. macOS supplies its own *Enter Full Screen* item, so the app's is shown on other platforms only.
+
+**Shortcut ownership.** Every `Ctrl`/`⌘` shortcut is owned by the menu (no second `Shortcut` for it). Single-key shortcuts (`V`, `H`, `C`, arrows, `Delete`, `Return`, `Tab`, `Esc`, `?`, `N`, `⇧H`, `⇧1`, `⇧2`, `=`, `-`) stay in `main.qml` because they must be off while a text field has focus; the menu shows them as a hint in the label, not as its own key. Undo, Redo, Cut, Copy, Paste and Select All act on the focused text field when one has focus, otherwise on the canvas. Not verified: that a real `⌘C`/`⌘V` keystroke reaches a focused text field before the native menu item.
+
+### Canvas editing
+
+What the canvas does with the pointer (`qml/CanvasView.qml`; every result is an editor call, so each edit is one undo step and reaches the agent as a user edit):
+
+- **Selecting.** Click selects; `⇧`-click adds or removes a layer; dragging on empty space draws a marquee that selects the layers it touches (`⇧` adds). Clicking empty frame space without dragging still selects the frame. The layers panel highlights every selected row and `⇧`/`⌘`-click there adds or removes a layer. Several layers show an outline each plus one box around all; the inspector then shows their count, the union position and size, align/distribute/stack buttons and a stack gap.
+- **Moving and resizing.** Dragging a selected layer moves the whole selection; `⌥`-drag duplicates first and moves the copy; `⇧` locks the axis when adding to a selection. Eight handles resize a single layer (not a group); `⇧` on a corner keeps the proportion. The inspector's lock next to W/H keeps the proportion for typed sizes (session only).
+- **Snapping.** While moving and resizing, the moved box snaps to sibling edges and centers and to the frame's edges and center within 6 document pixels; the guides are drawn in the overlay. Hold `⌘` (Ctrl) to skip snapping; the magnet button and View > Snapping switch it off for the session.
+- **Drawing.** With a drawing tool a drag draws the shape (`⇧` for a square or circle); a click makes one at a default size (rectangle 160 × 120, ellipse 160, text 240 × 60, frame 400 × 300). The new layer is selected and the tool returns to Select.
+- **Rulers and grid.** Rulers along the top and left edges show document pixels with ticks that follow the zoom, the pointer position and the extent of the selection; they start off and switch on from the toolbar or the View menu. From 800% zoom a pixel grid is drawn (toggle in the toolbar). Both are session state.
+- **Context menu.** Right-click: duplicate, group, ungroup, copy, paste, bring forward, send backward, to front, to back, delete, each enabled by what the editor says is possible.
+- **Not done.** Spacing labels while holding `⌥` over another layer; rotation; dragging guides out of the rulers.
 
 ## Canvas rendering
 
@@ -155,7 +177,7 @@ UI icons are [Lucide](https://lucide.dev) SVGs (ISC; Feather parts MIT), vendore
 
 ## Overlays, layers folding
 
-The **overlay toggle** (toolbar eye-in-frame icon, `⇧H`, also in the shortcut list) hides everything the editor draws over the picture: the selection box, size label and handles, the blue "agent" outlines, pinned notes, and the unrendered-image and text-overflow markers. Tools still work while hidden (a click selects, keys move); the button shows as on while overlays are hidden. The state lasts for the session and is not saved in the layout file.
+The **overlay toggle** (the eye-in-frame icon in the canvas toolbar, `⇧H`, also in the shortcut list) hides everything the editor draws over the picture: the selection box, size label and handles, snapping guides, the blue "agent" outlines, pinned notes, and the unrendered-image and text-overflow markers. Tools still work while hidden (a click selects, keys move); the button shows as on while overlays are hidden. The state lasts for the session and is not saved in the layout file.
 
 Layers with children show a disclosure chevron; the folded layers are remembered by id for the session, the panel header has Expand all and Collapse all, and selecting a layer on the canvas unfolds the ones above it. The rows keep going through `JsonModel`, so folding changes only the rows that appear or vanish.
 

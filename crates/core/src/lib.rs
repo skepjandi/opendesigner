@@ -4,6 +4,7 @@
 //! the operations defined here (`docs/wiki/architecture.md`).
 
 pub mod annotations;
+pub mod arrange;
 pub mod error;
 pub mod geometry;
 pub mod history;

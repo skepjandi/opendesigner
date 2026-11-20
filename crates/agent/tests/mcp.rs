@@ -1607,3 +1607,96 @@ fn get_guidance_lists_the_servers_the_user_added_by_name_and_what_they_are_for()
     );
     assert!(servers[1].get("about").is_none());
 }
+
+/// RGB pixels of a PNG (alpha dropped).
+fn rgb_pixels(png_bytes: &[u8]) -> Vec<[u8; 3]> {
+    let mut reader = png::Decoder::new(std::io::Cursor::new(png_bytes))
+        .read_info()
+        .unwrap();
+    let mut buf = vec![0; reader.output_buffer_size().unwrap()];
+    let info = reader.next_frame(&mut buf).unwrap();
+    let channels = info.color_type.samples();
+    buf[..info.buffer_size()]
+        .chunks(channels)
+        .map(|p| [p[0], p[1], p[2]])
+        .collect()
+}
+
+#[test]
+fn a_generated_background_and_a_bundled_icon_end_up_in_a_rendered_video_frame() {
+    let f = fixture();
+    // 1. the assets, through the same tools an agent calls
+    let bg = f.ok(
+        "make_asset",
+        json!({"generator": "gradient", "width": 400, "height": 800,
+               "colors": ["#00ff00", "#00ff00"], "name": "scene-bg"}),
+    );
+    assert_eq!(bg["file"], "media/scene-bg.png");
+    let icon = f.ok(
+        "import_asset",
+        json!({"id": "lucide:camera", "width": 200, "height": 200, "color": "#ff0000",
+               "name": "cam"}),
+    );
+    assert_eq!(icon["file"], "media/cam.png");
+    let media = f.ok("list_media", json!({}));
+    assert!(
+        media.to_string().contains("scene-bg.png") && media.to_string().contains("cam.png"),
+        "list_media shows what the asset tools made: {media}"
+    );
+
+    // 2. frames hold them as image nodes; one frame is a clip, the other an overlay
+    let r = f.ok(
+        "apply_ops",
+        json!({"ops": [
+            {"op":"create","parent":f.root,"node":{"kind":"frame","name":"Scene","width":400,"height":800,
+              "children":[{"kind":"image","name":"Background","x":0,"y":0,"width":400,"height":800,
+                           "image":"media/scene-bg.png","image_fit":"cover"}]}},
+            {"op":"create","parent":f.root,"node":{"kind":"frame","name":"Badge","width":400,"height":800,
+              "children":[{"kind":"image","name":"Camera","x":100,"y":300,"width":200,"height":200,
+                           "image":"media/cam.png"}]}},
+            {"op":"create_video","name":"Promo","fps":10,"width":200,"height":400}
+        ]}),
+    );
+    let ids: Vec<String> = r["created"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap().to_string())
+        .collect();
+    let video = ids.iter().find(|i| i.starts_with("v_")).unwrap().clone();
+    let frames: Vec<&String> = ids.iter().filter(|i| i.starts_with("n_")).collect();
+    let (scene, badge) = (frames[0].clone(), frames[1].clone());
+    f.ok(
+        "apply_ops",
+        json!({"ops": [
+            {"op":"add_clip","video":video,"frame":scene,"duration_ms":2000},
+            {"op":"add_overlay","video":video,"frame":badge,"start_ms":0,"duration_ms":2000,
+             "enter":"none","exit":"none"}
+        ]}),
+    );
+
+    // 3. the picture really contains both assets
+    let resp = f.rpc(
+        "tools/call",
+        json!({"name":"render_video_frame","arguments":{"video":video,"time_ms":1000,"max_side":400}}),
+    );
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(resp["result"]["content"][0]["data"].as_str().unwrap())
+        .unwrap();
+    let px = rgb_pixels(&bytes);
+    let green = px.iter().filter(|p| p[1] > 200 && p[0] < 60).count();
+    let red = px
+        .iter()
+        .filter(|p| p[0] > 200 && p[1] < 60 && p[2] < 60)
+        .count();
+    assert!(
+        green > px.len() / 2,
+        "the generated background fills the frame ({green}/{})",
+        px.len()
+    );
+    assert!(
+        red > 50,
+        "the recolored icon is drawn over it ({red} red pixels)"
+    );
+}

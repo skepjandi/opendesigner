@@ -6,6 +6,22 @@ All notable changes to OpenDesigner are documented here.
 >
 > **Wiki**: the [GitHub Wiki](https://github.com/skepjandi/opendesigner/wiki) is the public-facing main wiki — architecture, document format, agent integration, security model, roadmap. Source-controlled editing surface is `docs/wiki/` in this repo; CI (`.github/workflows/sync-wiki.yml`) mirrors it to the GitHub Wiki on every merge to `main`. New single-PR changes belong here, not as new wiki pages.
 
+## 2026-11-20
+
+### feat(app): canvas overhaul, Variants and Preview panels, timeline, menu bar, chat fixes
+
+**Area:** `feat(app)`, `feat(core)`, `feat(agent)`, `fix(app)`
+
+**Change:**
+- **Chat:** fixed `Required property modelData was not initialized` (the model/effort/mode selectors repeated a `required property` inside the delegate). The slash-command list closes with Esc, its close button or a click elsewhere, and Up/Down/Tab/Enter work in it. A slash command is now sent to the agent exactly as typed: before, the first message of a session carried the preamble in front of it, so the agent saw plain text instead of a command.
+- **Variants and Preview panels** (`variants`, `preview`): options the agent offers appear as cards you pick from, not as frames on the canvas; the Preview shows the end product clean, chosen by the agent. New MCP tools `offer_variants`, `get_variants`, `clear_variants`, `show_preview`. Layouts saved earlier get the two panels hidden.
+- **Canvas:** a toolbar inside the canvas panel (tools, overlays, snapping, rulers, zoom, arrange); rectangle, ellipse, text and frame tools; multi-selection (Shift-click, marquee), align, distribute, stack, duplicate, group, ungroup, copy and paste (`od_core::arrange`); snapping guides, rulers, pixel grid, right-click menu; the inspector shows several selected nodes. The window toolbar keeps only global controls and the old "more" menu is gone.
+- **Menu bar:** the native application menu bar (File, Edit, Insert, Arrange, View, Agent, Window, Help); every Ctrl/Cmd shortcut moved into it.
+- **Video:** a new editor-style timeline (transport bar, ruler, playhead across tracks, zoom, labelled tracks, details of the picked clip).
+- **Agent and video:** a video now starts with an inventory (`list_media`, `list_footage`, `list_sounds`, `search_assets`, `list_asset_sources`) and uses bundled icons, generated backgrounds and pack art through image nodes in clip and overlay frames; the skill, the `video` playbook, the chat's first message and the asset tool descriptions say so, and a test pins every tool name the guidance uses.
+
+**Verified:** unit and integration tests in every crate, clippy `-D warnings`, the offscreen window session; the menu bar's items read back from macOS System Events. **Not verified:** how it looks or feels by eye (canvas gestures, timeline interaction, panels), text-field copy/paste with the menu shortcuts, Windows and Linux.
+
 ## 2026-11-19
 
 ### feat(app): every Direction section has "Let the agent decide"

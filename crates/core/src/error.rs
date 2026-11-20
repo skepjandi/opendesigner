@@ -60,6 +60,8 @@ pub enum OpError {
         clip: String,
         video: String,
     },
+    #[error("cannot arrange: {0}")]
+    Arrange(String),
     #[error("internal error: {0}")]
     Internal(String),
 }

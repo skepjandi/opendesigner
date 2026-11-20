@@ -33,6 +33,8 @@ pub mod qobject {
         #[qproperty(QString, jobs)]
         #[qproperty(QString, workspaces)]
         #[qproperty(QString, brief)]
+        #[qproperty(QString, showcase)]
+        #[qproperty(QString, showcase_notice, cxx_name = "showcaseNotice")]
         #[qproperty(QString, layout)]
         #[qproperty(QString, agent_probe, cxx_name = "agentProbe")]
         #[qproperty(QString, checkerboard)]
@@ -42,6 +44,10 @@ pub mod qobject {
         #[qproperty(QString, chat)]
         #[qproperty(bool, can_undo, cxx_name = "canUndo")]
         #[qproperty(bool, can_redo, cxx_name = "canRedo")]
+        #[qproperty(QString, selection_rects, cxx_name = "selectionRects")]
+        #[qproperty(bool, can_paste, cxx_name = "canPaste")]
+        #[qproperty(bool, can_group, cxx_name = "canGroup")]
+        #[qproperty(bool, can_ungroup, cxx_name = "canUngroup")]
         #[qproperty(bool, mcp_running, cxx_name = "mcpRunning")]
         #[qproperty(QString, mcp_url, cxx_name = "mcpUrl")]
         #[qproperty(QString, canvas)]
@@ -123,6 +129,21 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "importImage"]
         fn import_image(self: Pin<&mut Self>, url: &QString) -> QString;
+        #[qinvokable]
+        #[cxx_name = "pickVariant"]
+        fn pick_variant(self: Pin<&mut Self>, id: &QString);
+        #[qinvokable]
+        #[cxx_name = "dismissVariants"]
+        fn dismiss_variants(self: Pin<&mut Self>);
+        #[qinvokable]
+        #[cxx_name = "setPreviewOverride"]
+        fn set_preview_override(self: Pin<&mut Self>, kind: &QString, target: &QString);
+        #[qinvokable]
+        #[cxx_name = "clearPreviewOverride"]
+        fn clear_preview_override(self: Pin<&mut Self>);
+        #[qinvokable]
+        #[cxx_name = "renderFrameImage"]
+        fn render_frame_image(self: &Self, id: &QString, max_side: i32) -> QString;
         #[qinvokable]
         #[cxx_name = "layoutLoad"]
         fn layout_load(self: Pin<&mut Self>, persist: bool);
@@ -269,6 +290,51 @@ pub mod qobject {
         fn remove_token(self: Pin<&mut Self>, name: &QString);
         #[qinvokable]
         fn reorder(self: Pin<&mut Self>, id: &QString, delta: i32);
+        #[qinvokable]
+        #[cxx_name = "selectMany"]
+        fn select_many(self: Pin<&mut Self>, ids: &QString);
+        #[qinvokable]
+        #[cxx_name = "toggleSelect"]
+        fn toggle_select(self: Pin<&mut Self>, id: &QString);
+        #[qinvokable]
+        #[cxx_name = "selectAll"]
+        fn select_all(self: Pin<&mut Self>);
+        #[qinvokable]
+        #[cxx_name = "selectInRect"]
+        fn select_in_rect(self: Pin<&mut Self>, x: f64, y: f64, w: f64, h: f64, additive: bool);
+        #[qinvokable]
+        #[cxx_name = "alignSelected"]
+        fn align_selected(self: Pin<&mut Self>, kind: &QString);
+        #[qinvokable]
+        #[cxx_name = "distributeSelected"]
+        fn distribute_selected(self: Pin<&mut Self>, axis: &QString);
+        #[qinvokable]
+        #[cxx_name = "stackSelected"]
+        fn stack_selected(self: Pin<&mut Self>, dir: &QString, gap: f64);
+        #[qinvokable]
+        #[cxx_name = "duplicateSelected"]
+        fn duplicate_selected(self: Pin<&mut Self>);
+        #[qinvokable]
+        #[cxx_name = "groupSelected"]
+        fn group_selected(self: Pin<&mut Self>);
+        #[qinvokable]
+        #[cxx_name = "ungroupSelected"]
+        fn ungroup_selected(self: Pin<&mut Self>);
+        #[qinvokable]
+        #[cxx_name = "copySelected"]
+        fn copy_selected(self: Pin<&mut Self>);
+        #[qinvokable]
+        #[cxx_name = "pasteClipboard"]
+        fn paste_clipboard(self: Pin<&mut Self>);
+        #[qinvokable]
+        #[cxx_name = "bringSelected"]
+        fn bring_selected(self: Pin<&mut Self>, delta: i32);
+        #[qinvokable]
+        #[cxx_name = "moveSelected"]
+        fn move_selected(self: Pin<&mut Self>, dx: f64, dy: f64);
+        #[qinvokable]
+        #[cxx_name = "snapMove"]
+        fn snap_move(self: &Self, x: f64, y: f64, w: f64, h: f64, exclude: &QString) -> QString;
 
         #[qinvokable]
         fn undo(self: Pin<&mut Self>);
@@ -440,6 +506,9 @@ pub struct EditorRust {
     jobs: QString,
     workspaces: QString,
     brief: QString,
+    showcase: QString,
+    showcase_notice: QString,
+    showcase_notices: i32,
     layout: QString,
     agent_probe: QString,
     checkerboard: QString,
@@ -449,6 +518,10 @@ pub struct EditorRust {
     chat: QString,
     can_undo: bool,
     can_redo: bool,
+    selection_rects: QString,
+    can_paste: bool,
+    can_group: bool,
+    can_ungroup: bool,
     mcp_running: bool,
     mcp_url: QString,
     canvas: QString,
@@ -568,12 +641,17 @@ impl qobject::Editor {
         self.as_mut().set_workspaces(q(&snap.workspaces));
         self.as_mut().set_checkerboard(q(&checkerboard_data_url()));
         self.as_mut().set_brief(q(&snap.brief));
+        self.as_mut().set_showcase(q(&snap.showcase));
         self.as_mut().set_tokens(q(&snap.tokens));
         self.as_mut().set_languages(q(&snap.languages));
         self.as_mut().set_language(q(&snap.language));
         self.as_mut().set_chat(q(&snap.chat));
         self.as_mut().set_can_undo(snap.can_undo);
         self.as_mut().set_can_redo(snap.can_redo);
+        self.as_mut().set_selection_rects(q(&snap.selection_rects));
+        self.as_mut().set_can_paste(snap.can_paste);
+        self.as_mut().set_can_group(snap.can_group);
+        self.as_mut().set_can_ungroup(snap.can_ungroup);
         self.as_mut().set_mcp_running(snap.mcp_running);
         self.as_mut().set_mcp_url(q(&snap.mcp_url));
     }
@@ -584,6 +662,20 @@ impl qobject::Editor {
         self.as_mut().publish(&snap);
         let revision = *self.revision() + 1;
         self.as_mut().set_revision(revision);
+    }
+
+    /// Called on the Qt thread when an agent used a showcase tool (`show_preview`,
+    /// `offer_variants`, `clear_variants`): says so and tells the window which panel to reveal.
+    fn on_showcase_change(mut self: Pin<&mut Self>, who: &str, tool: &str) {
+        let notice = self.state.showcase_notice(tool, who);
+        if let Some((panel, text)) = notice {
+            let n = self.showcase_notices + 1;
+            self.as_mut().rust_mut().showcase_notices = n;
+            self.as_mut()
+                .set_showcase_notice(q(&format!("{panel}:{n}")));
+            self.as_mut().show(&text, false);
+        }
+        self.as_mut().refresh();
     }
 
     /// Called on the Qt thread when an agent changed the document through MCP.
@@ -931,6 +1023,46 @@ impl qobject::Editor {
         }
     }
 
+    pub fn pick_variant(mut self: Pin<&mut Self>, id: &QString) {
+        let id = id.to_string();
+        if let Some(told) = self.as_mut().act(|s| s.pick_variant(&id)) {
+            let text = if told {
+                "Pick sent to the agent"
+            } else {
+                "Pick saved: the agent reads it with get_variants"
+            };
+            self.as_mut().show(text, false);
+        }
+    }
+
+    pub fn dismiss_variants(mut self: Pin<&mut Self>) {
+        self.as_mut().act(EditorState::dismiss_variants);
+    }
+
+    pub fn set_preview_override(mut self: Pin<&mut Self>, kind: &QString, target: &QString) {
+        let (kind, target) = (kind.to_string(), target.to_string());
+        self.as_mut()
+            .act(|s| s.set_preview_override(&kind, &target));
+    }
+
+    pub fn clear_preview_override(mut self: Pin<&mut Self>) {
+        self.as_mut().act(|s| {
+            s.clear_preview_override();
+            Ok(())
+        });
+    }
+
+    /// Any frame drawn clean as a PNG data URL, or an empty string.
+    pub fn render_frame_image(&self, id: &QString, max_side: i32) -> QString {
+        match self
+            .state
+            .render_frame_image(&id.to_string(), u32::try_from(max_side).unwrap_or(256))
+        {
+            Ok(url) => q(&url),
+            Err(_) => q(""),
+        }
+    }
+
     /// Starts (or keeps) the background preview of a video; returns its status as JSON.
     pub fn preview_start(mut self: Pin<&mut Self>, video: &QString) -> QString {
         match self
@@ -1100,6 +1232,79 @@ impl qobject::Editor {
         self.as_mut().act(|s| s.reorder(&id, delta));
     }
 
+    pub fn select_many(mut self: Pin<&mut Self>, ids: &QString) {
+        let ids = ids.to_string();
+        self.as_mut().act(|s| s.select_many(&ids));
+    }
+
+    pub fn toggle_select(mut self: Pin<&mut Self>, id: &QString) {
+        let id = id.to_string();
+        self.as_mut().act(|s| s.toggle_select(&id));
+    }
+
+    pub fn select_all(mut self: Pin<&mut Self>) {
+        self.as_mut().act(|s| s.select_all());
+    }
+
+    pub fn select_in_rect(
+        mut self: Pin<&mut Self>,
+        x: f64,
+        y: f64,
+        w: f64,
+        h: f64,
+        additive: bool,
+    ) {
+        self.as_mut()
+            .act(|s| s.select_in_rect(x, y, w, h, additive));
+    }
+
+    pub fn align_selected(mut self: Pin<&mut Self>, kind: &QString) {
+        let kind = kind.to_string();
+        self.as_mut().act(|s| s.align_selected(&kind));
+    }
+
+    pub fn distribute_selected(mut self: Pin<&mut Self>, axis: &QString) {
+        let axis = axis.to_string();
+        self.as_mut().act(|s| s.distribute_selected(&axis));
+    }
+
+    pub fn stack_selected(mut self: Pin<&mut Self>, dir: &QString, gap: f64) {
+        let dir = dir.to_string();
+        self.as_mut().act(|s| s.stack_selected(&dir, gap));
+    }
+
+    pub fn duplicate_selected(mut self: Pin<&mut Self>) {
+        self.as_mut().act(|s| s.duplicate_selected());
+    }
+
+    pub fn group_selected(mut self: Pin<&mut Self>) {
+        self.as_mut().act(|s| s.group_selected());
+    }
+
+    pub fn ungroup_selected(mut self: Pin<&mut Self>) {
+        self.as_mut().act(|s| s.ungroup_selected());
+    }
+
+    pub fn copy_selected(mut self: Pin<&mut Self>) {
+        self.as_mut().act(|s| s.copy_selected());
+    }
+
+    pub fn paste_clipboard(mut self: Pin<&mut Self>) {
+        self.as_mut().act(|s| s.paste_clipboard());
+    }
+
+    pub fn bring_selected(mut self: Pin<&mut Self>, delta: i32) {
+        self.as_mut().act(|s| s.bring_selected(delta));
+    }
+
+    pub fn move_selected(mut self: Pin<&mut Self>, dx: f64, dy: f64) {
+        self.as_mut().act(|s| s.move_selected(dx, dy));
+    }
+
+    pub fn snap_move(&self, x: f64, y: f64, w: f64, h: f64, exclude: &QString) -> QString {
+        q(&self.state.snap_move(x, y, w, h, &exclude.to_string()))
+    }
+
     pub fn undo(mut self: Pin<&mut Self>) {
         self.as_mut().act(|s| s.undo());
     }
@@ -1213,8 +1418,14 @@ impl qobject::Editor {
     pub fn start_mcp(mut self: Pin<&mut Self>) {
         let qt = self.qt_thread();
         let hook: Arc<dyn Fn(ChangeEvent) + Send + Sync> = Arc::new(move |e: ChangeEvent| {
-            let (who, ids) = (e.actor, e.touched);
-            let _ = qt.queue(move |editor| editor.on_agent_change(&who, ids));
+            let (who, ids, tool) = (e.actor, e.touched, e.tool);
+            let _ = qt.queue(move |editor| {
+                if od_agent::tools::changes_showcase(&tool) {
+                    editor.on_showcase_change(&who, &tool);
+                } else {
+                    editor.on_agent_change(&who, ids);
+                }
+            });
         });
         let qt_jobs = self.qt_thread();
         let on_job: od_agent::mcp::JobHook = Arc::new(move |u| {

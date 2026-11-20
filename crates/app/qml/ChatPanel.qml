@@ -24,15 +24,24 @@ Item {
     // the agent's commands, filtered by what is typed
     readonly property var allCommands: root.chat.commands || []
     property bool showCommands: false
+    // the user closed the list by hand: it stays closed until the text stops being a command
+    property bool commandsDismissed: false
+    property int commandIndex: 0
     readonly property var commandList: {
         if (!root.showCommands) return []
         const typed = inputText.text.trim()
         const q = typed.startsWith("/") ? typed.slice(1).split(/\s/)[0].toLowerCase() : ""
         return root.allCommands.filter(c => q === "" || c.name.toLowerCase().indexOf(q) === 0).slice(0, 40)
     }
+    onCommandListChanged: commandIndex = 0
     function updateCommands() {
         const typed = inputText.text
-        root.showCommands = typed.startsWith("/") && typed.indexOf(" ") < 0 && root.allCommands.length > 0
+        if (!typed.startsWith("/")) root.commandsDismissed = false
+        root.showCommands = !root.commandsDismissed && typed.startsWith("/") && typed.indexOf(" ") < 0 && root.allCommands.length > 0
+    }
+    function dismissCommands() {
+        root.commandsDismissed = true
+        root.showCommands = false
     }
     // commands that are really settings of the session open a chooser here instead of being
     // sent to the model as text
@@ -144,7 +153,7 @@ Item {
             visible: (root.chat.commands || []).length > 0
             height: visible ? implicitHeight : 0
             text: "The agent's commands…"
-            onTriggered: { root.showCommands = true; inputText.forceActiveFocus() }
+            onTriggered: { root.commandsDismissed = false; root.showCommands = true; inputText.forceActiveFocus() }
         }
     }
 
@@ -242,30 +251,30 @@ Item {
             Repeater {
                 model: root.chat.config || []
                 delegate: RowLayout {
+                    id: settingRow
                     required property var modelData
                     spacing: 4
                     Label {
                         color: Theme.muted
                         font.pixelSize: 11
-                        text: modelData.category === "thought_level" ? "Effort"
-                            : modelData.category === "model" ? "Model"
-                            : modelData.category === "mode" ? "Mode"
-                            : modelData.name
+                        text: settingRow.modelData.category === "thought_level" ? "Effort"
+                            : settingRow.modelData.category === "model" ? "Model"
+                            : settingRow.modelData.category === "mode" ? "Mode"
+                            : settingRow.modelData.name
                     }
                     ComboBox {
                         id: settingBox
-                        required property var modelData
                         implicitWidth: Math.min(230, Math.max(110, settingBox.currentText.length * 7 + 40))
                         implicitHeight: Theme.row
                         font.pixelSize: 11
-                        model: settingBox.modelData.choices.map(c => c.name + (c.description ? "  ·  " + c.description : ""))
+                        model: settingRow.modelData.choices.map(c => c.name + (c.description ? "  ·  " + c.description : ""))
                         currentIndex: {
-                            const at = settingBox.modelData.choices.findIndex(c => c.value === settingBox.modelData.current)
+                            const at = settingRow.modelData.choices.findIndex(c => c.value === settingRow.modelData.current)
                             return at >= 0 ? at : 0
                         }
-                        onActivated: i => root.editor.chatSetConfig(settingBox.modelData.id, settingBox.modelData.choices[i].value)
+                        onActivated: i => root.editor.chatSetConfig(settingRow.modelData.id, settingRow.modelData.choices[i].value)
                         ToolTip.visible: hovered
-                        ToolTip.text: settingBox.modelData.choices.length + " choices"
+                        ToolTip.text: settingRow.modelData.choices.length + " choices"
                     }
                 }
             }
@@ -412,42 +421,76 @@ Item {
             // the agent's slash commands, listed just above the message field
             Popup {
                 id: commandPopup
+                // wanted while the user is typing a command; closing it by hand (Esc, the close
+                // button, a click elsewhere) holds it shut until the text is no longer a command
+                readonly property bool wanted: root.showCommands && root.commandList.length > 0
+                onWantedChanged: { if (wanted) open(); else close() }
+                onClosed: { if (wanted) root.dismissCommands() }
+                Component.onCompleted: { if (wanted) open() }
                 parent: inputRow
                 x: 0
                 width: Math.min(460, inputRow.width)
-                height: Math.min(300, commandList.contentHeight + 12)
+                height: Math.min(340, commandList.contentHeight + 52)
                 y: -height - 6
                 padding: 6
                 focus: false
-                closePolicy: Popup.NoAutoClose
-                visible: root.commandList.length > 0 && root.showCommands
+                closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
                 background: Rectangle { radius: Theme.radius; color: Theme.panelRaised; border.width: 1; border.color: Theme.border }
-                contentItem: ListView {
-                    id: commandList
-                    model: root.commandList
-                    clip: true
-                    boundsBehavior: Flickable.StopAtBounds
-                    ScrollBar.vertical: ScrollBar {}
-                    delegate: Rectangle {
-                        id: cmdRow
-                        required property var modelData
-                        width: commandList.width
-                        height: cmdText.implicitHeight + 10
-                        radius: 4
-                        color: cmdTap.hovered ? Theme.field : "transparent"
+                contentItem: ColumnLayout {
+                    spacing: 4
+                    RowLayout {
+                        Layout.fillWidth: true
                         Label {
-                            id: cmdText
-                            x: 6; y: 5
-                            width: parent.width - 12
-                            text: "/" + cmdRow.modelData.name + (cmdRow.modelData.hint ? " " + cmdRow.modelData.hint : "") + (cmdRow.modelData.description ? "\n" + cmdRow.modelData.description : "")
-                            color: Theme.text
-                            font.pixelSize: 11
-                            wrapMode: Text.WordWrap
-                            maximumLineCount: 3
+                            Layout.fillWidth: true
+                            leftPadding: 4
+                            text: "The agent's commands  ·  ↑↓ choose, Tab or Enter fills in, Esc closes"
+                            color: Theme.muted
+                            font.pixelSize: 10
                             elide: Text.ElideRight
                         }
-                        HoverHandler { id: cmdTap }
-                        TapHandler { onTapped: root.useCommand(cmdRow.modelData.name) }
+                        Btn {
+                            iconName: "x"
+                            Accessible.name: "Close the command list"
+                            tip: "Close (Esc)"
+                            implicitWidth: 24
+                            implicitHeight: 22
+                            leftPadding: 0
+                            rightPadding: 0
+                            onClicked: root.dismissCommands()
+                        }
+                    }
+                    ListView {
+                        id: commandList
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        model: root.commandList
+                        currentIndex: root.commandIndex
+                        clip: true
+                        boundsBehavior: Flickable.StopAtBounds
+                        ScrollBar.vertical: ScrollBar {}
+                        onCurrentIndexChanged: positionViewAtIndex(currentIndex, ListView.Contain)
+                        delegate: Rectangle {
+                            id: cmdRow
+                            required property var modelData
+                            required property int index
+                            width: commandList.width
+                            height: cmdText.implicitHeight + 10
+                            radius: 4
+                            color: cmdRow.index === root.commandIndex || cmdTap.hovered ? Theme.field : "transparent"
+                            Label {
+                                id: cmdText
+                                x: 6; y: 5
+                                width: parent.width - 12
+                                text: "/" + cmdRow.modelData.name + (cmdRow.modelData.hint ? " " + cmdRow.modelData.hint : "") + (cmdRow.modelData.description ? "\n" + cmdRow.modelData.description : "")
+                                color: Theme.text
+                                font.pixelSize: 11
+                                wrapMode: Text.WordWrap
+                                maximumLineCount: 3
+                                elide: Text.ElideRight
+                            }
+                            HoverHandler { id: cmdTap }
+                            TapHandler { onTapped: root.useCommand(cmdRow.modelData.name) }
+                        }
                     }
                 }
             }
@@ -485,12 +528,27 @@ Item {
                     enabled: root.chat.status === "ready" || root.chat.status === "busy"
                     background: Rectangle { radius: 4; color: Theme.field; border.width: 1; border.color: inputText.activeFocus ? Theme.accent : Theme.border }
                     onTextChanged: root.updateCommands()
+                    // Escape closes the command list first; the window's own Escape (deselect)
+                    // only sees it when no list is open
+                    Keys.onShortcutOverride: event => { if (event.key === Qt.Key_Escape && commandPopup.opened) event.accepted = true }
+                    Keys.onEscapePressed: event => { if (commandPopup.opened) { root.dismissCommands(); event.accepted = true } }
                     Keys.onPressed: key => {
-                        if (key.key === Qt.Key_Return && !(key.modifiers & Qt.ShiftModifier)) {
-                            root.send()
+                        const listed = commandPopup.opened && root.commandList.length > 0
+                        if (listed && key.key === Qt.Key_Down) {
+                            root.commandIndex = Math.min(root.commandList.length - 1, root.commandIndex + 1)
                             key.accepted = true
-                        } else if (key.key === Qt.Key_Tab && root.showCommands && root.commandList.length > 0) {
-                            root.useCommand(root.commandList[0].name)
+                        } else if (listed && key.key === Qt.Key_Up) {
+                            root.commandIndex = Math.max(0, root.commandIndex - 1)
+                            key.accepted = true
+                        } else if (key.key === Qt.Key_Tab && listed) {
+                            root.useCommand(root.commandList[root.commandIndex].name)
+                            key.accepted = true
+                        } else if (key.key === Qt.Key_Return && !(key.modifiers & Qt.ShiftModifier)) {
+                            // Enter on a half-typed command fills it in; on a whole one it runs
+                            const typed = inputText.text.trim()
+                            const chosen = listed ? root.commandList[root.commandIndex] : null
+                            if (chosen && typed !== "/" + chosen.name) root.useCommand(chosen.name)
+                            else root.send()
                             key.accepted = true
                         }
                     }

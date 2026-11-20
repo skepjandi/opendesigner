@@ -452,7 +452,7 @@ pub fn prompt(sel: &Selection) -> String {
         out.push_str("Before you design: look for skills and references that fit this work. List the skills you have and use the best matches (app store design, motion graphics, ffmpeg editing, front-end design); if you can search the web or a skills directory, find and read good examples and use what applies. Say which you used.\n");
     }
     if sel.options_first {
-        out.push_str("First show me three small directions (a hero frame each, made with this direction as the base) and wait for my pick before you build the full set.\n");
+        out.push_str("First show me three small directions (a hero frame each, made with this direction as the base): build each as its own clearly named frame, call offer_variants so they appear in my Variants panel (not on the canvas), tell me to pick there, then wait. Call get_variants for my pick before you build the full set.\n");
     }
     if sel.remember {
         out.push_str("Record these choices and what you learn in the agent memory (write_memory) so the next task starts from them.\n");

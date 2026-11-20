@@ -22,7 +22,13 @@ pub const PANELS: &[(&str, &str)] = &[
     ("video", "Video"),
     ("connect", "Connect"),
     ("chat", "Chat"),
+    ("variants", "Variants"),
+    ("preview", "Preview"),
 ];
+
+/// Panels added after the first release. A saved layout written before they existed keeps its
+/// arrangement and gets them as hidden panels.
+const ADDED_LATER: &[&str] = &["variants", "preview"];
 
 pub const FORMAT_VERSION: u32 = 1;
 const MIN_WINDOW: f64 = 240.0;
@@ -130,7 +136,7 @@ impl Default for Layout {
                 weights: vec![0.17, 0.6, 0.23],
                 children: vec![
                     group(2, &["layers"], "layers"),
-                    group(3, &["canvas"], "canvas"),
+                    group(3, &["canvas", "preview", "variants"], "canvas"),
                     Node::Split {
                         id: 4,
                         dir: Dir::Column,
@@ -658,12 +664,28 @@ impl Layout {
         serde_json::to_string(self).unwrap_or_default()
     }
 
+    fn with_added_panels(mut self) -> Layout {
+        let mut placed = Vec::new();
+        panels_of(&self.main, &mut placed);
+        self.floating
+            .iter()
+            .for_each(|f| panels_of(&f.root, &mut placed));
+        placed.extend(self.hidden.iter().cloned());
+        for panel in ADDED_LATER {
+            if !placed.iter().any(|p| p == panel) {
+                self.hidden.push((*panel).to_string());
+            }
+        }
+        self
+    }
+
     /// The saved layout, or the default when there is none or it is not valid (a layout from a
     /// newer version, a hand edit, a panel that no longer exists).
     pub fn load(path: &Path) -> Layout {
         std::fs::read_to_string(path)
             .ok()
             .and_then(|t| serde_json::from_str::<Layout>(&t).ok())
+            .map(Layout::with_added_panels)
             .filter(|l| l.version == FORMAT_VERSION && l.validate().is_ok())
             .unwrap_or_default()
     }
@@ -900,6 +922,8 @@ mod tests {
             "memory",
             "video",
             "connect",
+            "variants",
+            "preview",
         ] {
             l.float(p, 10.0, 10.0, 300.0, 300.0).unwrap();
         }
@@ -1001,6 +1025,31 @@ mod tests {
         broken.hidden.push("chat".into());
         std::fs::write(&path, serde_json::to_string(&broken).unwrap()).unwrap();
         assert_eq!(Layout::load(&path), Layout::default());
+    }
+
+    #[test]
+    fn a_layout_saved_before_variants_and_preview_existed_loads_with_them_hidden() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("layout.json");
+        let mut old = Layout::default();
+        old.hide("preview").unwrap();
+        old.hide("variants").unwrap();
+        old.move_panel("chat", find_group(&old, "canvas").unwrap(), Zone::Right)
+            .unwrap();
+        old.hidden.clear();
+        std::fs::write(&path, serde_json::to_string(&old).unwrap()).unwrap();
+        let loaded = Layout::load(&path);
+        assert_eq!(loaded.hidden, ["variants", "preview"]);
+        assert_eq!(find_group(&loaded, "chat"), find_group(&old, "chat"));
+        loaded.validate().unwrap();
+    }
+
+    #[test]
+    fn the_default_puts_preview_and_variants_beside_the_canvas_as_tabs() {
+        let l = Layout::default();
+        let g = find_group(&l, "canvas").unwrap();
+        assert_eq!(find_group(&l, "preview"), Some(g));
+        assert_eq!(find_group(&l, "variants"), Some(g));
     }
 
     #[test]

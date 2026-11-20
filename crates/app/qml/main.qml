@@ -7,6 +7,12 @@ import org.opendesigner.app
 
 ApplicationWindow {
     id: win
+    menuBar: AppMenus {
+        win: win
+        dock: dock
+        editor: backend
+        dialogs: ({ openProject: openDialog, exportAssets: exportDialog, image: imageDialog, languages: languagesDialog, tokens: tokensDialog, shortcuts: shortcutsDialog })
+    }
     visible: true
     width: 1440
     height: 900
@@ -20,6 +26,10 @@ ApplicationWindow {
     property string tool: "select"
     // hides what the editor draws over the picture (selection, agent outlines, pins, markers)
     property bool overlaysHidden: false
+    // session-only view toggles the View menu flips and the canvas reads
+    property bool snapEnabled: true
+    property bool rulersVisible: false
+    property bool pixelGridVisible: true
     // the panels are placed by the dock (`Dock.qml`, `layout.rs`); the ones other code talks to
     // register themselves here when they are created
     property var canvas: null
@@ -67,7 +77,9 @@ ApplicationWindow {
     // macOS Qt writes the Command key as "Ctrl" and Control as "Meta".
     readonly property var selectedId: backend.selection ? (JSON.parse(backend.selection)[0] || "") : ""
     readonly property bool canAct: backend.hasProject && !typing
+    readonly property int selectionCount: backend.selection ? JSON.parse(backend.selection).length : 0
     function nudge(dx, dy) {
+        if (selectionCount > 1) { backend.moveSelected(dx, dy); return }
         const n = inspectorNode()
         if (n) backend.moveNode(n.id, n.x + dx, n.y + dy)
     }
@@ -90,9 +102,6 @@ ApplicationWindow {
     }
 
     // edit
-    Shortcut { sequences: [StandardKey.Undo]; onActivated: backend.undo() }
-    Shortcut { sequences: [StandardKey.Redo]; onActivated: backend.redo() }
-    Shortcut { sequences: [StandardKey.Save]; onActivated: backend.saveProject() }
     Shortcut { sequences: ["Delete", "Backspace"]; enabled: win.canAct; onActivated: backend.deleteSelected() }
     Shortcut { sequences: ["Escape"]; onActivated: { win.tool = "select"; backend.select("") } }
     Shortcut { sequence: "Return"; enabled: win.canAct && win.selectedId !== ""; onActivated: { const i = win.panels.inspector; if (i) i.editText() } }
@@ -106,31 +115,27 @@ ApplicationWindow {
     Shortcut { sequence: "Shift+Down"; enabled: win.canAct; onActivated: win.nudge(0, 10) }
     Shortcut { sequence: "Tab"; enabled: win.canAct; onActivated: win.stepLayer(1) }
     Shortcut { sequence: "Shift+Tab"; enabled: win.canAct; onActivated: win.stepLayer(-1) }
-    Shortcut { sequence: "Ctrl+]"; enabled: win.canAct && win.selectedId !== ""; onActivated: backend.reorder(win.selectedId, 1) }
-    Shortcut { sequence: "Ctrl+["; enabled: win.canAct && win.selectedId !== ""; onActivated: backend.reorder(win.selectedId, -1) }
-    Shortcut { sequence: "Ctrl+Alt+]"; enabled: win.canAct && win.selectedId !== ""; onActivated: backend.reorder(win.selectedId, 1000) }
-    Shortcut { sequence: "Ctrl+Alt+["; enabled: win.canAct && win.selectedId !== ""; onActivated: backend.reorder(win.selectedId, -1000) }
 
     // tools
     Shortcut { sequence: "V"; enabled: win.canAct; onActivated: win.tool = "select" }
     Shortcut { sequence: "H"; enabled: win.canAct; onActivated: win.tool = "hand" }
     Shortcut { sequence: "C"; enabled: win.canAct; onActivated: win.tool = "pin" }
+    Shortcut { sequence: "R"; enabled: win.canAct; onActivated: win.tool = "rect" }
+    Shortcut { sequence: "O"; enabled: win.canAct; onActivated: win.tool = "ellipse" }
+    Shortcut { sequence: "T"; enabled: win.canAct; onActivated: win.tool = "text" }
+    Shortcut { sequence: "F"; enabled: win.canAct; onActivated: win.tool = "frame" }
     Shortcut { sequence: "Shift+H"; enabled: win.canAct; onActivated: win.overlaysHidden = !win.overlaysHidden }
 
     // view
-    Shortcut { sequences: [StandardKey.ZoomIn, "="]; enabled: !win.typing; onActivated: win.zoomBy(1.25) }
-    Shortcut { sequences: [StandardKey.ZoomOut, "-"]; enabled: !win.typing; onActivated: win.zoomBy(0.8) }
-    Shortcut { sequence: "Ctrl+0"; onActivated: win.zoomTo(1) }
+    Shortcut { sequence: "="; enabled: !win.typing; onActivated: win.zoomBy(1.25) }
+    Shortcut { sequence: "-"; enabled: !win.typing; onActivated: win.zoomBy(0.8) }
     Shortcut { sequence: "Shift+1"; enabled: !win.typing; onActivated: win.fitCanvas() }
     Shortcut { sequence: "Shift+2"; enabled: !win.typing; onActivated: win.fitSelection() }
     Shortcut { sequence: "N"; enabled: win.canAct; onActivated: win.stepFrame(1) }
     Shortcut { sequence: "Shift+N"; enabled: win.canAct; onActivated: win.stepFrame(-1) }
 
     // app
-    Shortcut { sequences: [StandardKey.Open]; onActivated: openDialog.open() }
-    Shortcut { sequence: "Ctrl+Shift+E"; enabled: backend.hasProject; onActivated: exportDialog.openDialog() }
-    Shortcut { sequence: "Ctrl+L"; enabled: backend.hasProject; onActivated: win.focusChat() }
-    Shortcut { sequences: ["?", "Ctrl+/"]; enabled: !win.typing; onActivated: shortcutsDialog.open() }
+    Shortcut { sequence: "?"; enabled: !win.typing; onActivated: shortcutsDialog.open() }
 
     // ---------- layout ----------
     ColumnLayout {
@@ -158,24 +163,6 @@ ApplicationWindow {
                     fillMode: Image.PreserveAspectFit
                 }
                 Item { implicitWidth: 12 }
-                Repeater {
-                    model: [
-                        { id: "select", label: "Select", icon: "mouse-pointer-2", key: "V", tip: "Select and move what the agent made" },
-                        { id: "hand", label: "Hand", icon: "hand", key: "H", tip: "Drag to move the view (or hold Space)" },
-                        { id: "pin", label: "Note", icon: "map-pin", key: "C", tip: "Pin a note for the agent on a layer or a region" }
-                    ]
-                    delegate: Btn {
-                        required property var modelData
-                        iconName: modelData.icon
-                        Accessible.name: modelData.label
-                        implicitWidth: 34
-                        leftPadding: 0
-                        rightPadding: 0
-                        active: win.tool === modelData.id
-                        onClicked: win.tool = modelData.id
-                        tip: modelData.tip + " (" + modelData.key + ")"
-                    }
-                }
                 ComboBox {
                     id: workspaceBox
                     visible: backend.hasProject
@@ -216,25 +203,6 @@ ApplicationWindow {
                 Item { Layout.fillWidth: true }
                 Btn { iconName: "undo-2"; tip: "Undo (⌘Z)"; Accessible.name: "Undo"; implicitWidth: 34; leftPadding: 0; rightPadding: 0; enabled: backend.canUndo; onClicked: backend.undo() }
                 Btn { iconName: "redo-2"; tip: "Redo (⇧⌘Z)"; Accessible.name: "Redo"; implicitWidth: 34; leftPadding: 0; rightPadding: 0; enabled: backend.canRedo; onClicked: backend.redo() }
-                Btn {
-                    id: overlayToggle
-                    iconName: "scan-eye"
-                    implicitWidth: 34
-                    leftPadding: 0
-                    rightPadding: 0
-                    active: win.overlaysHidden
-                    Accessible.name: "Hide editor overlays"
-                    Accessible.checkable: true
-                    Accessible.checked: win.overlaysHidden
-                    tip: win.overlaysHidden ? "Overlays are hidden: showing the clean design. Click to show selection, agent outlines and pins (⇧H)"
-                                            : "Hide selection, agent outlines, pins and markers to see the clean design (⇧H)"
-                    onClicked: win.overlaysHidden = !win.overlaysHidden
-                }
-                Rectangle { width: 1; height: 22; color: Theme.border; Layout.leftMargin: 6; Layout.rightMargin: 6 }
-                Btn { iconName: "minus"; tip: "Zoom out (⌘−)"; Accessible.name: "Zoom out"; implicitWidth: 30; leftPadding: 0; rightPadding: 0; onClicked: win.zoomBy(0.8) }
-                Label { text: Math.round((win.canvas ? win.canvas.zoom : 1) * 100) + "%"; color: Theme.muted; Layout.preferredWidth: 44; horizontalAlignment: Text.AlignHCenter }
-                Btn { iconName: "plus"; tip: "Zoom in (⌘+)"; Accessible.name: "Zoom in"; implicitWidth: 30; leftPadding: 0; rightPadding: 0; onClicked: win.zoomBy(1.25) }
-                Btn { iconName: "maximize"; tip: "Fit the frame (⇧1)"; Accessible.name: "Fit"; implicitWidth: 34; leftPadding: 0; rightPadding: 0; onClicked: win.fitCanvas() }
                 Rectangle { width: 1; height: 22; color: Theme.border; Layout.leftMargin: 6; Layout.rightMargin: 6 }
                 Btn {
                     iconName: "layout-panel-left"
@@ -246,26 +214,6 @@ ApplicationWindow {
                     tip: "Layout: show or hide panels, reset the arrangement. Drag a tab to move a panel; right-click a tab for more."
                 }
                 Btn { text: "Export…"; iconName: "download"; primary: true; onClicked: exportDialog.openDialog() }
-                Btn {
-                    iconName: "ellipsis"
-                    Accessible.name: "More"
-                    implicitWidth: 34
-                    leftPadding: 0
-                    rightPadding: 0
-                    onClicked: moreMenu.open()
-                    tip: "Project: colors, languages, open another project, shortcuts"
-                    Menu {
-                        id: moreMenu
-                        y: parent.height
-                        MenuItem { text: "Colors…"; onTriggered: tokensDialog.open() }
-                        MenuItem { text: "Languages…"; onTriggered: languagesDialog.open() }
-                        MenuSeparator {}
-                        MenuItem { text: "Open another project…\t⌘O"; onTriggered: openDialog.open() }
-                        MenuItem { text: "Save\t⌘S"; onTriggered: backend.saveProject() }
-                        MenuSeparator {}
-                        MenuItem { text: "Keyboard shortcuts\t?"; onTriggered: shortcutsDialog.open() }
-                    }
-                }
             }
         }
 
@@ -350,11 +298,38 @@ ApplicationWindow {
                     }
                 }
             }
+            CanvasToolbar {
+                Layout.fillWidth: true
+                editor: backend
+                tool: win.tool
+                overlaysHidden: win.overlaysHidden
+                snapping: win.snapEnabled
+                rulers: win.rulersVisible
+                grid: win.pixelGridVisible
+                zoom: canvasView.zoom
+                onToolChosen: id => win.tool = id
+                onToggled: what => {
+                    if (what === "overlays") win.overlaysHidden = !win.overlaysHidden
+                    else if (what === "snap") win.snapEnabled = !win.snapEnabled
+                    else if (what === "rulers") win.rulersVisible = !win.rulersVisible
+                    else if (what === "grid") win.pixelGridVisible = !win.pixelGridVisible
+                }
+                onZoomed: what => {
+                    if (what === "out") win.zoomBy(0.8)
+                    else if (what === "in") win.zoomBy(1.25)
+                    else if (what === "fit") win.fitCanvas()
+                    else if (what === "selection") win.fitSelection()
+                    else win.zoomTo(1)
+                }
+            }
             CanvasView {
                 id: canvasView
                 editor: backend
                 tool: win.tool
                 overlays: !win.overlaysHidden
+                snapping: win.snapEnabled
+                rulers: win.rulersVisible
+                pixelGrid: win.pixelGridVisible
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 onToolFinished: win.tool = "select"
@@ -380,6 +355,15 @@ ApplicationWindow {
     Component { id: historyPanel; HistoryPanel { editor: backend } }
     Component { id: memoryPanel; MemoryPanel { editor: backend } }
     Component { id: videoPanel; VideoPanel { editor: backend } }
+    Component {
+        id: variantsPanel
+        VariantsPanel {
+            editor: backend
+            onShowOnCanvas: id => { backend.openFrame(id); backend.select(id); win.showPanel("canvas") }
+            onAskForDifferent: text => { win.showPanel("chat"); backend.chatSend(text) }
+        }
+    }
+    Component { id: previewPanel; PreviewPanel { editor: backend } }
     Component { id: connectPanel; ConnectPanel { editor: backend; onToast: text => win.toast(text, false) } }
     Component {
         id: chatPanel
@@ -397,7 +381,8 @@ ApplicationWindow {
         mainWindow: win
         components: ({
             layers: layersPanel, canvas: canvasPanel, inspector: inspectorPanel, notes: notesPanel,
-            history: historyPanel, memory: memoryPanel, video: videoPanel, connect: connectPanel, chat: chatPanel
+            history: historyPanel, memory: memoryPanel, video: videoPanel, connect: connectPanel, chat: chatPanel,
+            variants: variantsPanel, preview: previewPanel
         })
     }
 
@@ -868,14 +853,19 @@ ApplicationWindow {
                 ["Zoom to 100%", "⌘0"],
                 ["Next / previous frame", "N   /   ⇧N"]] },
             { name: "Pointing", rows: [
-                ["Select", "V   (click a layer on the canvas)"],
+                ["Select", "V   (click; ⇧ click adds; drag on empty space selects a box)"],
+                ["Draw a rectangle / ellipse / text / frame", "R   /   O   /   T   /   F   (drag, ⇧ for a square)"],
                 ["Pin a note for the agent", "C   (click a layer, or drag a region)"],
+                ["Move without snapping / copy while moving", "hold ⌘   /   hold ⌥ and drag"],
                 ["Next / previous layer", "Tab   /   ⇧Tab"],
                 ["Edit the selected text", "Return"],
                 ["Hide / show the overlays (selection, agent outlines, pins)", "⇧H"],
                 ["Deselect", "Esc"]] },
             { name: "Edit", rows: [
                 ["Undo / redo", "⌘Z   /   ⇧⌘Z"],
+                ["Copy / paste / duplicate", "⌘C   /   ⌘V   /   ⌘D"],
+                ["Select all", "⌘A"],
+                ["Group / ungroup", "⌘G   /   ⇧⌘G"],
                 ["Move the selection", "arrows 1 px,  ⇧ arrows 10 px"],
                 ["Bring forward / send back", "⌘]   /   ⌘["],
                 ["Bring to front / send to back", "⌥⌘]   /   ⌥⌘["],

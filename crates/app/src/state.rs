@@ -27,6 +27,8 @@ const LOG_ROWS: usize = 60;
 
 type Res<T> = Result<T, String>;
 
+mod arrange_ops;
+
 struct Server {
     // The runtime owns the server's tasks; it must outlive `running`.
     runtime: tokio::runtime::Runtime,
@@ -58,6 +60,10 @@ pub struct EditorState {
     layout_file: Option<PathBuf>,
     /// The frames of the video the Video tab plays, drawn on a worker thread.
     preview: Option<PreviewSlot>,
+    /// The Preview and Variants panels: the user's choice of preview and drawn thumbnails.
+    showcase: crate::showcase::ShowcaseSession,
+    /// What the user copied (`od_core::arrange::Clip` as JSON), kept in memory.
+    clipboard: Option<String>,
 }
 
 /// A running or finished preview and what it was made from: it is stale when the project has
@@ -105,12 +111,17 @@ pub struct Snapshot {
     pub jobs: String,
     pub workspaces: String,
     pub brief: String,
+    pub showcase: String,
     pub tokens: String,
     pub languages: String,
     pub language: String,
     pub chat: String,
     pub can_undo: bool,
     pub can_redo: bool,
+    pub selection_rects: String,
+    pub can_paste: bool,
+    pub can_group: bool,
+    pub can_ungroup: bool,
     pub mcp_running: bool,
     pub mcp_url: String,
 }
@@ -148,6 +159,8 @@ impl EditorState {
             layout: crate::layout::Layout::default(),
             layout_file: None,
             preview: None,
+            showcase: Default::default(),
+            clipboard: None,
         }
     }
 
@@ -177,6 +190,7 @@ impl EditorState {
         self.active_frame = first_frame;
         self.language = None;
         self.agent_changed.clear();
+        self.showcase.reset();
     }
 
     /// Creates a project folder with one frame of the given size (a store preset or custom).
@@ -337,6 +351,7 @@ impl EditorState {
             self.active_frame = None;
             self.language = None;
             self.agent_changed.clear();
+            self.showcase.reset();
         }
     }
 
@@ -879,17 +894,6 @@ impl EditorState {
         let id = created.first().ok_or("nothing was created")?.clone();
         self.select(Some(id.as_str()))?;
         Ok(id.to_string())
-    }
-
-    pub fn delete_selected(&mut self) -> Res<()> {
-        let Some(id) = self.selected() else {
-            return Ok(());
-        };
-        self.apply_user(&[Operation::Delete { id: id.clone() }])?;
-        if self.active_frame.as_ref() == Some(&id) {
-            self.active_frame = None;
-        }
-        Ok(())
     }
 
     /// Moves a node one step in its parent's stacking order (`+1` forward, `-1` backward).
@@ -1580,6 +1584,66 @@ impl EditorState {
         answer_skill_offer_in(&home, &config, install)
     }
 
+    // ---- showcase: the Preview and Variants panels ----
+
+    fn project_folder(&self) -> Res<PathBuf> {
+        self.with_ws(|ws| {
+            ws.dir()
+                .map(Path::to_path_buf)
+                .ok_or_else(|| "the project has no folder".to_string())
+        })
+    }
+
+    /// Stores the user's pick and tells the chat agent when one is connected; the agent can
+    /// also read it with `get_variants`. Returns whether the chat was told.
+    pub fn pick_variant(&mut self, id: &str) -> Res<bool> {
+        let dir = self.project_folder()?;
+        let mut saved = od_agent::showcase::load(&dir);
+        let label = saved.pick(id).map_err(|e| e.to_string())?.label.clone();
+        od_agent::showcase::save(&dir, &saved).map_err(|e| e.to_string())?;
+        if self.chat.is_none() {
+            return Ok(false);
+        }
+        self.chat_send(&format!("I pick variant {label}. Continue with it."))
+            .map_err(|e| format!("Your pick is saved, but the chat did not get it: {e}"))?;
+        Ok(true)
+    }
+
+    pub fn dismiss_variants(&mut self) -> Res<()> {
+        let dir = self.project_folder()?;
+        let mut saved = od_agent::showcase::load(&dir);
+        if saved.clear_variants() {
+            od_agent::showcase::save(&dir, &saved).map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+
+    /// The user looks at something else than the agent chose, until `clear_preview_override`.
+    pub fn set_preview_override(&mut self, kind: &str, target: &str) -> Res<()> {
+        let chosen = self.with_ws(|ws| crate::showcase::check_override(ws, kind, target))?;
+        self.showcase.preview_override = Some(chosen);
+        Ok(())
+    }
+
+    pub fn clear_preview_override(&mut self) {
+        self.showcase.preview_override = None;
+    }
+
+    /// Any frame drawn clean, as a PNG data URL (cached until the document changes).
+    pub fn render_frame_image(&self, id: &str, max_side: u32) -> Res<String> {
+        self.with_ws(|ws| {
+            self.showcase
+                .frame_image(ws, self.language.as_deref(), id, max_side)
+        })
+    }
+
+    /// For an agent's showcase tool call: the panel to reveal and what to tell the user.
+    pub fn showcase_notice(&self, tool: &str, who: &str) -> Option<(&'static str, String)> {
+        self.with_ws(|ws| Ok(crate::showcase::notice(ws, tool, who)))
+            .ok()
+            .flatten()
+    }
+
     // ---- panel layout ----
 
     /// Loads the saved arrangement of panels (or the default). With `persist` false (the window
@@ -1833,7 +1897,7 @@ impl EditorState {
             active_frame: frame.map(NodeId::to_string).unwrap_or_default(),
             frame_size: frame_size.to_string(),
             selection: to_string(&selection),
-            selection_bounds: rect_json(selection.first().and_then(&in_frame)).to_string(),
+            selection_bounds: arrange_ops::union_bounds_json(doc, frame, &selection),
             inspector: inspector.unwrap_or(Value::Null).to_string(),
             annotations: to_string(&annotations),
             checkpoints: to_string(ws.session.checkpoints()),
@@ -1849,6 +1913,7 @@ impl EditorState {
             jobs: self.jobs_json(),
             workspaces: workspaces_of(&ws),
             brief: brief_of(&ws),
+            showcase: crate::showcase::view(&ws, &self.showcase, frame).to_string(),
             overflows: to_string(&frame.map(|f| collect_overflows(doc, f)).unwrap_or_default()),
             tokens: to_string(&view::tokens(doc)),
             languages: to_string(&view::locales(doc)),
@@ -1864,6 +1929,10 @@ impl EditorState {
                 .to_string(),
             can_undo: ws.session.can_undo(),
             can_redo: ws.session.can_redo(),
+            selection_rects: arrange_ops::rects_json(doc, frame, &selection),
+            can_paste: self.clipboard.is_some(),
+            can_group: od_core::arrange::can_group(doc, &selection),
+            can_ungroup: od_core::arrange::can_ungroup(doc, &selection),
             mcp_running: self.server.is_some(),
             mcp_url: self
                 .server
@@ -3382,5 +3451,120 @@ mod tests {
         s.undo().unwrap();
         let videos: Value = serde_json::from_str(&s.snapshot().videos).unwrap();
         assert_eq!(videos[0]["audio"]["file"], "media/song.mp3");
+    }
+    fn offer_two(s: &EditorState) -> (Vec<String>, Value) {
+        let frames: Vec<String> = serde_json::from_str::<Vec<Value>>(&s.snapshot().frames)
+            .unwrap()
+            .iter()
+            .map(|f| f["id"].as_str().unwrap().to_string())
+            .collect();
+        let dir = s.project_dir().unwrap();
+        let opts: Vec<_> = frames
+            .iter()
+            .map(|f| od_agent::showcase::NewOption {
+                label: format!("Look {f}"),
+                kind: od_agent::showcase::Kind::Frame,
+                target: f.clone(),
+                note: None,
+            })
+            .collect();
+        let mut saved = od_agent::showcase::load(&dir);
+        s.with_ws(|ws| {
+            saved
+                .offer(ws, "Directions", None, &opts, "agent")
+                .map(|_| ())
+                .map_err(|e| e.to_string())
+        })
+        .unwrap();
+        od_agent::showcase::save(&dir, &saved).unwrap();
+        (
+            frames,
+            serde_json::from_str(&s.snapshot().showcase).unwrap(),
+        )
+    }
+
+    #[test]
+    fn a_pick_is_stored_for_get_variants_and_the_snapshot_without_a_chat() {
+        let (mut s, _t) = state();
+        s.create_node("frame", 0.0, 0.0, 120.0, 90.0).unwrap();
+        let (frames, shown) = offer_two(&s);
+        assert_eq!(shown["variants"]["picked"], Value::Null);
+        assert!(!s.pick_variant("v2").unwrap(), "no chat to tell");
+        let after: Value = serde_json::from_str(&s.snapshot().showcase).unwrap();
+        assert_eq!(after["variants"]["picked"], "v2");
+        let stored = od_agent::showcase::load(&s.project_dir().unwrap());
+        assert_eq!(
+            stored.variants.unwrap().picked_option().unwrap().target,
+            frames[1]
+        );
+        assert!(s.pick_variant("v9").is_err());
+        s.dismiss_variants().unwrap();
+        assert!(
+            serde_json::from_str::<Value>(&s.snapshot().showcase).unwrap()["variants"].is_null()
+        );
+    }
+
+    #[test]
+    fn picking_with_a_chat_connected_tells_the_agent_which_variant() {
+        let (mut s, t) = state();
+        s.create_node("frame", 0.0, 0.0, 120.0, 90.0).unwrap();
+        offer_two(&s);
+        let (tx, rx) = std::sync::mpsc::channel();
+        let hook: ChatHook = Arc::new(move |input| {
+            let _ = tx.send(input);
+        });
+        let command = format!("\"{}\" normal", mock_agent().display());
+        s.start_mcp(&t.path().join("token"), Arc::new(|_| {}))
+            .unwrap();
+        s.chat_start(&command, hook).unwrap();
+        pump(&mut s, &rx, |c| c["status"] == "ready");
+        assert!(s.pick_variant("v1").unwrap());
+        let chat = pump(&mut s, &rx, |c| {
+            c["messages"]
+                .as_array()
+                .is_some_and(|m| m.iter().any(|m| m["role"] == "user"))
+        });
+        let said: Vec<&str> = chat["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|m| m["role"] == "user")
+            .map(|m| m["text"].as_str().unwrap())
+            .collect();
+        assert_eq!(said.len(), 1);
+        assert!(
+            said[0].starts_with("I pick variant Look ") && said[0].ends_with(". Continue with it."),
+            "{said:?}"
+        );
+        s.chat_stop();
+    }
+
+    #[test]
+    fn a_frame_that_is_not_open_renders_to_a_png_and_the_preview_override_is_checked() {
+        let (mut s, _t) = state();
+        let first = s.snapshot().active_frame;
+        s.create_node("frame", 0.0, 0.0, 120.0, 90.0).unwrap();
+        assert_ne!(
+            s.snapshot().active_frame,
+            first,
+            "the new frame is the open one"
+        );
+        let url = s.render_frame_image(&first, 64).unwrap();
+        let png = STANDARD
+            .decode(url.strip_prefix("data:image/png;base64,").unwrap())
+            .unwrap();
+        assert_eq!(&png[..4], b"\x89PNG");
+        assert_eq!(u32::from_be_bytes(png[16..20].try_into().unwrap()), 64);
+        assert!(s.render_frame_image("n_99999", 64).is_err());
+
+        let view =
+            |s: &EditorState| -> Value { serde_json::from_str(&s.snapshot().showcase).unwrap() };
+        assert_eq!(view(&s)["preview"]["chosen_by"], "default");
+        s.set_preview_override("frame", &first).unwrap();
+        assert_eq!(view(&s)["preview"]["target"], first.as_str());
+        assert_eq!(view(&s)["preview"]["chosen_by"], "user");
+        assert!(s.set_preview_override("frame", "n_99999").is_err());
+        s.clear_preview_override();
+        assert_eq!(view(&s)["preview"]["chosen_by"], "default");
     }
 }

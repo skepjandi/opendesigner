@@ -122,6 +122,7 @@ pub fn definitions() -> Vec<Value> {
     let mut all = core_definitions();
     all.extend(crate::assets::tools::definitions());
     all.extend(crate::assets::logo::definitions());
+    all.extend(showcase_definitions());
     all
 }
 
@@ -145,7 +146,8 @@ fn core_definitions() -> Vec<Value> {
         tool(
             "get_playbook",
             "Craft guidance for making work that is not mediocre. Topics: design (images), style \
-             (named looks with rules), video, motion (timings, easing, recipes), formats (sizes and \
+             (named looks with rules), video (start with the inventory of media, footage, sounds and \
+             assets), motion (timings, easing, recipes), formats (sizes and \
              safe zones), logo (identity design). Call it with no topic for the list; read the ones that apply before you \
              build, not after.",
             json!({"topic": {"type": "string", "enum": ["design", "style", "video", "motion", "formats", "logo"]}}),
@@ -320,9 +322,11 @@ fn core_definitions() -> Vec<Value> {
         ),
         tool(
             "list_media",
-            "Images the user has imported into the project (media/), with their size in pixels. Use \
-             a path as the `image` of an image node. If the one you need is not here, use find_files \
-             and import_file (when the user allows it) or ask the user to add it in the app.",
+            "Images the user has imported into the project (media/), with their size in pixels; \
+             pictures made by make_asset and import_asset land here too. Use a path as the `image` \
+             of an image node (in a video, in a frame that is a clip or an overlay). If the one you \
+             need is not here, search_assets, or use find_files and import_file (when the user \
+             allows it) or ask the user to add it in the app.",
             json!({}),
             &[],
             true,
@@ -414,7 +418,8 @@ fn core_definitions() -> Vec<Value> {
             "The project's videos: each is a timeline of clips that show design frames, with the \
              time every clip starts, its transition (which overlaps the clip before it) and its zoom. \
              A video may also have one sound track (the file, when it starts and its volume). \
-             Change them with apply_ops (create_video, add_clip, set_clip, ...); look at one moment \
+             Start a video with list_media, list_footage, list_sounds and search_assets to see what \
+             you can use. Change them with apply_ops (create_video, add_clip, add_overlay, set_clip, ...); look at one moment \
              with render_video_frame and write the MP4 with export_video.",
             json!({}),
             &[],
@@ -649,6 +654,7 @@ pub fn call(ctx: &mut CallCtx, name: &str, args: Value) -> Result<Output, ToolEr
             crate::assets::tools::call(dir.as_deref(), n, args)
         }
         "get_playbook" => get_playbook(parse(args)?),
+        n if SHOWCASE_TOOLS.contains(&n) => showcase_call(ctx, n, args),
         "review_frame" => review_frame_tool(ctx, parse(args)?),
         "list_formats" => Ok(Output::json(&crate::formats::sections_json())),
         "get_brief" => Ok(Output::json(&brief_of(ctx).to_json())),
@@ -2026,4 +2032,163 @@ fn switch_workspace(
     ctx.ws.save()?;
     *ctx.ws = next;
     Ok(Output::json(&json!({"open": a.name, "created": create})))
+}
+
+// ---- showcase: the Preview and Variants panels ----
+
+/// The tools that change what the Preview and Variants panels show.
+pub const SHOWCASE_TOOLS: &[&str] = &[
+    "show_preview",
+    "offer_variants",
+    "get_variants",
+    "clear_variants",
+];
+
+/// Tools whose result the window must pick up although they touch no layer.
+pub fn changes_showcase(name: &str) -> bool {
+    matches!(name, "show_preview" | "offer_variants" | "clear_variants")
+}
+
+fn showcase_definitions() -> Vec<Value> {
+    let text = |d: &str| json!({"type": "string", "description": d});
+    let kind = json!({"type": "string", "enum": ["frame", "video", "image"],
+        "description": "frame: a frame id from list_pages or get_tree. video: a video id from list_videos. image: a media path from list_media."});
+    vec![
+        tool(
+            "show_preview",
+            "Show the user the end product, in the Preview panel: the clean frame, video or image \
+             they asked for, without editor handles. You decide what that is: call it as soon as \
+             there is a deliverable (the hero frame, the finished video) and again whenever you \
+             replace it with a better one. The user can look at something else; their choice is \
+             theirs and your call stays the default. The canvas is for working; this is for the result.",
+            json!({
+                "kind": kind,
+                "target": text("The frame id, video id or media path."),
+                "title": text("A short name for it, shown above the picture."),
+                "note": text("One line for the user: what they are looking at, or what changed.")
+            }),
+            &["kind", "target"],
+            false,
+        ),
+        tool(
+            "offer_variants",
+            "Offer the user 2 to 8 options to choose from, in the Variants panel (not on the \
+             canvas). Build each option first as its own clearly named frame (or video), then call \
+             this with one entry per option. It replaces any open set. Then tell the user to pick in \
+             the Variants panel and STOP: do not build the full set until get_variants shows their \
+             pick. A frame, video or image can appear in one option only.",
+            json!({
+                "title": text("What is being chosen, for example \"Three directions for the hero\"."),
+                "question": text("Optional: what you want the user to decide on."),
+                "options": {
+                    "type": "array", "minItems": 2, "maxItems": 8,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "label": text("A short name, for example \"Bold and dark\"."),
+                            "kind": kind,
+                            "target": text("The frame id, video id or media path."),
+                            "note": text("One line: what is different about this option.")
+                        },
+                        "required": ["label", "kind", "target"],
+                        "additionalProperties": false
+                    }
+                }
+            }),
+            &["title", "options"],
+            false,
+        ),
+        tool(
+            "get_variants",
+            "Read the open set of options and which one the user picked (`status`: none, waiting or \
+             picked). Call it after offer_variants and before you build on a choice; if it says \
+             waiting, tell the user you are waiting for their pick and stop.",
+            json!({}),
+            &[],
+            true,
+        ),
+        tool(
+            "clear_variants",
+            "Close the open set of options once the choice is made and used.",
+            json!({}),
+            &[],
+            false,
+        ),
+    ]
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ShowPreviewArgs {
+    kind: crate::showcase::Kind,
+    target: String,
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    note: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct OfferVariantsArgs {
+    title: String,
+    #[serde(default)]
+    question: Option<String>,
+    options: Vec<crate::showcase::NewOption>,
+}
+
+fn showcase_call(ctx: &mut CallCtx, name: &str, args: Value) -> Result<Output, ToolError> {
+    let dir = ctx
+        .ws
+        .dir()
+        .map(std::path::Path::to_path_buf)
+        .ok_or_else(|| ToolError(crate::showcase::ShowcaseError::NoFolder.to_string()))?;
+    let mut showcase = crate::showcase::load(&dir);
+    let by = ctx.actor.to_string();
+    let reply = match name {
+        "show_preview" => {
+            let a: ShowPreviewArgs = parse(args)?;
+            showcase
+                .set_preview(
+                    ctx.ws,
+                    a.kind,
+                    &a.target,
+                    a.title.as_deref(),
+                    a.note.as_deref(),
+                    &by,
+                )
+                .map_err(|e| ToolError(e.to_string()))?;
+            json!({
+                "shown": showcase.preview,
+                "next": "The user sees it in the Preview panel. Call show_preview again when you replace it with a better version.",
+            })
+        }
+        "offer_variants" => {
+            let a: OfferVariantsArgs = parse(args)?;
+            let set = showcase
+                .offer(ctx.ws, &a.title, a.question.as_deref(), &a.options, &by)
+                .map_err(|e| ToolError(e.to_string()))?;
+            json!({
+                "offered": set,
+                "next": "Tell the user to pick one in the Variants panel, then STOP and wait. When they answer, call get_variants to read the pick before you build the full set.",
+            })
+        }
+        "clear_variants" => json!({"cleared": showcase.clear_variants()}),
+        _ => return Ok(Output::json(&variants_status(&showcase))),
+    };
+    crate::showcase::save(&dir, &showcase).map_err(|e| ToolError(e.to_string()))?;
+    Ok(Output::json(&reply))
+}
+
+fn variants_status(showcase: &crate::showcase::Showcase) -> Value {
+    let Some(set) = &showcase.variants else {
+        return json!({"status": "none", "variants": null, "picked": null,
+            "message": "No options are open. Build each option as its own frame and call offer_variants."});
+    };
+    match set.picked_option() {
+        Some(option) => json!({"status": "picked", "variants": set, "picked": option,
+            "message": format!("The user picked {:?}. Continue with it, then clear_variants.", option.label)}),
+        None => json!({"status": "waiting", "variants": set, "picked": null,
+            "message": "The user has not picked yet. Tell them to choose in the Variants panel and wait; do not build the full set."}),
+    }
 }

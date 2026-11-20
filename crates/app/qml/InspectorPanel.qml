@@ -12,6 +12,26 @@ Rectangle {
     color: Theme.panel
 
     readonly property var node: editor.inspector && editor.inspector !== "null" ? JSON.parse(editor.inspector) : null
+    readonly property var selIds: editor.selection ? JSON.parse(editor.selection) : []
+    readonly property bool multi: selIds.length > 1
+    readonly property var bounds: editor.selectionBounds && editor.selectionBounds !== "null" ? JSON.parse(editor.selectionBounds) : null
+    // keep the width and height in proportion while one is typed (this session only)
+    property bool lockAspect: false
+    property real stackGap: 16
+    function setSize(prop, text) {
+        const v = parseFloat(text)
+        if (isNaN(v) || !node) return
+        if (!lockAspect || node.width <= 0 || node.height <= 0) { setNum(prop, text); return }
+        const w = prop === "width" ? v : v * node.width / node.height
+        const h = prop === "height" ? v : v * node.height / node.width
+        editor.resizeNode(node.id, node.x, node.y, w, h)
+    }
+    function moveUnion(axis, text) {
+        const v = parseFloat(text)
+        if (isNaN(v) || !bounds) return
+        if (axis === "x") editor.moveSelected(v - bounds.x, 0)
+        else editor.moveSelected(0, v - bounds.y)
+    }
     readonly property var overflow: {
         const all = editor.overflows ? JSON.parse(editor.overflows) : []
         return node ? all.find(o => o.id === node.id) || null : null
@@ -54,7 +74,7 @@ Rectangle {
     }
 
     ScrollView {
-        visible: !!root.node
+        visible: !!root.node && !root.multi
         anchors.fill: parent
         contentWidth: availableWidth
         contentHeight: inspectorColumn.implicitHeight + 2 * Theme.pad + 80
@@ -101,12 +121,23 @@ Rectangle {
                 Field {
                     Layout.fillWidth: true
                     text: root.node ? root.num(root.node.width) : ""
-                    onCommitted: v => root.setNum("width", v)
+                    onCommitted: v => root.setSize("width", v)
                 }
                 Field {
                     Layout.fillWidth: true
                     text: root.node ? root.num(root.node.height) : ""
-                    onCommitted: v => root.setNum("height", v)
+                    onCommitted: v => root.setSize("height", v)
+                }
+                Btn {
+                    iconName: root.lockAspect ? "lock" : "lock-open"
+                    implicitWidth: 28
+                    leftPadding: 0
+                    rightPadding: 0
+                    active: root.lockAspect
+                    Accessible.checkable: true
+                    Accessible.checked: root.lockAspect
+                    tip: root.lockAspect ? "Width and height keep their proportion (click to unlock)" : "Lock the proportion of width and height"
+                    onClicked: root.lockAspect = !root.lockAspect
                 }
             }
             Row2 {
@@ -287,6 +318,72 @@ Rectangle {
                 text: root.node ? root.node.child_count + " child layers" : ""
                 color: Theme.muted
                 font.pixelSize: 12
+            }
+        }
+    }
+
+    // several layers: what they are together, and how to line them up
+    ScrollView {
+        visible: root.multi
+        anchors.fill: parent
+        contentWidth: availableWidth
+        contentHeight: multiColumn.implicitHeight + 2 * Theme.pad + 80
+        clip: true
+        ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+
+        ColumnLayout {
+            id: multiColumn
+            width: root.width - 2 * Theme.pad
+            x: Theme.pad
+            y: Theme.pad
+            spacing: 8
+
+            Label {
+                text: root.selIds.length + " LAYERS SELECTED"
+                color: Theme.accent
+                font.pixelSize: 11
+                font.bold: true
+            }
+            Row2 {
+                label: "Position"
+                Field {
+                    Layout.fillWidth: true
+                    text: root.bounds ? root.num(root.bounds.x) : ""
+                    onCommitted: v => root.moveUnion("x", v)
+                }
+                Field {
+                    Layout.fillWidth: true
+                    text: root.bounds ? root.num(root.bounds.y) : ""
+                    onCommitted: v => root.moveUnion("y", v)
+                }
+            }
+            Row2 {
+                label: "Size"
+                Label { Layout.fillWidth: true; color: Theme.muted; font.pixelSize: 12; text: root.bounds ? root.num(root.bounds.width) : "" }
+                Label { Layout.fillWidth: true; color: Theme.muted; font.pixelSize: 12; text: root.bounds ? root.num(root.bounds.height) : "" }
+            }
+            Row2 {
+                label: "Align"
+                ArrangeGroup { editor: root.editor; group: "align"; count: root.selIds.length }
+            }
+            Row2 {
+                label: "Distribute"
+                ArrangeGroup { editor: root.editor; group: "distribute"; count: root.selIds.length }
+            }
+            Row2 {
+                label: "Stack"
+                ArrangeGroup { editor: root.editor; group: "stack"; count: root.selIds.length; gap: root.stackGap }
+                Field {
+                    Layout.preferredWidth: 48
+                    placeholderText: "Gap"
+                    text: root.num(root.stackGap)
+                    onCommitted: v => { const g = parseFloat(v); if (!isNaN(g)) root.stackGap = g }
+                }
+            }
+            Row2 {
+                label: "Layers"
+                Btn { text: "Group"; enabled: root.editor.canGroup === true; onClicked: root.editor.groupSelected() }
+                Btn { text: "Duplicate"; onClicked: root.editor.duplicateSelected() }
             }
         }
     }

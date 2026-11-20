@@ -23,6 +23,9 @@ fn main() {
             "qml/Field.qml",
             "qml/JsonModel.qml",
             "qml/VideoPanel.qml",
+            "qml/VideoTimeline.qml",
+            "qml/VariantsPanel.qml",
+            "qml/PreviewPanel.qml",
             "qml/FormatPicker.qml",
             "qml/StartPanel.qml",
             "qml/LayersPanel.qml",
@@ -39,6 +42,9 @@ fn main() {
             "qml/DockGroup.qml",
             "qml/ChatPanel.qml",
             "qml/CanvasView.qml",
+            "qml/CanvasToolbar.qml",
+            "qml/ArrangeGroup.qml",
+            "qml/AppMenus.qml",
             "qml/SelfTest.qml",
         ]);
     let mut builder = CxxQtBuilder::new_qml_module(module);

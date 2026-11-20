@@ -64,7 +64,8 @@ pub fn definitions() -> Vec<Value> {
             "What assets exist and under which licence: the bundled Lucide icon set, the generators \
              make_asset runs, the packs install_asset_pack can download (with sizes and whether \
              installed), optional external MCP servers for 3D assets, and sources that are only a \
-             link and why. Call it once before you draw an icon, blob, background or pattern by hand.",
+             link and why. Call it once before you draw an icon, blob, background or pattern by hand, \
+             and at the start of every video (with list_media, list_footage and list_sounds).",
             json!({}),
             &[],
             true,
@@ -75,7 +76,8 @@ pub fn definitions() -> Vec<Value> {
             "Search icons, shapes, blobs, backgrounds, patterns, illustrations and sounds by name \
              and tag across the bundled icon set, the generators and every installed pack. Each \
              result has an id and says whether to use import_asset (a stored file) or make_asset \
-             (a generator). Use this before drawing an icon or decoration by hand. Needs no network.",
+             (a generator). Use this before drawing an icon or decoration by hand, and when planning \
+             a video (sounds are listed too). Needs no network.",
             json!({
                 "query": text("Words, e.g. \"arrow right\", \"camera\", \"click\". Empty lists everything of the kind."),
                 "kind": {"type": "string", "enum": KINDS, "description": "Narrow to one kind. font and 3d have nothing built in; the answer says where to look."},
@@ -93,7 +95,8 @@ pub fn definitions() -> Vec<Value> {
              pattern (dots, lines, waves, grid, checker, zigzag, topo) or shape (circle, rounded-rect, \
              triangle, star, polygon, ring, burst). The same seed always gives the same picture. Pass \
              hex colors from list_tokens so it matches the design. Then use the returned file in an \
-             image node. No licence conditions.",
+             image node. No licence conditions. For a video: make the background or texture the \
+             video's size, put it in an image node of a frame, and use that frame as a clip or overlay.",
             json!({
                 "generator": {"type": "string", "enum": ["blob", "gradient", "aurora", "grain", "pattern", "shape"]},
                 "width": side("Pixels."),
@@ -114,7 +117,9 @@ pub fn definitions() -> Vec<Value> {
              and drawn as a crisp PNG at the size you ask for in media/; a PNG or sound is copied as \
              is. A sidecar next to it names the source and licence. Returns the media/ file and, when \
              the licence asks for it, the credit line you must show with the work (say it in your \
-             closing message and keep it in the credits). Keep one icon set per design.",
+             closing message and keep it in the credits). Keep one icon set per design. For a video: \
+             create an image node with this file as `image` in a clip frame or a transparent overlay \
+             frame (apply_ops); an imported sound goes to set_video audio.",
             json!({
                 "id": text("An id from search_assets, e.g. lucide:camera."),
                 "width": side("Draw this wide (the icon is fitted inside, centered)."),

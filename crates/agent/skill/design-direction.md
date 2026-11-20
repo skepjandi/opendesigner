@@ -23,6 +23,10 @@ a first draft.
    copying the same structure so the set reads as one story.
 6. **Critique with the tools.** `review_frame` measures contrast, text size, overflow, margins and
    alignment; fix every finding or say why it stays. `render_preview` again.
+   Asked for options first? Build each as its own named frame, `offer_variants`, tell the user to
+   pick in the Variants panel, wait, and read the pick with `get_variants` before the full set.
+   When the hero frame or the set is good, `show_preview` it: the user judges it in the Preview
+   panel, not on the canvas.
 7. **Ship.** `export_set` / `export_panorama` with the preset (nothing is written if a rule breaks;
    the result carries `before_you_call_it_done` when a frame was never reviewed or changed after its
    last `review_frame`: go back, fix, export again),

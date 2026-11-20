@@ -148,11 +148,21 @@ Rectangle {
                 }
                 HoverHandler { id: hover }
                 TapHandler {
+                    acceptedModifiers: Qt.NoModifier
                     onTapped: {
                         if (row.modelData.kind === "page") return
                         if (row.modelData.kind === "frame") editor.openFrame(row.modelData.id)
                         editor.select(row.modelData.id)
                     }
+                }
+                // Shift or ⌘ (Ctrl) adds the layer to the selection or takes it out
+                TapHandler {
+                    acceptedModifiers: Qt.ShiftModifier
+                    onTapped: if (row.modelData.kind !== "page") editor.toggleSelect(row.modelData.id)
+                }
+                TapHandler {
+                    acceptedModifiers: Qt.ControlModifier
+                    onTapped: if (row.modelData.kind !== "page") editor.toggleSelect(row.modelData.id)
                 }
                 RowLayout {
                     anchors.fill: parent

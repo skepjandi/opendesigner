@@ -18,6 +18,7 @@ pub mod playbook;
 pub mod program;
 pub mod review;
 pub mod server;
+pub mod showcase;
 pub mod skill;
 pub mod synth;
 pub mod token;

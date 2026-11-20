@@ -31,10 +31,22 @@ fn preamble(servers: &[McpServer]) -> String {
          Call get_guidance first: it returns what the user has selected, the notes they pinned, \
          the workspace's brief and what they changed by hand since your last turn. Change the \
          design with apply_ops, look at it with render_preview, and say in the user's terms what \
-         you changed.\n\n{}\n\n{}\n\n",
+         you changed. For a video, first take inventory (list_media, list_footage, list_sounds, \
+         search_assets), then read get_playbook video, and build with the bundled icons and \
+         generated art.\n\n{}\n\n{}\n\n",
         od_agent::playbook::QUALITY_BAR,
         od_agent::mcp_servers::agent_note(&names)
     )
+}
+
+/// What goes to the agent for `text`. The first message carries the preamble, except a slash
+/// command: the agent only recognizes `/name` at the start of the prompt, so a command goes out
+/// untouched and the preamble waits for the first message that is not one.
+fn prompt_text(text: &str, preamble_pending: &mut bool, servers: &[McpServer]) -> String {
+    if text.starts_with('/') || !std::mem::take(preamble_pending) {
+        return text.to_string();
+    }
+    format!("{}{text}", preamble(servers))
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -425,11 +437,7 @@ impl Chat {
             self.push(json!({"role": "user", "text": text}));
         }
         self.plan.clear();
-        let prompt = if std::mem::take(&mut self.first_prompt) {
-            format!("{}{text}", preamble(&self.servers))
-        } else {
-            text.to_string()
-        };
+        let prompt = prompt_text(text, &mut self.first_prompt, &self.servers);
         self.status = Status::Busy;
         let _enter = self.runtime.enter();
         session.prompt(&prompt, events);
@@ -732,6 +740,18 @@ mod tests {
 
     fn chat() -> Chat {
         Chat::new().unwrap()
+    }
+
+    #[test]
+    fn a_slash_command_goes_out_as_typed_and_keeps_the_preamble_for_the_next_message() {
+        let mut pending = true;
+        assert_eq!(prompt_text("/compact", &mut pending, &[]), "/compact");
+        assert!(pending, "a command does not use up the preamble");
+        let first = prompt_text("make an icon", &mut pending, &[]);
+        assert!(first.starts_with("You are connected to OpenDesigner"));
+        assert!(first.ends_with("make an icon"));
+        assert_eq!(prompt_text("more", &mut pending, &[]), "more");
+        assert_eq!(prompt_text("/model x", &mut pending, &[]), "/model x");
     }
 
     #[test]
