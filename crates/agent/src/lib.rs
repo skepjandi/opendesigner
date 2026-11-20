@@ -18,6 +18,7 @@ pub mod mcp_servers;
 pub mod memory;
 pub mod motion;
 pub mod playbook;
+pub mod plugin;
 pub mod program;
 pub mod review;
 pub mod server;
