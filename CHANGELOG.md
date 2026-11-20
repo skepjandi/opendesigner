@@ -8,6 +8,12 @@ All notable changes to OpenDesigner are documented here.
 
 ## 2026-11-23
 
+### feat(agent): four more sound packs
+
+**Area:** `feat(agent)`
+
+Kenney Sci-fi Sounds, Digital Audio, RPG Audio and Music Jingles (all CC0, about 9 MB together) join the downloadable packs; installed only after the user's yes, like the others.
+
 ### fix(agent): sounds differ between videos
 
 **Area:** `fix(agent)`
