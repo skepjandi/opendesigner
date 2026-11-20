@@ -12,6 +12,7 @@ use od_core::{
 };
 mod serve;
 mod skillcmd;
+mod sound;
 
 use od_agent::export::{Plan, export_assets};
 use od_render::RenderError;
@@ -256,6 +257,16 @@ enum Command {
         /// opencode, cursor or other.
         #[arg(long, default_value = "claude-code")]
         agent: String,
+    },
+    /// Sound tracks, pauses and waveforms of a video.
+    Sound {
+        #[command(subcommand)]
+        action: sound::SoundAction,
+    },
+    /// Captions of a video: import a transcript, set a style.
+    Captions {
+        #[command(subcommand)]
+        action: sound::CaptionsAction,
     },
     /// Install, inspect or remove the Agent Skill that teaches coding agents to use OpenDesigner.
     Skill {
@@ -518,6 +529,26 @@ fn run(cli: Cli) -> Result<(), CliError> {
                 }
                 if v.motion_blur > 0 {
                     println!("  motion blur\t{} pictures per frame", v.motion_blur);
+                }
+                for t in &v.tracks {
+                    println!(
+                        "  sound track\t{}\t{}\t{}\tstarts {} ms\tvolume {:.2}{}",
+                        t.id,
+                        t.role.name(),
+                        t.file,
+                        t.start_ms,
+                        t.gain,
+                        match t.duck {
+                            Some(d) => format!("\tducks under the voice (depth {:.2})", d.depth),
+                            None => String::new(),
+                        }
+                    );
+                }
+                for q in &v.captions.cues {
+                    println!(
+                        "  caption\t{}\t{} to {} ms\t{}",
+                        q.id, q.start_ms, q.end_ms, q.text
+                    );
                 }
             }
         }
@@ -794,6 +825,8 @@ fn run(cli: Cli) -> Result<(), CliError> {
             rotate_token,
             agent,
         } => serve::run(&dir, port, show_token, rotate_token, &agent)?,
+        Command::Sound { action } => sound::sound(action)?,
+        Command::Captions { action } => sound::captions(action)?,
         Command::Skill { action } => skillcmd::run(action)?,
     }
     Ok(())

@@ -452,3 +452,133 @@ fn a_3d_device_is_printed_and_animated_from_the_command_line() {
     assert!(!out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains("unknown move"));
 }
+
+/// Sound tracks, captions and the sound tools, headless: the same tools the MCP server offers.
+#[test]
+fn sound_tracks_captions_and_pauses_work_from_the_command_line() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("v.od");
+    let dir_s = s(&dir);
+    ok(&["new", dir_s, "--name", "Sound"]);
+    let apply = |ops: serde_json::Value| {
+        let file = tmp.path().join("ops.json");
+        fs::write(&file, ops.to_string()).unwrap();
+        ok(&["apply", dir_s, s(&file)])
+    };
+    let made = apply(serde_json::json!([
+        {"op": "create", "parent": "n_2", "node": {"kind": "frame", "name": "One", "width": 200, "height": 400, "fill": "#ff0000"}},
+        {"op": "create_video", "name": "Teaser", "fps": 10, "width": 100, "height": 200}
+    ]));
+    let receipt: serde_json::Value = serde_json::from_str(&made).unwrap();
+    let ids: Vec<String> = receipt["created"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap().to_string())
+        .collect();
+    let video = ids.iter().find(|i| i.starts_with("v_")).unwrap();
+    let frame = ids[0].clone();
+    apply(
+        serde_json::json!([{"op": "add_clip", "video": video, "frame": frame, "duration_ms": 2000}]),
+    );
+
+    // a sound in the project
+    let made = od_agent::synth::make(
+        &dir,
+        &od_agent::synth::Spec {
+            kind: od_agent::synth::Kind::Hit,
+            duration_ms: 900,
+            seed: 1,
+            pitch_hz: None,
+            bpm: None,
+            bars: None,
+            stereo: false,
+        },
+        Some("bed"),
+    )
+    .unwrap();
+    assert!(made.file.starts_with("media/"), "{}", made.file);
+    let added = ok(&[
+        "sound",
+        "add",
+        dir_s,
+        "--video",
+        video,
+        "--file",
+        "media/bed.wav",
+        "--role",
+        "voice",
+        "--gain",
+        "0.4",
+    ]);
+    assert!(added.contains("\"track\""), "{added}");
+    let listing = ok(&["videos", dir_s]);
+    assert!(
+        listing.contains("sound track") && listing.contains("voice"),
+        "{listing}"
+    );
+
+    ok(&[
+        "sound",
+        "set",
+        dir_s,
+        "--video",
+        video,
+        "--track-id",
+        "a1",
+        "--pan",
+        "-0.5",
+    ]);
+    ok(&[
+        "sound",
+        "remove",
+        dir_s,
+        "--video",
+        video,
+        "--track-id",
+        "a1",
+    ]);
+
+    // captions from a script and from a transcript file
+    let scripted = ok(&[
+        "captions",
+        "script",
+        dir_s,
+        "--video",
+        video,
+        "--text",
+        "Hello there. This is a test.",
+    ]);
+    assert!(scripted.contains("\"cues\""), "{scripted}");
+    let srt = tmp.path().join("t.srt");
+    fs::write(&srt, "1\n00:00:00,500 --> 00:00:01,500\nHello there\n").unwrap();
+    let imported = ok(&[
+        "captions",
+        "import",
+        dir_s,
+        "--video",
+        video,
+        "--format",
+        "srt",
+        "--from",
+        s(&srt),
+    ]);
+    assert!(imported.contains("\"cues\": 1"), "{imported}");
+    ok(&[
+        "captions", "style", dir_s, "--video", video, "--preset", "karaoke",
+    ]);
+    ok(&["captions", "clear", dir_s, "--video", video]);
+
+    // a sound that is not there is refused with a reason
+    let out = od(&[
+        "sound",
+        "add",
+        dir_s,
+        "--video",
+        video,
+        "--file",
+        "media/missing.wav",
+    ]);
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("missing.wav"));
+}
