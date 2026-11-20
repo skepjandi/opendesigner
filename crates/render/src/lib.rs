@@ -101,6 +101,12 @@ struct Ctx<'a> {
     devices: &'a HashMap<NodeId, Arc<Pixmap>>,
 }
 
+/// The widest line and the height of all lines of `node`'s text, in document units (a box with
+/// no width does not wrap). `None` when the node has no text to draw.
+pub fn measure_text(node: &Node) -> Option<(f32, f32)> {
+    text::measure(node)
+}
+
 /// Text in `node` and below that wraps to more rows than its box is tall. A box with no width
 /// does not wrap and one with no height has nothing to overflow, so neither is checked.
 pub fn check_text(node: &Node) -> Vec<Warning> {
