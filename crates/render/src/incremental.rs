@@ -19,8 +19,10 @@ use tiny_skia::Pixmap;
 
 use crate::{RenderError, draw_rows, frame_geometry, text};
 
-/// Rows in one tile at the drawn scale.
-pub const TILE_ROWS: u32 = 32;
+/// How many tiles a frame is cut into. The rows of a tile follow from the frame's height: a
+/// frame is walked once per tile, so few tiles keep the first draw cheap, and an edit that
+/// touches one node redraws the one or two tiles it reaches.
+pub const TILES: u32 = 8;
 /// Rows added around every dirty span: anti-aliasing reaches a pixel past a path's bounds.
 const SPAN_PAD: i32 = 2;
 
@@ -48,7 +50,9 @@ struct Item {
 }
 
 struct Snapshot {
-    index: HashMap<NodeId, usize>,
+    /// The node's position in `items`, by the hash of its id (the id itself is in the item, so a
+    /// hash that lands on another node is caught).
+    index: HashMap<u64, usize>,
     items: Vec<Item>,
     has_device: bool,
 }
@@ -79,7 +83,7 @@ impl Retained {
             width: u64::from(w),
             height: u64::from(h),
         })?;
-        let all: Vec<u32> = (0..tile_count(h)).collect();
+        let all = tile_tops(h);
         draw_tiles(doc, node, scale, project_dir, &mut pixmap, &all)?;
         Ok(Some(Retained {
             frame: frame.clone(),
@@ -132,26 +136,38 @@ impl Retained {
             0 => Refresh::Unchanged,
             redrawn => Refresh::Redrawn {
                 redrawn,
-                tiles: tile_count(h) as usize,
+                tiles: tile_tops(h).len(),
             },
         })
     }
 }
 
-fn tile_count(height: u32) -> u32 {
-    height.div_ceil(TILE_ROWS)
+/// The rows in one tile of a frame `height` rows tall.
+fn tile_rows(height: u32) -> u32 {
+    height.div_ceil(TILES).max(1)
 }
 
-/// The tiles the row `spans` touch, in order.
+/// The first row of every tile of a frame `height` rows tall.
+fn tile_tops(height: u32) -> Vec<u32> {
+    let rows = tile_rows(height);
+    (0..TILES)
+        .map(|n| n * rows)
+        .filter(|top| *top < height)
+        .collect()
+}
+
+/// The first row of every tile the row `spans` touch, in order.
 fn tiles_of(spans: &[Rows], height: u32) -> Vec<u32> {
     let last = height as i32 - 1;
+    let rows = tile_rows(height);
     let mut tiles: Vec<u32> = spans
         .iter()
         .filter_map(|&(a, b)| {
             let (a, b) = (a.max(0), b.min(last));
-            (a <= b).then(|| (a as u32 / TILE_ROWS)..=(b as u32 / TILE_ROWS))
+            (a <= b).then(|| (a as u32 / rows)..=(b as u32 / rows))
         })
         .flatten()
+        .map(|tile| tile * rows)
         .collect();
     tiles.sort_unstable();
     tiles.dedup();
@@ -169,9 +185,8 @@ fn draw_tiles(
 ) -> Result<(), RenderError> {
     let (w, h) = (pixmap.width(), pixmap.height());
     let devices = HashMap::new();
-    let draw = |tile: u32| -> Result<(u32, Vec<u8>), RenderError> {
-        let top = tile * TILE_ROWS;
-        let rows = TILE_ROWS.min(h - top);
+    let draw = |top: u32| -> Result<(u32, Vec<u8>), RenderError> {
+        let rows = tile_rows(h);
         draw_rows(doc, node, scale, (w, h), project_dir, &devices, top, rows)
             .map(|(bytes, _)| (top, bytes))
     };
@@ -216,7 +231,7 @@ fn draw_tiles(
 impl Snapshot {
     fn capture(frame: &Node, scale: f32) -> Snapshot {
         let mut snapshot = Snapshot {
-            index: HashMap::new(),
+            index: HashMap::with_capacity(1024),
             items: Vec::new(),
             has_device: false,
         };
@@ -240,7 +255,7 @@ impl Snapshot {
         let hidden = hidden || !node.visible;
         self.has_device |= node.kind == NodeKind::Device3d;
         let at = self.items.len();
-        self.index.insert(node.id.clone(), at);
+        self.index.insert(hash_of(&node.id), at);
         self.items.push(Item {
             id: node.id.clone(),
             rows: NO_ROWS,
@@ -264,8 +279,14 @@ impl Snapshot {
         at
     }
 
+    /// The item of the node with that id, or `None` when the node is not in the snapshot.
+    fn item_of(&self, id: &NodeId) -> Option<usize> {
+        let at = *self.index.get(&hash_of(id))?;
+        (self.items[at].id == *id).then_some(at)
+    }
+
     fn rows_of(&self, id: &NodeId) -> Rows {
-        self.index.get(id).map_or(NO_ROWS, |&i| self.items[i].rows)
+        self.item_of(id).map_or(NO_ROWS, |i| self.items[i].rows)
     }
 
     /// The row spans an edit touching `changed` repaints, or `None` when they cannot be told.
@@ -273,9 +294,9 @@ impl Snapshot {
         let touched: HashSet<&NodeId> = changed.iter().collect();
         let mut spans = Vec::new();
         for id in changed {
-            let (old, new) = (self.index.get(id), next.index.get(id));
+            let (old, new) = (self.item_of(id), next.item_of(id));
             match (old, new) {
-                (Some(&o), Some(&n)) => {
+                (Some(o), Some(n)) => {
                     let (before, after) = (&self.items[o], &next.items[n]);
                     if before.shallow != after.shallow {
                         if id == &frame.id {
@@ -288,8 +309,8 @@ impl Snapshot {
                         spans.extend([before.rows, after.rows]);
                     }
                 }
-                (Some(&o), None) => spans.push(self.items[o].rows),
-                (None, Some(&n)) => spans.push(next.items[n].rows),
+                (Some(o), None) => spans.push(self.items[o].rows),
+                (None, Some(n)) => spans.push(next.items[n].rows),
                 (None, None) => {}
             }
         }
@@ -376,6 +397,14 @@ fn own_rows(node: &Node, top: f64, scale: f64) -> Rows {
         (top * scale - margin - ink_above).floor() as i32,
         (bottom * scale + margin).ceil() as i32,
     )
+}
+
+/// The hash of a node's id: the index is keyed by it, so the ids are not copied twice.
+fn hash_of(id: &NodeId) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    id.as_str().hash(&mut hasher);
+    hasher.finish()
 }
 
 fn union(a: Rows, b: Rows) -> Rows {
@@ -738,8 +767,10 @@ mod tests {
     fn tiles_cover_the_spans_and_stay_inside_the_frame() {
         assert_eq!(tiles_of(&[(-50, -1)], 300), Vec::<u32>::new());
         assert_eq!(tiles_of(&[(0, 0)], 300), vec![0]);
-        assert_eq!(tiles_of(&[(30, 33), (63, 70)], 300), vec![0, 1, 2]);
-        assert_eq!(tiles_of(&[(299, 999)], 300), vec![9]);
+        // 300 rows in 8 tiles of 38 rows
+        assert_eq!(tiles_of(&[(30, 33), (63, 70)], 300), vec![0, 38]);
+        assert_eq!(tiles_of(&[(299, 999)], 300), vec![266]);
+        assert_eq!(tile_tops(300), vec![0, 38, 76, 114, 152, 190, 228, 266]);
         assert_eq!(
             merge(vec![(10, 20), (22, 30), (100, 110)]),
             vec![(8, 32), (98, 112)]
