@@ -1,6 +1,6 @@
 # Development Guide
 
-> **Status: Implemented for what exists.** Everything below was run on macOS arm64 (Qt 6.12 from Homebrew). Windows and Linux builds are not verified. There is no CMake project and no C++ source: Cargo builds the whole app, and `cxx-qt-build` generates and compiles the Qt glue.
+> **Status: Implemented for what exists.** Everything below was run on macOS arm64 (Qt 6.12 from Homebrew). Windows and Linux builds are not verified. There is no CMake project and one hand-written C++ file (the image provider in `crates/app/cpp/`): Cargo builds the whole app, and `cxx-qt-build` generates and compiles the Qt glue.
 
 ## Prerequisites
 

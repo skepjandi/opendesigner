@@ -10,7 +10,7 @@ Alternatives considered: GPUI (fast, pre-1.0, small component set, widgets for d
 
 Costs, stated plainly:
 
-- **Two languages, one build.** Rust core and Rust glue, QML for presentation, no C++ sources (yet). `cxx-qt` generates the C++ the `QObject` needs; Cargo drives the whole build.
+- **Two languages, one build.** Rust core and Rust glue, QML for presentation, and one hand-written C++ file (the image provider that hands the canvas picture to Qt Quick). `cxx-qt` generates the C++ the `QObject` needs; Cargo drives the whole build.
 - **`cxx-qt` is pre-1.0** (0.10.0, 2026-08-24; MIT or Apache-2.0; MSRV 1.85), pinned exactly. The churn risk moved from the UI toolkit to the bridge, but the bridge surface is one `QObject`.
 - **Heavier distribution and LGPL obligations** ([Licensing](#licensing)).
 - **Qt's own deprecations across minor versions** (it already deprecates media backends, see [Video Editing](./video-editing.md#qt-multimedia-and-ffmpeg)).
