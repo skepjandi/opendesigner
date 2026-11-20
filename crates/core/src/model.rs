@@ -8,8 +8,10 @@ use crate::limits::{self, finite_in, text_within};
 use crate::paint::{Paint, valid_token_name};
 
 /// Version of the on-disk project format. A loader refuses a newer one. Version 2 added 3D
-/// devices and keyframe animations; every version 1 project is a valid version 2 project.
-pub const FORMAT_VERSION: u32 = 2;
+/// devices and keyframe animations; version 3 added sound tracks, captions, clip speed and grades,
+/// transitions and template variables. Every older project is a valid version 3 project, because
+/// each addition is an optional field.
+pub const FORMAT_VERSION: u32 = 3;
 
 /// Stable identifier of a node or page. Never reused within a document.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]

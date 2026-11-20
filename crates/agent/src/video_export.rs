@@ -377,18 +377,6 @@ pub fn export_video_with(
             ));
         }
         if info.has_audio {
-            audio.push(AudioPiece {
-                file: path,
-                role: PieceRole::Footage,
-                in_ms: f.in_ms,
-                start_ms: placed.start_ms,
-                duration_ms: u64::from(clip.duration_ms),
-                gain: 1.0,
-                fade_in_ms: 0,
-                fade_out_ms: 0,
-                pan: 0.0,
-                duck: None,
-            });
             let piece = if clip.retimed() {
                 let wav = dir.join(format!(".{file}.{}.retimed.wav", clip.id));
                 retime_clip_sound(ffmpeg, clip, &path, f.in_ms, &wav)?;
@@ -515,7 +503,7 @@ pub fn export_video_with(
     })
 }
 
-fn piece_of(
+pub(crate) fn piece_of(
     track: &od_core::SoundTrack,
     file: std::path::PathBuf,
     start_ms: u64,
@@ -565,7 +553,7 @@ impl Drop for TempFiles {
     }
 }
 
-fn footage_piece(
+pub(crate) fn footage_piece(
     file: std::path::PathBuf,
     in_ms: u64,
     start_ms: u64,
@@ -573,12 +561,15 @@ fn footage_piece(
 ) -> AudioPiece {
     AudioPiece {
         file,
+        role: PieceRole::Footage,
         in_ms,
         start_ms,
         duration_ms,
         gain: 1.0,
         fade_in_ms: 0,
         fade_out_ms: 0,
+        pan: 0.0,
+        duck: None,
     }
 }
 
@@ -587,7 +578,7 @@ const RAMP_SLICE_MS: u64 = 250;
 
 /// Writes the sound of a retimed clip: its stretch of the file squeezed or stretched to the
 /// clip's length on the timeline (`od_media::retime`).
-fn retime_clip_sound(
+pub(crate) fn retime_clip_sound(
     ffmpeg: &Ffmpeg,
     clip: &od_core::Clip,
     source: &std::path::Path,

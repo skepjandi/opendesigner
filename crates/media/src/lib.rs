@@ -598,85 +598,6 @@ pub fn add_audio(
         cmd.arg("-i").arg(&p.file);
     }
     let filter = mix::filter_graph(pieces);
-/// One piece of sound on the finished timeline.
-#[derive(Debug, Clone)]
-pub struct AudioPiece {
-    pub file: PathBuf,
-    pub in_ms: u64,
-    pub start_ms: u64,
-    pub duration_ms: u64,
-    /// The volume it is played at: 1 is as recorded, 0 is silent.
-    pub gain: f32,
-    /// How long it takes to reach its volume, and how long it takes to leave.
-    pub fade_in_ms: u64,
-    pub fade_out_ms: u64,
-}
-
-/// The filter that cuts each piece from its file (input `n + 1`; input 0 is the picture),
-/// delays it to its place and leaves it as `[a0]`, `[a1]`, ...
-fn piece_filters(pieces: &[AudioPiece]) -> String {
-    let mut filter = String::new();
-    for (n, p) in pieces.iter().enumerate() {
-        filter.push_str(&format!(
-            "[{i}:a]atrim=start={s:.3}:duration={d:.3},asetpts=PTS-STARTPTS",
-            i = n + 1,
-            s = p.in_ms as f64 / 1000.0,
-            d = p.duration_ms as f64 / 1000.0
-        ));
-        if (p.gain - 1.0).abs() > f32::EPSILON {
-            filter.push_str(&format!(",volume={g:.3}", g = p.gain));
-        }
-        let fade_in = p.fade_in_ms.min(p.duration_ms);
-        if fade_in > 0 {
-            filter.push_str(&format!(
-                ",afade=t=in:st=0:d={d:.3}",
-                d = fade_in as f64 / 1000.0
-            ));
-        }
-        let fade_out = p.fade_out_ms.min(p.duration_ms);
-        if fade_out > 0 {
-            filter.push_str(&format!(
-                ",afade=t=out:st={s:.3}:d={d:.3}",
-                s = (p.duration_ms - fade_out) as f64 / 1000.0,
-                d = fade_out as f64 / 1000.0
-            ));
-        }
-        filter.push_str(&format!(",adelay={delay}:all=1[a{n}];", delay = p.start_ms));
-    }
-    filter
-}
-
-/// The filter that mixes `labels` into the output `[a]`.
-fn mix_filters(labels: &str, count: usize) -> String {
-    format!("{labels}amix=inputs={count}:normalize=0:duration=longest[a]")
-}
-
-/// The filter graph that cuts each piece from its file (input `n + 1`; input 0 is the picture),
-/// delays it to its place and mixes them into the output `[a]`.
-fn filter_graph(pieces: &[AudioPiece]) -> String {
-    let labels: String = (0..pieces.len()).map(|n| format!("[a{n}]")).collect();
-    format!(
-        "{}{}",
-        piece_filters(pieces),
-        mix_filters(&labels, pieces.len())
-    )
-}
-
-/// Puts the sound of `pieces` under the picture of `video` (copied, not re-encoded) and writes
-/// `output`. Each piece is cut from its file, delayed to its place and mixed with the others.
-pub fn add_audio(
-    ffmpeg: &Ffmpeg,
-    video: &Path,
-    pieces: &[AudioPiece],
-    output: &Path,
-) -> Result<(), MediaError> {
-    let mut cmd = Command::new(&ffmpeg.path);
-    cmd.args(["-hide_banner", "-loglevel", "error", "-y", "-i"])
-        .arg(video);
-    for p in pieces {
-        cmd.arg("-i").arg(&p.file);
-    }
-    let filter = filter_graph(pieces);
     let out = cmd
         .args(["-filter_complex", &filter, "-map", "0:v", "-map", "[a]"])
         .args(["-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-shortest"])
@@ -696,7 +617,7 @@ pub fn add_audio(
 }
 
 /// Mixes `pieces` into one stereo 44.1 kHz 16-bit WAV at `output`, `duration_ms` long: the sound
-/// the editor plays under its preview. The same cut, delay, fade and gain as [`add_audio`], so
+/// the editor plays under its preview. The same graph as [`add_audio`], so
 /// what is heard is what exports. Input 0 is silence, which keeps the graph's numbering.
 pub fn mix_wav(
     ffmpeg: &Ffmpeg,
@@ -720,13 +641,7 @@ pub fn mix_wav(
     for p in pieces {
         cmd.arg("-i").arg(&p.file);
     }
-    // the silence is mixed in as well, so the result lasts as long as the video
-    let labels: String = (0..pieces.len()).map(|n| format!("[a{n}]")).collect();
-    let filter = format!(
-        "[0:a]anull[s];{}{}",
-        piece_filters(pieces),
-        mix_filters(&format!("[s]{labels}"), pieces.len() + 1)
-    );
+    let filter = mix::filter_graph(pieces);
     let out = cmd
         .args(["-filter_complex", &filter, "-map", "[a]", "-t"])
         .arg(&seconds)
@@ -799,49 +714,6 @@ mod tests {
             let err = Ffmpeg::probe(Path::new("/bin/echo")).unwrap_err();
             assert!(err.to_string().contains("version line"), "{err}");
         }
-    }
-
-    #[test]
-    fn pieces_mix_into_a_wav_of_the_videos_length_when_ffmpeg_is_there() {
-        let Ok(ff) = Ffmpeg::locate() else {
-            eprintln!("skipped: no ffmpeg on this machine");
-            return;
-        };
-        let tmp = tempfile::tempdir().unwrap();
-        let tone = tmp.path().join("tone.wav");
-        let made = Command::new(&ff.path)
-            .args(["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi"])
-            .args(["-i", "sine=frequency=440:duration=1"])
-            .arg(&tone)
-            .output()
-            .unwrap();
-        assert!(made.status.success());
-        let piece = AudioPiece {
-            file: tone,
-            in_ms: 0,
-            start_ms: 500,
-            duration_ms: 1000,
-            gain: 0.5,
-            fade_in_ms: 100,
-            fade_out_ms: 100,
-        };
-        let wav = tmp.path().join("mix.wav");
-        mix_wav(&ff, std::slice::from_ref(&piece), 2000, &wav).unwrap();
-        let bytes = std::fs::read(&wav).unwrap();
-        assert_eq!(&bytes[..4], b"RIFF", "a wav file");
-        assert_eq!(&bytes[8..12], b"WAVE");
-        // 44 bytes of header, 44100 samples a second, two channels of 16 bits
-        let samples = (bytes.len() - 44) as f64 / (44100.0 * 4.0);
-        assert!((1.9..=2.1).contains(&samples), "{samples}");
-        let missing = AudioPiece {
-            file: tmp.path().join("none.wav"),
-            ..piece
-        };
-        assert!(mix_wav(&ff, &[missing], 2000, &tmp.path().join("x.wav")).is_err());
-        assert!(
-            !tmp.path().join("x.wav").exists(),
-            "a failed mix leaves no file"
-        );
     }
 }
 
@@ -926,5 +798,51 @@ mod decoder_tests {
         let c = slow.frame("media/a.mp4", 533, 64, 48).unwrap();
         assert!(a == b && a != c);
         assert!(c == seek(533));
+    }
+
+    #[test]
+    fn pieces_mix_into_a_wav_of_the_videos_length_when_ffmpeg_is_there() {
+        let Ok(ff) = Ffmpeg::locate() else {
+            eprintln!("skipped: no ffmpeg on this machine");
+            return;
+        };
+        let tmp = tempfile::tempdir().unwrap();
+        let tone = tmp.path().join("tone.wav");
+        let made = Command::new(&ff.path)
+            .args(["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi"])
+            .args(["-i", "sine=frequency=440:duration=1"])
+            .arg(&tone)
+            .output()
+            .unwrap();
+        assert!(made.status.success());
+        let piece = AudioPiece {
+            file: tone,
+            role: PieceRole::Music,
+            pan: 0.0,
+            duck: None,
+            in_ms: 0,
+            start_ms: 500,
+            duration_ms: 1000,
+            gain: 0.5,
+            fade_in_ms: 100,
+            fade_out_ms: 100,
+        };
+        let wav = tmp.path().join("mix.wav");
+        mix_wav(&ff, std::slice::from_ref(&piece), 2000, &wav).unwrap();
+        let bytes = std::fs::read(&wav).unwrap();
+        assert_eq!(&bytes[..4], b"RIFF", "a wav file");
+        assert_eq!(&bytes[8..12], b"WAVE");
+        // 44 bytes of header, 44100 samples a second, two channels of 16 bits
+        let samples = (bytes.len() - 44) as f64 / (44100.0 * 4.0);
+        assert!((1.9..=2.1).contains(&samples), "{samples}");
+        let missing = AudioPiece {
+            file: tmp.path().join("none.wav"),
+            ..piece
+        };
+        assert!(mix_wav(&ff, &[missing], 2000, &tmp.path().join("x.wav")).is_err());
+        assert!(
+            !tmp.path().join("x.wav").exists(),
+            "a failed mix leaves no file"
+        );
     }
 }

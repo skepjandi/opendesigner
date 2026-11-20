@@ -6,6 +6,19 @@ All notable changes to OpenDesigner are documented here.
 >
 > **Wiki**: the [GitHub Wiki](https://github.com/skepjandi/opendesigner/wiki) is the public-facing main wiki — architecture, document format, agent integration, security model, roadmap. Source-controlled editing surface is `docs/wiki/` in this repo; CI (`.github/workflows/sync-wiki.yml`) mirrors it to the GitHub Wiki on every merge to `main`. New single-PR changes belong here, not as new wiki pages.
 
+## 2026-11-21
+
+### feat: close the gap to Hyperframes: blocks, captions, multi-track audio, motion, lint, variables, faster preview and export
+
+**Area:** `feat(agent)`, `feat(core)`, `feat(render)`, `feat(media)`, `feat(app)`, `feat(cli)`, `feat(build)`
+
+- **Blocks.** 31 ready-made titles, overlays, backgrounds, charts and motion wrappers (`list_blocks`, `get_block`, `add_block`; CLI `blocks`) that expand into ordinary nodes and keyframes in one undoable transaction.
+- **Audio and captions.** Up to 8 sound tracks with ducking, waveforms, pause detection and removal; word-timed captions as data (SRT/VTT/JSON import, four styles) drawn in preview and export.
+- **Motion.** Frame-aligned time, clip speed and speed ramps, colour grading and looks, eight more transitions, and a parallel video export (about 4x faster on an M2 Pro).
+- **Agent safety and templates.** `validate_document` with stable `OD` rule codes, `dry_run` and receipts on `apply_ops`, typed template variables, `batch_export`, and a Claude Code / Codex plugin that ships the skill.
+- **Editor.** Raw-pixel canvas, tile-wise redraw, node index, signature-keyed preview cache, preview sound through Qt Multimedia; Linux and Windows CI jobs for the Qt shell (unverified until they run).
+- Project format is now version 3; every addition is an optional field, so older projects load unchanged.
+
 ## 2026-11-20
 
 ### feat(app): canvas overhaul, Variants and Preview panels, timeline, menu bar, chat fixes

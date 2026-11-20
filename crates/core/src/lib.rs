@@ -23,10 +23,10 @@ pub mod ops;
 pub mod paint;
 pub mod pauses;
 pub mod project;
-pub mod variables;
 mod snap;
 pub mod speed;
 pub mod timebase;
+pub mod variables;
 pub mod video;
 pub mod view;
 pub mod workspace;
@@ -43,8 +43,8 @@ pub use history::{Actor, Checkpoint, Session, Transaction, TransactionKind, TxRe
 pub use model::{Document, ImageFit, Node, NodeId, NodeKind, Page, Stroke, TextAlign};
 pub use ops::{AppliedOp, NewNode, Operation, Property};
 pub use paint::{Paint, Rgba};
-pub use variables::{Binding, Portrays, VarValue, Variable, VariableKind};
 pub use speed::SpeedKey;
+pub use variables::{Binding, Portrays, VarValue, Variable, VariableKind};
 pub use video::{
     AudioTrack, Clip, ClipProperty, ClipSource, Ease, Entrance, Footage, Motion, Overlay,
     OverlayProperty, Transition, TransitionKind, Video, VideoProperty,

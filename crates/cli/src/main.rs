@@ -283,6 +283,7 @@ enum Command {
     Blocks {
         #[command(subcommand)]
         action: blocks::BlocksAction,
+    },
     /// Sound tracks, pauses and waveforms of a video.
     Sound {
         #[command(subcommand)]

@@ -12,7 +12,7 @@ No arguments.
 
 ## `get_playbook`
 
-Craft guidance for making work that is not mediocre. Topics: design (images), style (named looks with rules), video (start with the inventory of media, footage, sounds and assets), motion (timings, easing, recipes), 3d (devices in 3D, captures from a simulator, moves), formats (sizes and safe zones), logo (identity design). Call it with no topic for the list; read the ones that apply before you build, not after.
+Craft guidance for making work that is not mediocre. Topics: design (images), style (named looks with rules), video (start with the inventory of media, footage, sounds and assets), motion (timings, easing, recipes), 3d (devices in 3D, captures from a simulator, moves), formats (sizes and safe zones), logo (identity design), blocks (the catalog of ready-made titles, overlays, backgrounds, charts and motion, and when to use one). Call it with no topic for the list; read the ones that apply before you build, not after.
 
 Read-only.
 
@@ -138,7 +138,7 @@ No arguments.
 
 ## `apply_ops`
 
-Change the design with a list of operations, applied together or not at all. Operations: {op:'create', parent, index?, node:{kind, name?, x, y, width, height, fill?, stroke?, corner_radius?, opacity?, visible?, text?, font_size?, font_family?, font_weight?, text_align?, line_height?, image?, image_fit?, device3d?, children?}}, {op:'set', id, prop:{name, value}} with name one of name, x, y, width, height, visible, opacity, fill, stroke, corner_radius, text, font_size, font_family, font_weight, text_align, line_height, image (a media/ path from list_media), image_fit (cover, contain or fill), {op:'move', id, x, y}, {op:'reparent', id, parent, index?}, {op:'delete', id}, {op:'set_token', name, value} (a named color '#rrggbb'; value null removes an unused token), {op:'set_localized_text', locale, id, text} (a translation of a text node; text null removes it). 3D devices: kind 'device3d' is a phone, tablet, laptop or monitor drawn in 3D inside its box (the box is the viewport; 1 zoom fits the device with a margin at any turn); its fill is the body finish, its image (with image_fit) is the capture on the screen; create it with device3d:{model: phone|phone_punch_hole|tablet|laptop|monitor, rotate_x?, rotate_y?, rotate_z?, zoom?, fov?, light_angle?, shadow?, glare?, screen_scroll?, screen_footage?:{file:'media/x.mov', in_ms}} and change it with set props model, rotate_x (tilt, + leans the top away), rotate_y (turn, + turns the right edge away), rotate_z (roll, + clockwise), zoom (0.05 to 10), fov (1 to 100 degrees, 30 natural, low is flat), light_angle (degrees, 0 from above, 90 from the right), shadow (0 to 1), glare (0 to 1, screen reflection), screen_scroll (0 top to 1 bottom of a long capture; null centres), screen_footage (value {file, in_ms}: a recording on the screen that plays while the frame is shown; null shows the image). Videos (see list_videos): {op:'create_video', name, fps, width, height} (even sizes), {op:'delete_video', id}, {op:'set_video', id, prop:{name, value}} with name one of name, fps, size (value {width, height}), audio (value {file:'media/x.mp3', start_ms?, gain? (0 to 2), fade_in_ms?, fade_out_ms?} for the sound under the picture; null takes it away), motion_blur (0 off, or 2 to 16 pictures blended while anything moves), {op:'add_clip', video, frame | footage:{file:'media/x.mp4', in_ms}, duration_ms, index?, transition?, motion?} (a clip shows a design frame or plays footage from list_footage), {op:'remove_clip', video, clip}, {op:'move_clip', video, clip, index}, {op:'set_clip', video, clip, prop:{name, value}} with name one of duration_ms, frame, source (value {frame} or {footage:{file,in_ms}}), transition (value {kind: cut|fade|slide_left|slide_right|slide_up|slide_down|dip|zoom_in, duration_ms, ease?}), motion (value {scale_from, scale_to, ease?}, 1 to 3), {op:'add_overlay', video, frame, start_ms, duration_ms, fade_ms?, enter?, exit?, ease?} (a design frame drawn over the whole video for a while: titles, lower thirds, call-outs; a frame with no fill is transparent; enter and exit are none, fade, slide_up, slide_down, slide_left, slide_right, pop or zoom, taking fade_ms each), {op:'remove_overlay', video, overlay}, {op:'set_overlay', video, overlay, prop:{name, value}} with name one of frame, start_ms, duration_ms, fade_ms, enter, exit, ease, {op:'animate', video, node, prop, keys:[{at_ms, value, ease?}]} (keyframes one number of a node over the video's time, at_ms from the start of the video, strictly increasing; the value holds before the first key and after the last; prop one of x, y, width, height, opacity, corner_radius, rotate_x, rotate_y, rotate_z, zoom, fov, light_angle, shadow, glare, screen_scroll; keys:[] removes it; animate_preset writes these for you). Eases: linear, ease_in, ease_out, ease_in_out, back (overshoots) or spring (overshoots and settles). Colors are '#rrggbb', '#rrggbbaa' or '{token.name}'. Template variables (see list_variables): {op:'declare_variable', variable:{id, kind, label, description?, portrays?, default, enum_values?, binds?:[{node, prop}]}} with kind one of string, number, color, bool, enum, image, font (enum_values only for enum) and portrays one of subject_name, subject_domain, subject_tagline, subject_logo, host_identity, {op:'set_variable', id, prop:{name, value}} with name one of label, description, portrays, default, enum_values, binds, {op:'remove_variable', id}, {op:'set_variable_value', id, value} (writes every bound node property through the same validated path as set, so it is attributed and undoable). Ids are minted for you; the result lists the created ids. A checkpoint is taken before your first change in a turn so the user can restore it. Set dry_run true to check the operations without applying them: you get ok, what each operation would do, the node ids that would change, and for a rejection a stable code (E_NODE_NOT_FOUND, E_OUT_OF_BOUNDS, E_LIMIT, ...) with a hint; nothing is changed, checkpointed or saved. An applied result has stage 'applied', the checkpoint taken before the turn, the transaction, the changed ids and whether the project was saved.
+Change the design with a list of operations, applied together or not at all. Operations: {op:'create', parent, index?, node:{kind, name?, x, y, width, height, fill?, stroke?, corner_radius?, opacity?, visible?, text?, font_size?, font_family?, font_weight?, text_align?, line_height?, image?, image_fit?, device3d?, children?}}, {op:'set', id, prop:{name, value}} with name one of name, x, y, width, height, visible, opacity, fill, stroke, corner_radius, text, font_size, font_family, font_weight, text_align, line_height, image (a media/ path from list_media), image_fit (cover, contain or fill), {op:'move', id, x, y}, {op:'reparent', id, parent, index?}, {op:'delete', id}, {op:'set_token', name, value} (a named color '#rrggbb'; value null removes an unused token), {op:'set_localized_text', locale, id, text} (a translation of a text node; text null removes it). 3D devices: kind 'device3d' is a phone, tablet, laptop or monitor drawn in 3D inside its box (the box is the viewport; 1 zoom fits the device with a margin at any turn); its fill is the body finish, its image (with image_fit) is the capture on the screen; create it with device3d:{model: phone|phone_punch_hole|tablet|laptop|monitor, rotate_x?, rotate_y?, rotate_z?, zoom?, fov?, light_angle?, shadow?, glare?, screen_scroll?, screen_footage?:{file:'media/x.mov', in_ms}} and change it with set props model, rotate_x (tilt, + leans the top away), rotate_y (turn, + turns the right edge away), rotate_z (roll, + clockwise), zoom (0.05 to 10), fov (1 to 100 degrees, 30 natural, low is flat), light_angle (degrees, 0 from above, 90 from the right), shadow (0 to 1), glare (0 to 1, screen reflection), screen_scroll (0 top to 1 bottom of a long capture; null centres), screen_footage (value {file, in_ms}: a recording on the screen that plays while the frame is shown; null shows the image). Videos (see list_videos): {op:'create_video', name, fps, width, height} (even sizes), {op:'delete_video', id}, {op:'set_video', id, prop:{name, value}} with name one of name, fps, size (value {width, height}), audio (value {file:'media/x.mp3', start_ms?, gain? (0 to 2), fade_in_ms?, fade_out_ms?} for the sound under the picture; null takes it away), motion_blur (0 off, or 2 to 16 pictures blended while anything moves), {op:'add_clip', video, frame | footage:{file:'media/x.mp4', in_ms}, duration_ms, index?, transition?, motion?} (a clip shows a design frame or plays footage from list_footage), {op:'remove_clip', video, clip}, {op:'move_clip', video, clip, index}, {op:'set_clip', video, clip, prop:{name, value}} with name one of duration_ms, frame, source (value {frame} or {footage:{file,in_ms}}), transition (value {kind: cut|fade|slide_left|slide_right|slide_up|slide_down|dip|zoom_in|wipe_left|wipe_right|wipe_up|wipe_down|iris|flash|blur_dissolve|glitch_slice, duration_ms, ease?}), motion (value {scale_from, scale_to, ease?}, 1 to 3), speed (footage only, 0.25 to 4; duration_ms is the length on the timeline, the clip plays duration_ms*speed of the file), speed_ramp (footage only, value [{at_ms, rate 0.25 to 4, ease?}] in clip time, needs speed 1; [] removes it), grade (value {exposure?(-3..3 stops), contrast?, saturation?, temperature?, tint? (all -1..1), vignette? (0..1), blur? (0..50), look?: warm|cool|mono|faded|punchy}, or null; a look fills the numbers and the numbers you give override it; also set on an image node with {op:'set', id, prop:{name:'grade', value}}). Times (durations, starts, in points, transitions, keys) are rounded to the video's frame grid; the receipt shows the value kept. {op:'add_overlay', video, frame, start_ms, duration_ms, fade_ms?, enter?, exit?, ease?} (a design frame drawn over the whole video for a while: titles, lower thirds, call-outs; a frame with no fill is transparent; enter and exit are none, fade, slide_up, slide_down, slide_left, slide_right, pop or zoom, taking fade_ms each), {op:'remove_overlay', video, overlay}, {op:'set_overlay', video, overlay, prop:{name, value}} with name one of frame, start_ms, duration_ms, fade_ms, enter, exit, ease, {op:'animate', video, node, prop, keys:[{at_ms, value, ease?}]} (keyframes one number of a node over the video's time, at_ms from the start of the video, strictly increasing; the value holds before the first key and after the last; prop one of x, y, width, height, opacity, corner_radius, rotate_x, rotate_y, rotate_z, zoom, fov, light_angle, shadow, glare, screen_scroll, or on an image node grade_exposure, grade_contrast, grade_saturation, grade_temperature, grade_tint, grade_vignette, grade_blur; keys:[] removes it; animate_preset writes these for you). Eases: linear, ease_in, ease_out, ease_in_out, back (overshoots) or spring (overshoots and settles). Colors are '#rrggbb', '#rrggbbaa' or '{token.name}'. Template variables (see list_variables): {op:'declare_variable', variable:{id, kind, label, description?, portrays?, default, enum_values?, binds?:[{node, prop}]}} with kind one of string, number, color, bool, enum, image, font (enum_values only for enum) and portrays one of subject_name, subject_domain, subject_tagline, subject_logo, host_identity, {op:'set_variable', id, prop:{name, value}} with name one of label, description, portrays, default, enum_values, binds, {op:'remove_variable', id}, {op:'set_variable_value', id, value} (writes every bound node property through the same validated path as set, so it is attributed and undoable). Ids are minted for you; the result lists the created ids. A checkpoint is taken before your first change in a turn so the user can restore it. Set dry_run true to check the operations without applying them: you get ok, what each operation would do, the node ids that would change, and for a rejection a stable code (E_NODE_NOT_FOUND, E_OUT_OF_BOUNDS, E_LIMIT, ...) with a hint; nothing is changed, checkpointed or saved. An applied result has stage 'applied', the checkpoint taken before the turn, the transaction, the changed ids and whether the project was saved.
 
 Arguments:
 
@@ -482,6 +482,46 @@ Arguments:
 - `to_ms` (integer) 
 - `video` (string, required) Id of a video from list_videos.
 
+## `list_blocks`
+
+The block catalog: ready-made titles, lower thirds, overlays, backgrounds, charts, store headlines and motion wrappers that expand into ordinary nodes (and keyframes on a video). Search by what you need (`query`: words matched against names, tags and descriptions) and/or `category`. Each result has the block id, its category and what it is for. Then get_block for its parameters and add_block to use it.
+
+Read-only.
+
+Arguments:
+
+- `category` (string) 
+- `query` (string) Words describing what you need, e.g. 'lower third name' or 'bar chart'.
+
+## `get_block`
+
+One block's full description: what it makes, every parameter (type, range or options, default), the default box it lays itself out in, whether it moves, and the standard parameters every block takes.
+
+Read-only.
+
+Arguments:
+
+- `block` (string, required) A block id from list_blocks.
+
+## `add_block`
+
+Add a block to a frame as one undoable step. It makes a group named `block:<id>#<n>` with named parts inside (find them with get_tree, change them with apply_ops, delete the group to remove the block); with a `video` it also keyframes the parts using the same animations as animate_preset. Colors come from the document's tokens (or tokens the block creates once, named block.background/foreground/accent/muted; set_token changes them everywhere) unless you pass `colors`. The block's defaults are placeholders: write your own copy and colors, then check the result with render_preview and review_frame. The result lists the created root and its parts. Use `dry_run` to see the operations without applying them.
+
+Arguments:
+
+- `block` (string, required) A block id from list_blocks.
+- `box` (object) Where it lays itself out, in frame coordinates; omitted sides use the block's default box.
+- `colors` (object) Override the roles with #rrggbb or a {token}.
+- `dry_run` (boolean) Return the operations without applying them.
+- `font` (string) One font family for all of the block's text (default: the bundled one).
+- `frame` (string) Id of the frame to put it in (optional when the document has one frame).
+- `hold_ms` (integer) Fade the block out this long after start_ms (needs a video; at least as long as its entrance). Omit to keep it on screen.
+- `params` (object) The block's own parameters (see get_block).
+- `start_ms` (integer) When it starts, from the start of the video (default 0).
+- `summary` (string) One line, in the user's terms, naming what this turn does.
+- `turn` (string) Groups related calls into one turn; omit and each call is its own turn.
+- `video` (string) Id of a video from list_videos to keyframe in (optional when there is one video; without one the block is static).
+
 ## `validate_document`
 
 Lint the whole document and its videos and get findings with stable rule codes (OD001 ...): nodes outside their frame, clipped or overflowing or tiny or empty text, low contrast, missing images or footage or sound, undefined tokens, hidden nodes a video animates, overlapping siblings, frames that match no export target, video timing problems, and broken template variable bindings. Each finding says what is wrong, where (node, frame or video) and how to fix it. Read-only. Call it before you finish a turn and fix every error and warning, or say why you left one.
@@ -513,6 +553,178 @@ Arguments:
 - `scale` (number) Pixels per document unit for frames (default 1).
 - `strict_variables` (boolean) Fail a row that names an unknown variable or gives a value of the wrong type.
 - `video` (string) Id of the video to render for each row (an MP4).
+
+## `add_sound_track`
+
+Add a sound track to a video, up to 8 besides the older single `audio`: music, a voice-over or effects, each with its own start, trim (in_ms/out_ms), gain, fades, pan and, for music, `duck`: the music lowers while a voice track speaks (a side-chain compressor in the export's one ffmpeg pass; the picture is copied, not re-encoded; footage sound is still mixed). Put a voice-over in with role voice, then music with `duck: {}` and gain 0.3 to 0.6. Returns the track id for set_sound_track and remove_sound_track. Speech is not made here: for a voice-over use a speech MCP server the user added (get_guidance lists them) and import the file with import_file.
+
+Arguments:
+
+- `duck` (any) Music only: lower under the voice tracks. {depth 0-1 (default 0.7), attack_ms (default 40), release_ms (default 500)}; null turns it off.
+- `fade_in_ms` (integer) 
+- `fade_out_ms` (integer) 
+- `file` (string, required) An audio file in media/ from list_sounds (media/<name>.mp3|wav|m4a|aac|ogg).
+- `gain` (number) 1 is as recorded. A music bed under a voice: 0.15 to 0.3.
+- `in_ms` (integer) Trim in: where in the file it starts playing.
+- `out_ms` (any) Trim out: where in the file it stops (null or omitted plays to the end).
+- `pan` (number) -1 all left, 1 all right.
+- `role` (string) music (default; may duck), voice (a voice-over: music ducks under it) or sfx.
+- `start_ms` (integer) When it starts, from the start of the video.
+- `summary` (string) One line, in the user's terms, naming what this turn does.
+- `turn` (string) Groups related calls into one turn; omit and each call is its own turn.
+- `video` (string, required) Id of a video from list_videos.
+
+## `set_sound_track`
+
+Change one sound track of a video: only the fields you give change; `out_ms: null` and `duck: null` clear them. The older single track (id `audio`) is changed with set_video audio.
+
+Arguments:
+
+- `duck` (any) Music only: lower under the voice tracks. {depth 0-1 (default 0.7), attack_ms (default 40), release_ms (default 500)}; null turns it off.
+- `fade_in_ms` (integer) 
+- `fade_out_ms` (integer) 
+- `file` (string) An audio file in media/ from list_sounds (media/<name>.mp3|wav|m4a|aac|ogg).
+- `gain` (number) 1 is as recorded. A music bed under a voice: 0.15 to 0.3.
+- `in_ms` (integer) Trim in: where in the file it starts playing.
+- `out_ms` (any) Trim out: where in the file it stops (null or omitted plays to the end).
+- `pan` (number) -1 all left, 1 all right.
+- `role` (string) music (default; may duck), voice (a voice-over: music ducks under it) or sfx.
+- `start_ms` (integer) When it starts, from the start of the video.
+- `summary` (string) One line, in the user's terms, naming what this turn does.
+- `track` (string, required) A track id from list_videos (a1, a2, ...).
+- `turn` (string) Groups related calls into one turn; omit and each call is its own turn.
+- `video` (string, required) Id of a video from list_videos.
+
+## `remove_sound_track`
+
+Remove one sound track from a video.
+
+Arguments:
+
+- `summary` (string) One line, in the user's terms, naming what this turn does.
+- `track` (string, required) A track id from list_videos.
+- `turn` (string) Groups related calls into one turn; omit and each call is its own turn.
+- `video` (string, required) Id of a video from list_videos.
+
+## `detect_pauses`
+
+Find the pauses in the sound of a file in media/ (audio or footage): stretches at least `min_ms` long quieter than `noise_db`, by ffmpeg's silencedetect. Returns the pauses and the stretches of sound between them, in the file's own time. Needs ffmpeg. Use it to plan a cut with remove_pauses or to time captions to speech.
+
+Read-only.
+
+Arguments:
+
+- `file` (string, required) A media/ file: audio or footage.
+- `min_ms` (integer) A pause is at least this long (default 500).
+- `noise_db` (number) Quieter than this is a pause (default -30).
+
+## `remove_pauses`
+
+Cut the pauses out of a footage clip: the clip becomes several clips that play only the stretches with sound, one after the other, in one undoable step (a zoom on the clip carries on across the cuts). `keep_ms` of each pause is left at both ends so speech is not clipped. The video gets shorter; overlays, captions and sound tracks keep their times, so move them after, and read the new story in list_videos. Needs ffmpeg.
+
+Arguments:
+
+- `clip` (string, required) A footage clip id from list_videos.
+- `keep_ms` (integer) Pause kept at each end (default 120).
+- `min_ms` (integer) Shortest pause to cut (default 400).
+- `noise_db` (number) Default -30.
+- `summary` (string) One line, in the user's terms, naming what this turn does.
+- `turn` (string) Groups related calls into one turn; omit and each call is its own turn.
+- `video` (string, required) Id of a video from list_videos.
+
+## `get_waveform`
+
+Downsampled peaks (0 to 1) of the sound in a media/ file (audio or footage), decoded by ffmpeg: `buckets` numbers from 50 to 2000 across the file's whole length. The window's Sound tracks draw the same. Needs ffmpeg.
+
+Read-only.
+
+Arguments:
+
+- `buckets` (integer) Default 400.
+- `file` (string, required) A media/ file: audio or footage.
+
+## `import_captions`
+
+Set a video's captions from a transcript the user (or their speech MCP server) produced. format `srt` or `vtt` (WebVTT inline <00:00:01.500> word times become word timings), or `words_json`: a list of {text|word, start_ms|start (seconds), end_ms|end}, which is what a speech-to-text server gives, grouped into cues at sentence ends and pauses. This tool does not recognize speech: OpenDesigner has no speech-to-text built in, so a transcript must come from the user's own speech server. Replaces every cue; keeps the style. `offset_ms` shifts all times; cues outside the video are dropped and counted. Captions are drawn in the preview and burned into export_video.
+
+Arguments:
+
+- `format` (string, required) 
+- `offset_ms` (integer) 
+- `summary` (string) One line, in the user's terms, naming what this turn does.
+- `text` (string, required) The file's text (at most 2 MB).
+- `turn` (string) Groups related calls into one turn; omit and each call is its own turn.
+- `video` (string, required) Id of a video from list_videos.
+
+## `captions_from_script`
+
+Set captions from a plain script spread over a time range in proportion to word length. This is an ESTIMATE, not speech recognition: it knows nothing of how the words are spoken, so it fits a voice-over only roughly; prefer import_captions with real timings when there is a transcript. Cues break after sentence ends and at `words_per_cue`. Replaces every cue; keeps the style.
+
+Arguments:
+
+- `end_ms` (integer) Default the end of the video.
+- `script` (string, required) The words to show.
+- `start_ms` (integer) Default 0.
+- `summary` (string) One line, in the user's terms, naming what this turn does.
+- `turn` (string) Groups related calls into one turn; omit and each call is its own turn.
+- `video` (string, required) Id of a video from list_videos.
+- `words_per_cue` (integer) Default 7.
+
+## `add_caption_cue`
+
+Add one caption cue. Cues are in time order and may not overlap; they end inside the video. Give `words` ([{text, start_ms, end_ms}] spelling the text) to highlight the spoken word.
+
+Arguments:
+
+- `end_ms` (integer, required) 
+- `start_ms` (integer, required) 
+- `summary` (string) One line, in the user's terms, naming what this turn does.
+- `text` (string, required) At most 400 characters.
+- `turn` (string) Groups related calls into one turn; omit and each call is its own turn.
+- `video` (string, required) Id of a video from list_videos.
+- `words` (array) 
+
+## `remove_caption_cue`
+
+Remove one caption cue (ids are in list_videos under captions.cues).
+
+Arguments:
+
+- `cue` (string, required) A cue id (q1, q2, ...).
+- `summary` (string) One line, in the user's terms, naming what this turn does.
+- `turn` (string) Groups related calls into one turn; omit and each call is its own turn.
+- `video` (string, required) Id of a video from list_videos.
+
+## `clear_captions`
+
+Remove every caption cue of a video (the style stays).
+
+Arguments:
+
+- `summary` (string) One line, in the user's terms, naming what this turn does.
+- `turn` (string) Groups related calls into one turn; omit and each call is its own turn.
+- `video` (string, required) Id of a video from list_videos.
+
+## `set_caption_style`
+
+Set how captions look: start from a `preset` and/or change single fields; fields you leave out keep their value (`highlight: null` and `background: null` remove them). Sizes are a percent of the video's height so one style fits every output size.
+
+Arguments:
+
+- `align` (string) 
+- `background` (any) A box behind each line, #rrggbbaa; null removes it.
+- `color` (string) #rrggbb or #rrggbbaa.
+- `font_family` (string) A font family; unknown ones fall back to Lato.
+- `font_weight` (integer) 
+- `highlight` (any) Colour of the word being spoken (needs word timings, or the estimate by word length); null removes it.
+- `max_lines` (integer) 
+- `position` (string) 
+- `preset` (string) Start from a named look: clean, bold_pop (big, uppercase, yellow active word), karaoke (mid-screen, green active word), boxed (dark box).
+- `size_pct` (number) Text size as a percent of the video's height.
+- `summary` (string) One line, in the user's terms, naming what this turn does.
+- `turn` (string) Groups related calls into one turn; omit and each call is its own turn.
+- `uppercase` (boolean) 
+- `video` (string, required) Id of a video from list_videos.
 
 ## `list_asset_sources`
 
@@ -709,10 +921,12 @@ for motion, use several overlays or `set_overlay` over time. Match the video's s
 
 The ids of a created video and clips come back in `created` (`v_...`, `c_...`). Width and height
 are even numbers; a frame of another shape is scaled to cover the video and cropped in the middle,
-so use frames of the video's shape. A transition (`cut`, `fade`, `slide_left`, `slide_right`)
+so use frames of the video's shape. A transition (`cut`, `fade`, `slide_left`, `slide_right`, `slide_up`, `slide_down`, `dip`, `zoom_in`,
+`wipe_left`, `wipe_right`, `wipe_up`, `wipe_down`, `iris`, `flash`, `blur_dissolve`, `glitch_slice`)
 overlaps the end of the clip before it, so it makes the video shorter by its length; the first
 clip's transition is not shown. `motion` zooms slowly from `scale_from` to `scale_to` (1 to 3) over
-the clip. Change a clip with `set_clip` (`duration_ms`, `frame`, `transition`, `motion`), reorder
+the clip. Change a clip with `set_clip` (`duration_ms`, `frame`, `source`, `transition`, `motion`, and for footage
+`speed`, `speed_ramp`; for any clip `grade`), reorder
 with `move_clip`, remove with `remove_clip`. A frame that a clip shows cannot be deleted until the
 clip is removed. Look at a moment with `render_video_frame` (try the middle of a transition) and
 write the file with `export_video`, which needs `ffmpeg` on the user's computer and tells you if it
@@ -729,7 +943,12 @@ never makes the video longer: it is cut at the end. To find music or sound effec
 hit, chime, drone, beat, stinger; no licence, but no music), `search_sounds` (Freesound; it needs
 the user's token, and the answer says so if there is none), `import_sound` to bring one into
 `media/`, or `import_file` with a sound file of the user's (`find_files` kind audio); `list_sounds`
-shows them all. Then set the track. A Freesound sound keeps its
+shows them all. Then set the track. For more than one (music, a voice-over, effects), use
+`add_sound_track` (role `music`, `voice` or `sfx`, up to 8; start, trim, gain, fades, pan; music can
+`duck` under the voice), `set_sound_track` and `remove_sound_track`. Captions are data: bring a
+transcript from the user's own speech server with `import_captions` (`srt`, `vtt`, `words_json`;
+OpenDesigner does no speech recognition), or estimate from a script with `captions_from_script`,
+then `set_caption_style`. `detect_pauses`, `remove_pauses` and `get_waveform` need ffmpeg. A Freesound sound keeps its
 author's license: show the attribution the tool gives you (title, author, license, link) wherever
 the sound is used, and prefer CC0.
 

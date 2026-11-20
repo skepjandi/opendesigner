@@ -536,6 +536,8 @@ fn the_block_catalog_lists_describes_and_adds_a_block_to_a_project() {
             .status
             .success()
     );
+}
+
 /// Sound tracks, captions and the sound tools, headless: the same tools the MCP server offers.
 #[test]
 fn sound_tracks_captions_and_pauses_work_from_the_command_line() {

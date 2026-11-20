@@ -11,11 +11,17 @@ use od_core::{NodeId, Video};
 use od_media::{AudioPiece, Ffmpeg};
 
 use crate::tools::ToolError;
-use crate::video_export::Source;
+use crate::video_export::{Source, footage_piece, piece_of, retime_clip_sound};
 
-/// The pieces of sound `video` plays: each footage clip's sound, at its place on the timeline,
-/// and the sound track cut at the end of the video.
-fn pieces(src: &Source, video: &Video, ffmpeg: &Ffmpeg) -> Result<Vec<AudioPiece>, ToolError> {
+/// The pieces of sound `video` plays: each footage clip's sound (retimed clips through a WAV
+/// named by what went into it, in `dir`), at its place on the timeline, and the sound tracks cut
+/// at the end of the video.
+fn pieces(
+    src: &Source,
+    video: &Video,
+    ffmpeg: &Ffmpeg,
+    dir: &Path,
+) -> Result<Vec<AudioPiece>, ToolError> {
     let mut out = Vec::new();
     for (clip, placed) in video.clips.iter().zip(video.placed()) {
         let Some(footage) = &clip.footage else {
@@ -29,19 +35,18 @@ fn pieces(src: &Source, video: &Video, ffmpeg: &Ffmpeg) -> Result<Vec<AudioPiece
         let info = ffmpeg
             .probe_file(&file)
             .map_err(|e| ToolError(e.to_string()))?;
-        if info.has_audio {
-            out.push(AudioPiece {
-                file,
-                in_ms: footage.in_ms,
-                start_ms: placed.start_ms,
-                duration_ms: u64::from(clip.duration_ms),
-                gain: 1.0,
-                fade_in_ms: 0,
-                fade_out_ms: 0,
-            });
+        if !info.has_audio {
+            continue;
+        }
+        let length = u64::from(clip.duration_ms);
+        if clip.retimed() {
+            let wav = retimed_wav(ffmpeg, clip, &file, footage.in_ms, dir)?;
+            out.push(footage_piece(wav, 0, placed.start_ms, length));
+        } else {
+            out.push(footage_piece(file, footage.in_ms, placed.start_ms, length));
         }
     }
-    if let Some(track) = &video.audio {
+    for track in video.sound_tracks() {
         let project = src
             .dir()
             .ok_or_else(|| ToolError("the project has no folder, so no sound track".into()))?;
@@ -51,27 +56,42 @@ fn pieces(src: &Source, video: &Video, ffmpeg: &Ffmpeg) -> Result<Vec<AudioPiece
             .probe_duration(&file)
             .map_err(|e| ToolError(e.to_string()))?;
         let start = u64::from(track.start_ms);
-        let left = video.duration_ms().saturating_sub(start);
-        if left > 0 {
-            out.push(AudioPiece {
-                file,
-                in_ms: 0,
-                start_ms: start,
-                duration_ms: length.min(left),
-                gain: track.gain,
-                fade_in_ms: u64::from(track.fade_in_ms),
-                fade_out_ms: u64::from(track.fade_out_ms),
-            });
+        let room = video.duration_ms().saturating_sub(start);
+        let played = track.played_ms(length, room);
+        if played > 0 {
+            out.push(piece_of(&track, file, start, played));
         }
     }
     Ok(out)
 }
 
+fn retimed_wav(
+    ffmpeg: &Ffmpeg,
+    clip: &od_core::Clip,
+    file: &Path,
+    in_ms: u64,
+    dir: &Path,
+) -> Result<PathBuf, ToolError> {
+    let mut hasher = DefaultHasher::new();
+    (
+        file,
+        in_ms,
+        clip.duration_ms,
+        format!("{:?}{:?}", clip.speed, clip.speed_ramp),
+    )
+        .hash(&mut hasher);
+    let wav = dir.join(format!("retimed-{:016x}.wav", hasher.finish()));
+    if !wav.is_file() {
+        retime_clip_sound(ffmpeg, clip, file, in_ms, &wav)?;
+    }
+    Ok(wav)
+}
+
 /// Whether `video` can have sound at all: a sound track, or footage that may carry its own.
 pub fn may_have_sound(src: &Source, video: &NodeId) -> bool {
-    src.doc
-        .video(video)
-        .is_some_and(|v| v.audio.is_some() || v.clips.iter().any(|c| c.footage.is_some()))
+    src.doc.video(video).is_some_and(|v| {
+        !v.sound_tracks().is_empty() || v.clips.iter().any(|c| c.footage.is_some())
+    })
 }
 
 /// What the mix is made from: the pieces and their files' sizes and times.
@@ -96,6 +116,8 @@ fn mix_key(pieces: &[AudioPiece], duration_ms: u64) -> u64 {
             p.gain.to_bits(),
             p.fade_in_ms,
             p.fade_out_ms,
+            format!("{:?}{:?}", p.role, p.duck),
+            p.pan.to_bits(),
             stamp,
         )
             .hash(&mut hasher);
@@ -115,7 +137,7 @@ pub fn prepare(
         .doc
         .video(video)
         .ok_or_else(|| ToolError(format!("video {video} does not exist")))?;
-    let pieces = pieces(src, v, ffmpeg)?;
+    let pieces = pieces(src, v, ffmpeg, dir)?;
     if pieces.is_empty() {
         return Ok(None);
     }
@@ -176,6 +198,9 @@ mod tests {
     #[test]
     fn the_mix_key_follows_the_sound_and_nothing_else() {
         let piece = AudioPiece {
+            role: od_media::PieceRole::Music,
+            pan: 0.0,
+            duck: None,
             file: PathBuf::from("/nowhere/a.wav"),
             in_ms: 0,
             start_ms: 0,

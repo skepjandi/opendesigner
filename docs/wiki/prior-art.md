@@ -31,6 +31,23 @@ Open-source video editor ("the open-source CapCut alternative"), MIT. The origin
 | Logic in Rust, UI replaceable | Core rule ([Architecture](./architecture.md)) |
 | Desktop app is still a scaffold | Do not depend on it; read it, do not port it |
 
+## HyperFrames ([heygen-com/hyperframes](https://github.com/heygen-com/hyperframes))
+
+Open-source (Apache-2.0) framework that renders HTML, CSS and seekable animation (GSAP, Lottie, Three.js, WebGL shaders) to deterministic MP4 through headless Chrome and FFmpeg, built for coding agents. Read 2026-11-20 from its README and docs; its source was not read. A free Studio desktop app (HeyGen account sign-in; a paid Pro plan adds HeyGen models) and a browser editor sit on top; a hosted MCP connector, AWS Lambda and Cloud Run rendering, and share links are HeyGen cloud.
+
+- **Agents on the picture.** Studio has Select, Draw and Comment tools, a "Pending video edits" queue sent to the agent as one batch, comments pinned to a moment, and a per-run Undo. Pointing as guidance is therefore not unique to us for video.
+- **Catalog and skills.** About 450 installable blocks, nine skills shipped through plugin marketplaces (Claude Code, Codex, Cursor, Copilot).
+- **Templates.** Typed variables with `portrays` metadata, `--variables` and `--batch rows.json`.
+- **Agent rails.** A linter with stable rule codes, `can()` dry-run, receipts (`dispatched`, `saved`, `verified`), a frame-capture tool so the agent sees its result.
+
+| Observation | For OpenDesigner |
+|-------------|------------------|
+| Any web content is a layer; documents are HTML | Not copied: documents are data ([invariant 3](../../AGENTS.md)); motion is typed keyframes, blocks and looks instead |
+| Block catalog | Built smaller: 31 blocks that expand into ordinary operations ([Store Assets](./store-assets.md)) |
+| Lint codes, dry-run, receipts, variables, batch | Built: [Lint Rules](./lint-rules.md), `apply_ops` `dry_run`, `batch_export` |
+| Preview and render share one runtime | Ours: preview and export share `render`; preview is a cached, reduced-size draw |
+| Account, cloud render, Pro models | Not copied: local files, no account |
+
 ## Penpot ([penpot.app](https://penpot.app))
 
 Open-source design tool. Ships an official **MCP server** that works through Penpot's Plugin API ("data queries, transformation and creation operations") for any MCP-capable AI client, free.
@@ -59,4 +76,4 @@ The reference product for UX. Its remote **MCP server** (`https://mcp.figma.com/
 
 ## Gap this project fills
 
-Design tools have MCP servers; video editors have MCP servers; agents can already drive both. None treats the user's *pointing* (selection, pinned notes, hand corrections) as the primary, structured way to guide an agent, none is aimed at producing store-compliant asset sets, and the open ones are not native. That intersection is the product.
+Design tools have MCP servers; video editors have MCP servers; agents can already drive both, and Hyperframes Studio lets the user point, draw and comment on a video for the agent. What none does is use the same structured pointing for stills *and* video, through typed, validated, attributed operations on open data files, produce store-compliant asset sets with validated presets, and run as a native app with no account. That intersection is the product.

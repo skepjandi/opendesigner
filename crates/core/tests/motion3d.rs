@@ -371,7 +371,7 @@ fn devices_and_animations_round_trip_through_a_project_folder() {
     let dir = tempfile::tempdir().unwrap();
     project::save(dir.path(), &f.s).unwrap();
     let manifest = std::fs::read_to_string(dir.path().join("od.toml")).unwrap();
-    assert!(manifest.contains("format = 2"));
+    assert!(manifest.contains("format = 3"));
     let loaded = project::load(dir.path()).unwrap();
     assert_eq!(loaded.document(), f.s.document());
 }
@@ -391,7 +391,7 @@ fn a_version_one_project_still_loads() {
     project::save(dir.path(), &f.s).unwrap();
     let manifest = dir.path().join("od.toml");
     let text = std::fs::read_to_string(&manifest).unwrap();
-    std::fs::write(&manifest, text.replace("format = 2", "format = 1")).unwrap();
+    std::fs::write(&manifest, text.replace("format = 3", "format = 1")).unwrap();
     let loaded = project::load(dir.path()).unwrap();
-    assert_eq!(loaded.document().format, 2);
+    assert_eq!(loaded.document().format, 3);
 }
