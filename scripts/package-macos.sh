@@ -10,6 +10,7 @@ set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 out="${1:-$root/dist}"
+tmp_gpl="$(mktemp)"
 qmake="${QMAKE:-$(command -v qmake || true)}"
 [ -n "$qmake" ] || { echo "set QMAKE to Qt 6's qmake" >&2; exit 1; }
 qt_bin="$(dirname "$qmake")"
@@ -60,6 +61,14 @@ echo "==> licensing check"
   echo "removing GPL-only Qt part: $path"
   rm -rf "$path"
 done)
+# Qt's FFmpeg backend is a GPL build; the app runs the user's own ffmpeg instead, so a bundle
+# that carries Qt's FFmpeg libraries would break invariant 10.
+(cd "$app" && find . | grep -iE "lib(avcodec|avformat|avutil|swscale|swresample|postproc)" || true) > "$tmp_gpl"
+if [ -s "$tmp_gpl" ]; then
+  echo "the bundle carries Qt's FFmpeg libraries (GPL):" >&2
+  cat "$tmp_gpl" >&2
+  exit 2
+fi
 left="$(cd "$app" && find . | grep -iE "$banned" || true)"
 if [ -n "$left" ]; then
   echo "GPL-only Qt modules are still in the bundle:" >&2
@@ -91,5 +100,6 @@ grep -q "SELFTEST OK" "$log" || { cat "$log" >&2; exit 3; }
 echo "SELFTEST OK from the bundle"
 rm -rf "$work" "$home"
 
+rm -f "$tmp_gpl"
 echo "==> $app"
 du -sh "$app"

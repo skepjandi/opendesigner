@@ -74,14 +74,23 @@ The agent can put music and sound effects on a video. It finds them on [Freesoun
 
 ### Preview in the Video tab
 
-Play in the Video tab plays a **cached preview**, not a live render. When a video is shown (or chosen, or changed) a worker thread draws every frame of it from a detached copy of the project (`od_agent::video_preview`, the same copy `export_video` uses), one frame after the other so footage is decoded as a stream, and keeps each as a PNG in memory. The window shows "Preparing preview N%"; Play starts once the first second is drawn and keeps going while the playhead stays behind the drawn frames (it shows "Buffering" and waits when it catches up). The playhead follows the clock (real elapsed time), and the video loops at its end.
+Play in the Video tab plays a **cached preview**, not a live render. When a video is shown (or chosen, or changed) a worker thread draws every picture of it from a detached copy of the project (`od_agent::video_preview`, the same copy `export_video` uses), one picture after the other so footage is decoded as a stream. The window shows "Preparing preview N%"; Play starts once the first second is drawn and keeps going while the playhead stays behind the drawn pictures (it shows "Buffering" and waits when it catches up). The video loops at its end.
+
+How the preview stays cheap:
+
+- **Pictures are kept by what they were made from.** `od_agent::preview_key` gives every moment a key: the video's settings, the clips and overlays on screen with the design frames they show, the animations, the colour tokens and the project's media files (as the file stores them, so a field added to a clip later is in the key without touching the code). The renderer's own `signature` says when two moments of one video look alike; the key also says what they look like. After an edit only the pictures whose key changed are drawn again; the rest are taken from the preview being replaced (`Preview::reusable`).
+- **A picture that holds still is drawn once** and shared (`VideoRenderer::signature`).
+- **The size and the rate follow the machine.** `od_agent::preview_tier` tries the longest sides 360, 540, 720 and 960 px at 15 fps or the video's own rate, and takes the best tier whose pictures fit the memory cap and can be drawn in a share of the video's length. The first preview measures the machine (three pictures) and hands the estimate to the next one, so a fast machine gets a sharp, smooth preview and a slow one a small, cheap one.
+- **Pictures are kept run-length coded**, not as PNG (`od_agent::preview_frames`): a flat design frame shrinks by more than ten times, and a picture that does not shrink (footage) stays raw. Qt reads the raw pixels through the same image provider the canvas uses.
+- **The sound is mixed once.** The footage clips' own sound and the sound track are mixed into a WAV (`od_media::mix_wav`, the same pieces and the same graph the export mixes) and played by Qt Multimedia (`MediaPlayer` and `AudioOutput`). The mix is named by what went into it, so an edit that leaves the sound alone does not mix again.
 
 Limits, stated in the panel too:
 
-- **Small and slow:** longest side at most 360 px, at most 15 pictures a second (or the video's own rate when lower). The exported MP4 is full size at the video's rate.
-- **Silent:** footage sound is not played (no Qt Multimedia); the export mixes it in.
-- **Bounded memory:** about 256 MiB of encoded pictures; a picture that holds still (see `VideoRenderer::signature`) is drawn once and shared. At the cap the preview keeps what it has and the panel says so.
-- **Cancelled, not repaired, on change:** any change to the project (the log grows: the user's edit, an agent's, undo) makes the cache stale; the worker stops before its next frame and a new one starts. Switching video or closing the panel cancels it too. While the cache is not there yet, scrubbing draws the one frame asked for on demand.
+- **Sharp and smooth, within the cap:** the tier is chosen as above; the exported MP4 is full size at the video's rate.
+- **With sound:** the mixed WAV is played; a video with no sound says so, and a machine without `ffmpeg` says the sound could not be mixed.
+- **Bounded memory:** about 256 MiB of pictures; a picture shown more than once is counted once. At the cap the preview keeps what it has and the panel says so.
+- **Repaired, not cancelled, on change:** any change to the project (the log grows: the user's edit, an agent's, undo) makes the cache stale; the new preview takes the pictures the edit left alone and draws the rest. Switching video or closing the panel cancels it too. While the cache is not there yet, scrubbing draws the one picture asked for on demand.
+- **The playhead follows the sound.** Two clocks run, the wall clock and the sound player's position. `app::preview::step` decides each tick: the player's position is the reference and the playhead leans toward it by a tenth of a tick (so a player that reports its position in coarse steps does not make the picture step), and when the two are more than 150 ms apart (after a stall, a seek or a loop) the player is moved to the playhead, which is right.
 
 ## Timeline model (intended)
 
@@ -100,6 +109,8 @@ What follows for us:
 - **One FFmpeg in the process** ([invariant 10](../../AGENTS.md)). Our `media` crate and Qt's backend must share the same major version; if we ship our own FFmpeg build, Qt loads it too. OpenCut's pin (8.1.3) is a different major than Qt's, so it is not directly reusable.
 - **Use Qt Multimedia for what it is good at** (plain playback, audio output, `QVideoSink` access to decoded frames, `QVideoFrameInput` to feed frames in) and our `media` crate for what an editor needs (frame-accurate decode, export, thumbnails, waveforms). Where they overlap, pick one in the Phase 0 video spike and delete the other path.
 - **Do not depend on the deprecated native backends.**
+
+What the app does with it (built, 2026-11-20): the preview's sound is a WAV that `od_media` mixes with the user's own `ffmpeg` and Qt Multimedia plays; nothing of ours is decoded by Qt, so no backend is chosen by us and the app does not need Qt's FFmpeg libraries. `crates/app/build.rs` links `Multimedia` (LGPLv3, checked in [Qt Desktop](./qt-desktop.md#licensing)) and `scripts/package-macos.sh` refuses a bundle that carries Qt's FFmpeg libraries, which would be a GPL build.
 
 ## Open questions
 
