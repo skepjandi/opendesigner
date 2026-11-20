@@ -592,6 +592,31 @@ pub enum Operation {
         index: usize,
         node: Node,
     },
+    /// Declare a template variable: a typed slot bound to node properties (`Document.variables`).
+    /// Bound nodes take its default at once.
+    DeclareVariable {
+        variable: crate::variables::NewVariable,
+    },
+    /// Remove a variable; the bound nodes keep the values they show now.
+    RemoveVariable { id: NodeId },
+    /// Change one property of a variable (label, description, portrays, default, enum_values, binds).
+    SetVariable {
+        id: NodeId,
+        prop: crate::variables::VariableProperty,
+    },
+    /// Set a variable's value: every bound node property is rewritten through `set`.
+    SetVariableValue {
+        id: NodeId,
+        value: crate::variables::VarValue,
+    },
+    /// Put back a variable and the node values it had. Written by the history; front ends
+    /// cannot issue it.
+    RestoreVariable {
+        id: NodeId,
+        index: usize,
+        variable: Option<crate::variables::Variable>,
+        sets: Vec<crate::variables::Assignment>,
+    },
 }
 
 impl Operation {
@@ -619,6 +644,11 @@ impl Operation {
             Operation::RestoreVideo { .. } => "restore_video",
             Operation::RestoreClip { .. } => "restore_clip",
             Operation::Restore { .. } => "restore",
+            Operation::DeclareVariable { .. } => "declare_variable",
+            Operation::RemoveVariable { .. } => "remove_variable",
+            Operation::SetVariable { .. } => "set_variable",
+            Operation::SetVariableValue { .. } => "set_variable_value",
+            Operation::RestoreVariable { .. } => "restore_variable",
         }
     }
 }
@@ -836,6 +866,11 @@ pub fn apply(
                 touched: vec![id.clone()],
             })
         }
+        Operation::DeclareVariable { .. }
+        | Operation::RemoveVariable { .. }
+        | Operation::SetVariable { .. }
+        | Operation::SetVariableValue { .. }
+        | Operation::RestoreVariable { .. } => crate::variables::apply(doc, op, allow_internal),
         Operation::Reparent { id, parent, index } => reparent(doc, id, parent, *index),
         Operation::Delete { id } => {
             let loc = node_loc(doc, id)?;

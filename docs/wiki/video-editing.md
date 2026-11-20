@@ -62,6 +62,8 @@ A video's sound track is any file in `media/` named `.mp3`, `.wav`, `.m4a`, `.aa
 
 The bundled icons, generated pictures and pack art (`search_assets`, `make_asset`, `import_asset`; [Store Assets](./store-assets.md#asset-packs-icons-shapes-backgrounds-sounds)) are PNGs in `media/`. They reach a video through the same typed ops as any picture: an `image` node (`image: media/<file>`) in a design frame, and the frame is a clip or an overlay. Sounds from `import_asset` or `make_sound` are the track set with `set_video` `audio`. The `video` playbook tells the agent to take inventory (`list_media`, `list_footage`, `list_sounds`, `search_assets`) before building.
 
+**One video per row.** `opendesigner export <project> --batch rows.json --video <id>` and the `batch_export` tool render a video once per row of template-variable values (a name, a headline, a language) on a scratch copy of the document, each through the normal `export_video` path and the same preset check, at most 20 rows a call ([Agent Integration](./agent-integration.md#template-variables-and-batch-export)). Per-language text overrides (`locales`) are a different mechanism: see [Document Format](./document-format.md#template-variables).
+
 ## Finding sounds: Freesound
 
 The agent can put music and sound effects on a video. It finds them on [Freesound](https://freesound.org), a library of Creative Commons sounds, through its API v2 (`crates/agent/src/freesound.rs`).

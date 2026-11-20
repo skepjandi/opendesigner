@@ -259,6 +259,8 @@ pub struct Document {
     pub pages: Vec<Page>,
     /// Timelines of clips that show frames of the pages.
     pub videos: Vec<crate::video::Video>,
+    /// Template variables: typed slots bound to node properties (`crate::variables`).
+    pub variables: Vec<crate::variables::Variable>,
 }
 
 /// Where a node sits: the page index and the child indices from the page root.
@@ -278,6 +280,7 @@ impl Document {
             locales: BTreeMap::new(),
             pages: Vec::new(),
             videos: Vec::new(),
+            variables: Vec::new(),
         }
     }
 
@@ -490,6 +493,7 @@ impl Document {
             }
             self.validate_tree(&page.root, 0, &mut seen, &mut total)?;
         }
+        self.validate_variables()?;
         self.validate_videos()
     }
 
