@@ -295,6 +295,45 @@ A chat panel (Kino's "chat panel in your project") that drives an agent over the
 - **Plans.** An ACP `plan` update (the agent's whole plan; each one replaces the last) is shown as a checklist above the conversation and cleared when the user sends the next message. Checked with real omp: its `todo` tool arrives as `plan` updates the client parses.
 - **Not built:** images in prompts, session resume and a session list, several conversations, per-turn checkpoints named after the chat (the checkpoint comes from the MCP `apply_ops` turn as for any agent).
 
+## Document tools
+
+> **Status: Implemented** (`crates/core/src/{lint,dryrun,variables}.rs`, `crates/agent/src/{doctools,batch,plugin}.rs`, `crates/cli/src/doccmd.rs`). Verified on macOS; nothing here is platform-specific except the `ffmpeg` the video batch runs.
+
+### Lint: `validate_document`
+
+`od_core::lint::lint(&Document, &LintOptions) -> Vec<Finding>` finds what makes a design or a video wrong without making it invalid, with **stable rule codes** (`OD001`...). The full table, what each rule means and what it does not know is in [Lint rules](./lint-rules.md). A finding is `{code, severity: error|warn|info, node?, frame?, video?, message, hint}`. The core has no fonts or file access beyond `media/`, so the caller supplies text measuring (the renderer's, through the `TextMeasure` trait), the project folder and the export targets (`LintOptions`); a rule without its input is skipped, not guessed.
+
+- **MCP:** `validate_document {min_severity?}` (read-only) returns `{ok, errors, warnings, infos, findings}`; `ok` is `errors == 0`. The skill's loop, the server's connect-time instructions and the tool descriptions tell agents to call it before they finish a turn and to fix every error and warning or say why one was left. `review_frame` stays the picture-level review of one frame; the linter covers the whole document and the videos.
+- **CLI:** `opendesigner lint <project> [--json] [--fail-on warn|error] [--preset <id>]...` (default `--fail-on error`; exit code 2 when a finding is at or above it). `--preset` adds a store preset's size rule as an export target for `OD041`.
+
+### Dry run and receipts: `apply_ops`
+
+`Workspace::check_ops(&[Operation]) -> OpsCheck` applies a batch to a scratch copy of the document and reports, per operation, whether it would apply, the nodes it would touch and, for a rejection, a stable error code, the message and a hint. The history, the checkpoints, the document and the files are untouched. A real `Session::apply` of the same batch on the same state changes exactly what was reported (`would_change` equals the receipt's `touched`, `would_create` its `created`); a test pins this.
+
+- **MCP:** `apply_ops {ops, dry_run: true}` returns `{stage: "dry_run", ok, would_change, would_create, ops: [{index, op, ok, touched, error?: {code, message, hint}}]}`. No pre-turn checkpoint is taken. A real call returns `{stage: "applied", saved, transaction, turn, checkpoint_before, created, touched}`, so an agent can tell an accepted change (a transaction and a checkpoint exist) from a checked one. `saved` says the project folder was written. A rejection leads with the code: `E_NODE_NOT_FOUND: node n_9 does not exist` then `hint: ...`.
+- **CLI:** `opendesigner apply <project> <ops.json> --dry-run` prints the same JSON and exits 2 when the batch would be rejected; a real apply prints `stage: "applied"` and leads a rejection with the code.
+- **Codes** (`OpError::code`, added on top of the typed errors without changing their text): `E_NODE_NOT_FOUND`, `E_DUPLICATE_ID`, `E_INVALID_ID`, `E_OUT_OF_BOUNDS`, `E_CYCLE`, `E_BAD_INDEX`, `E_ROOT_IMMUTABLE`, `E_NOT_APPLICABLE`, `E_NO_CHILDREN`, `E_INVALID_PAINT`, `E_UNKNOWN_TOKEN`, `E_TOKEN_IN_USE`, `E_LIMIT`, `E_INTERNAL_ONLY`, `E_NOTHING_TO`, `E_CHECKPOINT_NOT_FOUND`, `E_ANNOTATION_NOT_FOUND`, `E_PAGE_NOT_FOUND`, `E_VIDEO_NOT_FOUND`, `E_CLIP_NOT_FOUND`, `E_FRAME_IN_USE`, `E_ARRANGE`, `E_NODE_ANIMATED`, `E_INTERNAL`. The set only grows. The match over `OpError` is exhaustive, so a new error variant must name its code.
+- **Not built:** a `verified` stage (render and check after the apply). Today an agent verifies with `render_preview` and `validate_document`.
+
+### Template variables and batch export
+
+Variables are described in [Document Format](./document-format.md#template-variables). `list_variables` shows an agent the slots, their kinds, what they `portray` and where they are bound.
+
+`opendesigner export <project> --batch rows.json (--frame <id> | --video <id>) [--preset <id>] [--out-template 'exports/{name}.png'] [--strict-variables] [--scale n]` and the `batch_export` tool render the project once per row. The rows file is a JSON array (or `{"rows": [...]}`) of `{name, variables: {<id>: string|number|boolean}, locale?}`.
+
+- **The project is never changed.** Each row is applied to a scratch copy of the document through `set_variable_value` on a throwaway session (`Workspace::scratch`), then rendered with the ordinary still or video export, so the row is validated against `--preset` like any export. The only files written are the exports.
+- **All or nothing per row.** A row exports completely and validates, or reports its error and writes nothing; other rows still run. The report is `{ok, exported, failed, rows: [{name, ok, files, warnings, error}]}`; the CLI prints it and exits 2 when any row failed.
+- **Untrusted input.** The rows file is capped at 1 MiB, 100 rows (20 for video: each is a whole encode) and 100 variables per row; unknown keys, wrong types, bad names and duplicate names are refused before anything renders. Names are `[A-Za-z0-9_-]{1,64}`.
+- **Strict mode.** By default an unknown variable or a value that does not fit its variable is skipped with a warning in the row's report and the variable keeps its value. `--strict-variables` (`strict_variables` in the tool) fails the row instead.
+- **Output confinement.** `--out-template` must start with `exports/`; `{name}` and `{index}` (from 1) are replaced; what remains must be a plain file name directly in `exports/` ending `.png` (`.mp4` for a video). `..`, an absolute path, separators, a leading dot and a collision between rows are refused up front. An `exports/` folder or an output file that is a symlink is never written through.
+- **Videos** go through the existing export path (`video_export::export_video`, needs `ffmpeg`), one MP4 per row.
+
+### Agent plugin
+
+`plugins/opendesigner/` is the skill packaged for agents that install through a plugin marketplace: `.claude-plugin/plugin.json` (Claude Code), `.codex-plugin/plugin.json` (Codex) and `skills/opendesigner/` (the output of `skill::generate()`), with `.claude-plugin/marketplace.json` at the repository root pointing at it. `scripts/package-agent-plugin.sh` (or `opendesigner package-plugin [--check]`) regenerates every file from the tool schema; `plugin::tests::the_committed_plugin_is_exactly_what_the_generator_writes` fails while the committed files differ, so run the script and commit after changing a tool, a playbook or the version.
+
+The plugin holds the skill and nothing else (invariant 6): no `mcpServers`, no token, no endpoint, no hooks. The MCP connect step stays the explicit one the app shows (Connect tab, or `opendesigner serve-mcp`), because the endpoint needs the app running and a per-install token; the plugin's README explains the flow. The app's installer remains the explicit install path. `[INFERENCE]` The manifests follow the published Claude Code and Codex plugin formats; neither has been run against a live install here.
+
 ## Headless
 
-`opendesigner` CLI runs the same operations against a project folder without a window: `export`, `validate`, `apply` (a file of operations), `serve-mcp`. Used in CI and by agents on machines with no display (Kino documents headless use on Linux servers; OpenCut lists a headless mode in its plans).
+`opendesigner` CLI runs the same operations against a project folder without a window: `export` (one frame, or `--batch` rows of template variables), `validate`, `apply` (a file of operations, `--dry-run` to check them first), `lint` ([rules](./lint-rules.md)), `package-plugin`, `serve-mcp`. Used in CI and by agents on machines with no display (Kino documents headless use on Linux servers; OpenCut lists a headless mode in its plans).

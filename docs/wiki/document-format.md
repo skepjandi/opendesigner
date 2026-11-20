@@ -9,6 +9,7 @@
 | Node model | `model.rs` | `Document` (pages, tokens, id counter), `Page` with an immutable `Group` root, `Node` with kind, geometry, `visible`, `opacity`, `fill`, `stroke`, `corner_radius`, text fields (`text`, `font_size`, `font_family`, `font_weight` 100 to 900, `text_align` left/center/right, `line_height` as a multiple of the size; all optional with the defaults Lato, 400, left, 1.2), `image` path, `children`. A text node's `width` wraps its lines (0 means no wrapping); its `height` is not used for layout. Text is one run in one style: per-run styles, tracking and fonts per range are not built. Ids are `n_<counter>` / `p_<counter>` minted by the document and never reused (`next_id` only grows) |
 | Paint | `paint.rs` | `#rrggbb`, `#rrggbbaa` or `{token.name}` resolved against the document's tokens |
 | Operations | `ops.rs` | `create`, `set` (one typed `Property`), `move`, `reparent`, `delete`, `set_localized_text` (a translation of a text node in a language; `text: null` removes it, and a language with no translations disappears), `set_token` (define, recolor or, with `value: null`, remove a design token; removal is refused while a node uses it; users of the token are reported as touched), and the history-only `restore`. Each returns the resolved forward operation, its inverse and the touched ids |
+| Template variables | `variables.rs` | `Document.variables`: typed slots bound to node properties, written by `declare_variable`, `set_variable`, `set_variable_value` and `remove_variable` (see [Template variables](#template-variables)). Saved as `[[variables]]` tables in `od.toml`, absent when there are none |
 | History | `history.rs` | `Session`: append-only log of `Transaction`s (actor, optional turn id, kind `edit`/`undo`/`redo`/`restore`), atomic apply with rollback, undo/redo as appended transactions, checkpoints as log positions, `restore(checkpoint)` appends the inverse of everything after it, `changed_since(position)` for the agent-change outline |
 | Limits | `limits.rs` | Coordinates ±1,000,000; sizes 0..=16,384; 1,000 operations per transaction; 100,000 nodes; nesting 64; name 200 and text 10,000 characters; 64 MB per project file. Values are rounded to four decimals |
 | Project I/O | `project.rs` | `od.toml` (format, name, id counter, page ids, tokens), `pages/<id>.json`, `.od/history/log.jsonl`, `.od/history/checkpoints.json`; atomic writes; a newer `format` is refused; unknown fields, duplicate ids, a lagging id counter and ids that are not `[A-Za-z0-9_-]{1,64}` are rejected on load |
@@ -144,6 +145,33 @@ A video may animate any number of a node over its own time. `Video.animations` h
 The value holds before the first key and after the last, and eases in between. The animatable properties are `x`, `y`, `width`, `height`, `opacity`, `corner_radius` and, on a 3D device, `rotate_x`, `rotate_y`, `rotate_z`, `zoom`, `fov`, `light_angle`, `shadow`, `glare` and `screen_scroll`. Keys with no animation (an empty list) remove it; a node with an animation cannot be deleted until the animation is removed. `Video.motion_blur` (2 to 16 pictures) blends the moments across a half-frame shutter while something moves.
 
 The named moves (`spin`, `turntable`, `swing`, `flip_in`, `hero_reveal`, `rise_in`, `drop_in`, `float`, `push_in`, `pull_back`, `orbit`, `scroll_screen`, `fade_in`, `fade_out`, `slide_in_left`, `slide_in_right`) are not a separate format: they are written as ordinary keyframes, measured from the node's designed pose.
+
+## Template variables
+
+`Document.variables` is a list of typed, document-level slots whose value is written into the properties of the nodes they are bound to. They exist so one design can be rendered many times with different content (`opendesigner export --batch`, the `batch_export` tool) and so an agent knows which slots carry identity. A variable never renders by itself.
+
+```json
+{"op": "declare_variable", "variable": {
+  "id": "title", "kind": "string", "label": "Headline", "description": "The product name",
+  "portrays": "subject_name", "default": "Welcome",
+  "binds": [{"node": "n_7", "prop": "text"}]}}
+```
+
+| Field | Meaning |
+|-------|---------|
+| `id` | `[A-Za-z0-9_-]{1,64}`, unique among variables |
+| `kind` | `string`, `number`, `color`, `bool`, `enum`, `image` or `font` |
+| `label`, `description` | for people and agents (200 and 500 characters at most) |
+| `portrays` | optional: `subject_name`, `subject_domain`, `subject_tagline`, `subject_logo` or `host_identity`: the slot carries the identity of what the piece is about (or who makes it), so an agent must get it from the user and never invent it |
+| `default`, `value` | the declared default and what the bound nodes show now. A value is a string (also color, enum choice, `media/` reference, font family), a number or a boolean, and must agree with `kind` |
+| `enum_values` | the choices of an `enum` (1 to 32, each at most 64 characters, unique); empty for every other kind |
+| `binds` | at most 64 `{node, prop}` pairs, no duplicates |
+
+Which node properties a kind may drive: `string` drives `text` and `name`; `number` drives `x`, `y`, `width`, `height`, `opacity`, `corner_radius`, `font_size`, `font_weight`, `line_height` and the 3D device numbers; `color` drives `fill`; `bool` drives `visible`; `enum` drives `text`, `text_align`, `image_fit` and `model`; `image` drives `image`; `font` drives `font_family`. At most 100 variables.
+
+**How a value change works.** `set_variable_value {id, value}` checks the value against the kind, then writes every bound node property through the same validated path as `set` (so bounds, applicability and tokens are checked and a failure rolls the whole transaction back). It is one operation in one transaction: attribution, undo, redo, checkpoints and `restore` all work, and the bound nodes are reported as touched. Its inverse is the history-only `restore_variable`, which carries the variable and the old node values. `declare_variable` writes the default into the bound nodes at once; `set_variable` changes `label`, `description`, `portrays`, `default`, `enum_values` or `binds` (a node newly bound takes the current value); `remove_variable` leaves the nodes as they are. A bound node that was deleted is skipped when a value is written and reported by the linter (`OD060`), so deleting a node never blocks the others. Undoing the delete brings the binding back to life.
+
+**Variables and translations are different things.** `Document.locales` holds a translation of a text node per language (`set_localized_text`): keyed by node, per language, for the same piece in several languages. A variable is keyed by slot, has one value at a time, and is for different pieces (one card per customer). They combine without duplicating: a variable writes the node's own `text` (the default every language falls back to), and in a language that has a translation of that node the translation wins. The linter reports that case (`OD062`) so nobody is surprised; to have a variable drive a translated text, translate the variable's value in each language too. Batch rows may name a `locale` to render a language.
 
 ## History and checkpoints
 
