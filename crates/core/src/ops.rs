@@ -53,6 +53,13 @@ pub enum Property {
     ScreenScroll(Option<f64>),
     /// A recording on a device3d's screen (`null` shows the node's `image` again).
     ScreenFootage(Option<Footage>),
+    /// The colour grade of an image node (`null` for none).
+    Grade(Option<crate::grade::Grade>),
+    /// One number of an image node's grade (what keyframes move).
+    GradeParam {
+        param: crate::grade::GradeParam,
+        value: f64,
+    },
 }
 
 impl Property {
@@ -87,6 +94,8 @@ impl Property {
             Property::Glare(_) => "glare",
             Property::ScreenScroll(_) => "screen_scroll",
             Property::ScreenFootage(_) => "screen_footage",
+            Property::Grade(_) => "grade",
+            Property::GradeParam { .. } => "grade_param",
         }
     }
 
@@ -109,6 +118,7 @@ impl Property {
             | Property::TextAlign(_)
             | Property::LineHeight(_) => kind == Text,
             Property::Image(_) | Property::ImageFit(_) => matches!(kind, Image | Device3d),
+            Property::Grade(_) | Property::GradeParam { .. } => kind == Image,
             Property::Model(_)
             | Property::RotateX(_)
             | Property::RotateY(_)
@@ -224,6 +234,18 @@ fn apply_property(
             Property::Image(replace(&mut node.image, v))
         }
         Property::ImageFit(v) => Property::ImageFit(replace(&mut node.image_fit, v)),
+        Property::Grade(v) => {
+            let v = v.as_ref().map(crate::grade::Grade::checked).transpose()?;
+            Property::Grade(replace(&mut node.grade, v.filter(|g| !g.is_neutral())))
+        }
+        Property::GradeParam { param, value } => {
+            let value = param.checked(value)?;
+            let mut grade = node.grade.unwrap_or_default();
+            let old = param.get(&grade);
+            param.set(&mut grade, value);
+            node.grade = Some(grade).filter(|g| !g.is_neutral());
+            Property::GradeParam { param, value: old }
+        }
         device_prop => apply_device_property(node, device_prop)?,
     })
 }
@@ -822,7 +844,7 @@ pub fn apply(
             node,
             prop,
             keys,
-        } => crate::animation::apply(doc, video, node, *prop, keys),
+        } => crate::animation::apply(doc, video, node, *prop, keys, allow_internal),
         Operation::SetToken { name, value } => set_token(doc, name, value.as_deref()),
         Operation::SetLocalizedText { locale, id, text } => {
             let old = doc.set_locale_text(locale, id, text.as_deref())?;
@@ -938,6 +960,11 @@ fn current_value(node: &Node, prop: &Property) -> Property {
         Property::LineHeight(_) => Property::LineHeight(node.line_height),
         Property::Image(_) => Property::Image(node.image.clone()),
         Property::ImageFit(_) => Property::ImageFit(node.image_fit),
+        Property::Grade(_) => Property::Grade(node.grade),
+        Property::GradeParam { param, .. } => Property::GradeParam {
+            param: *param,
+            value: param.get(&node.grade.unwrap_or_default()),
+        },
         device_prop => {
             let d = node.device3d.clone().unwrap_or_default();
             match device_prop {

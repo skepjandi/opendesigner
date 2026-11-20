@@ -183,6 +183,12 @@ pub struct ClipRow {
     /// How long the transition into this clip really lasts.
     pub transition_ms: u32,
     pub motion: crate::video::Motion,
+    /// Footage speed (1 is as recorded) and, for a ramp, its keys; `source_span_ms` is how much
+    /// of the file the clip plays.
+    pub speed: f64,
+    pub speed_ramp: Vec<crate::speed::SpeedKey>,
+    pub source_span_ms: u64,
+    pub grade: Option<crate::grade::Grade>,
 }
 
 /// A video with its clips placed.
@@ -229,6 +235,33 @@ fn kind_name<T: serde::Serialize>(v: &T) -> String {
         .unwrap_or_default()
 }
 
+/// What a clip's speed, ramp and grade add to its sentence.
+fn retiming_and_grade(clip: &crate::video::Clip) -> String {
+    let mut out = String::new();
+    if !clip.speed_ramp.is_empty() {
+        out.push_str(&format!(
+            ", speed ramp over {} keys (plays {} of the file)",
+            clip.speed_ramp.len(),
+            secs(clip.source_span_ms())
+        ));
+    } else if clip.speed != 1.0 {
+        out.push_str(&format!(
+            ", at {}x speed (plays {} of the file)",
+            clip.speed,
+            secs(clip.source_span_ms())
+        ));
+    }
+    if let Some(g) = &clip.grade {
+        let set: Vec<String> = crate::grade::GradeParam::ALL
+            .iter()
+            .filter(|p| p.get(g) != 0.0)
+            .map(|p| format!("{} {}", p.as_str(), p.get(g)))
+            .collect();
+        out.push_str(&format!(", graded ({})", set.join(", ")));
+    }
+    out
+}
+
 /// The video as a list of sentences: what is on screen when, and what leads into what.
 fn story_of(doc: &Document, v: &crate::video::Video) -> Vec<String> {
     let placed = v.placed();
@@ -267,8 +300,9 @@ fn story_of(doc: &Document, v: &crate::video::Video) -> Vec<String> {
             String::new()
         };
         out.push(format!(
-            "{arrive}{what} for {}{zoom} (until {})",
+            "{arrive}{what} for {}{zoom}{} (until {})",
             secs(u64::from(clip.duration_ms)),
+            retiming_and_grade(clip),
             secs(p.end_ms)
         ));
     }
@@ -357,6 +391,10 @@ pub fn videos(doc: &Document) -> Vec<VideoRow> {
                         transition: c.transition,
                         transition_ms: p.overlap_ms,
                         motion: c.motion,
+                        speed: c.speed,
+                        speed_ramp: c.speed_ramp.clone(),
+                        source_span_ms: c.source_span_ms(),
+                        grade: c.grade,
                     })
                     .collect(),
                 overlays: v.overlays.clone(),

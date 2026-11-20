@@ -12,6 +12,7 @@ use std::collections::{BTreeMap, HashMap};
 use serde::{Deserialize, Serialize};
 
 use crate::error::OpError;
+use crate::grade::GradeParam;
 use crate::model::{Document, Node, NodeId, NodeKind};
 use crate::ops::{AppliedOp, Operation, Property, set_property};
 use crate::video::{Ease, MAX_VIDEO_MS, Video};
@@ -41,10 +42,31 @@ pub enum AnimProp {
     Shadow,
     Glare,
     ScreenScroll,
+    GradeExposure,
+    GradeContrast,
+    GradeSaturation,
+    GradeTemperature,
+    GradeTint,
+    GradeVignette,
+    GradeBlur,
 }
 
 impl AnimProp {
-    pub const ALL: [AnimProp; 15] = [
+    /// The grade number this property moves, for the image nodes that carry a grade.
+    fn grade_param(self) -> Option<GradeParam> {
+        Some(match self {
+            AnimProp::GradeExposure => GradeParam::Exposure,
+            AnimProp::GradeContrast => GradeParam::Contrast,
+            AnimProp::GradeSaturation => GradeParam::Saturation,
+            AnimProp::GradeTemperature => GradeParam::Temperature,
+            AnimProp::GradeTint => GradeParam::Tint,
+            AnimProp::GradeVignette => GradeParam::Vignette,
+            AnimProp::GradeBlur => GradeParam::Blur,
+            _ => return None,
+        })
+    }
+
+    pub const ALL: [AnimProp; 22] = [
         AnimProp::X,
         AnimProp::Y,
         AnimProp::Width,
@@ -60,6 +82,13 @@ impl AnimProp {
         AnimProp::Shadow,
         AnimProp::Glare,
         AnimProp::ScreenScroll,
+        AnimProp::GradeExposure,
+        AnimProp::GradeContrast,
+        AnimProp::GradeSaturation,
+        AnimProp::GradeTemperature,
+        AnimProp::GradeTint,
+        AnimProp::GradeVignette,
+        AnimProp::GradeBlur,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -79,6 +108,13 @@ impl AnimProp {
             AnimProp::Shadow => "shadow",
             AnimProp::Glare => "glare",
             AnimProp::ScreenScroll => "screen_scroll",
+            AnimProp::GradeExposure => "grade_exposure",
+            AnimProp::GradeContrast => "grade_contrast",
+            AnimProp::GradeSaturation => "grade_saturation",
+            AnimProp::GradeTemperature => "grade_temperature",
+            AnimProp::GradeTint => "grade_tint",
+            AnimProp::GradeVignette => "grade_vignette",
+            AnimProp::GradeBlur => "grade_blur",
         }
     }
 
@@ -100,6 +136,10 @@ impl AnimProp {
             AnimProp::Shadow => Property::Shadow(value),
             AnimProp::Glare => Property::Glare(value),
             AnimProp::ScreenScroll => Property::ScreenScroll(Some(value)),
+            grade => Property::GradeParam {
+                param: grade.grade_param().unwrap_or(GradeParam::Exposure),
+                value,
+            },
         }
     }
 
@@ -123,6 +163,10 @@ impl AnimProp {
             AnimProp::Glare => d.map(|d| d.glare),
             // unset means centred, which is halfway down a long capture
             AnimProp::ScreenScroll => d.map(|d| d.screen_scroll.unwrap_or(0.5)),
+            grade => grade
+                .grade_param()
+                .filter(|_| node.kind == NodeKind::Image)
+                .map(|p| p.get(&node.grade.unwrap_or_default())),
         }
     }
 
@@ -142,6 +186,7 @@ impl AnimProp {
             AnimProp::Zoom => (d::MIN_ZOOM, d::MAX_ZOOM),
             AnimProp::Fov => (d::MIN_FOV, d::MAX_FOV),
             AnimProp::LightAngle => (-d::MAX_LIGHT_ANGLE, d::MAX_LIGHT_ANGLE),
+            grade => grade.grade_param().map_or((0.0, 0.0), GradeParam::range),
         }
     }
 }
@@ -354,7 +399,16 @@ pub(crate) fn apply(
     node: &NodeId,
     prop: AnimProp,
     keys: &[Key],
+    allow_internal: bool,
 ) -> Result<AppliedOp, OpError> {
+    let snapped;
+    let keys = match doc.videos.iter().find(|v| &v.id == video) {
+        Some(v) if !allow_internal => {
+            snapped = crate::snap::keys(keys, v.fps);
+            &snapped[..]
+        }
+        _ => keys,
+    };
     let at = doc
         .videos
         .iter()
