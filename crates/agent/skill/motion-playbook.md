@@ -6,9 +6,25 @@ whole video process; this page is about movement.
 
 ## What the engine gives you
 
-- **Clips** of a design frame or of footage, in order, each with a **transition** into it (cut, fade,
-  slide_left/right/up/down, dip, zoom_in) and a slow **motion** (zoom from `scale_from` to
-  `scale_to`, 1 to 3) with an **ease**.
+- **Clips** of a design frame or of footage, in order, each with a **transition** into it (`cut`,
+  `fade`, `slide_left/right/up/down` which push the old clip out, `dip` through black, `flash`
+  through white, `zoom_in`, `wipe_left/right/up/down` which uncover the new clip from an edge,
+  `iris` which opens a circle from the middle, `blur_dissolve`, `glitch_slice`) and a slow
+  **motion** (zoom from `scale_from` to `scale_to`, 1 to 3) with an **ease**.
+- **Speed** of footage: `set_clip` `speed` (0.25 to 4) plays the file faster or slower, and
+  `speed_ramp` (keys `{at_ms, rate, ease?}` in clip time) eases the rate for a slow-motion
+  moment or a speed-up. The clip's `duration_ms` is its length on the timeline; it plays
+  `duration_ms * speed` of the file, and its sound follows (pitch kept).
+- **Grade**: `set_clip` `grade` on a clip of footage or a frame, and `set` `grade` on an image
+  node, take numbers `exposure` (-3 to 3 stops), `contrast`, `saturation`, `temperature` (cool to
+  warm), `tint` (green to magenta) all -1 to 1, `vignette` 0 to 1 and `blur` 0 to 50, or a
+  `look` (`warm`, `cool`, `mono`, `faded`, `punchy`) that fills them in (numbers you add win). Keep
+  one look across a piece. The numbers of an image node's grade can be keyframed with `animate`
+  (`grade_exposure`, `grade_contrast`, `grade_saturation`, `grade_temperature`, `grade_tint`,
+  `grade_vignette`, `grade_blur`), for example a pull-focus blur from 20 to 0.
+- **Time snaps to frames.** Every start, duration, in point, transition and key you give is rounded
+  to the video's frame grid (at 24 fps, 1010 ms becomes 1000 and 1030 becomes 1042); the result of
+  the operation and `list_videos` show the value that was kept.
 - **Overlays**: any design frame laid over the whole video for a time, with an **enter** and **exit**
   (fade, slide_up/down/left/right, pop, zoom, none), a duration for each (`fade_ms`) and an **ease**.
   A frame without a fill is transparent, so an overlay can be one headline, one badge, one arrow.
@@ -19,7 +35,7 @@ whole video process; this page is about movement.
   keyframed over the video's time with `animate` in `apply_ops`, or with a named move through
   `animate_preset`. A video can also blur what moves (`motion_blur`, 2 to 16 pictures). See the
   `3d` playbook for devices in 3D.
-- Sound: footage keeps its own, and a video can carry one extra sound track
+- Sound: footage keeps its own, and a video can carry up to eight sound tracks
   (see Sound below). `make_sound` synthesizes effects and simple loops, not music: for a music bed
   use `search_sounds` or ask the user for a track rather than promising one.
 
@@ -44,7 +60,7 @@ whole video process; this page is about movement.
 - **One thing moves at a time** unless it is a group; a group staggers, in reading order.
 - **Match the transition to the meaning.** Slide for "next", fade for "and then", dip for a chapter
   change, zoom_in for "closer look", cut for energy and for beats. Use one or two kinds in a
-  piece, not all eight. Prefer cuts on the beat of the story over fancy transitions.
+  piece, not all of them. Prefer cuts on the beat of the story over fancy transitions.
 - **The camera is the clip's zoom.** Use a slow push on every static frame; vary the direction
   (some push in, some pull out from 1.08 to 1.0) so it feels directed, not automatic.
 - **Frame 0 is not empty.** Start with something on screen; open on the strongest picture.
@@ -89,8 +105,8 @@ silence (an App Store preview autoplays muted, but still gets a track for when s
 - **Hits on cuts.** Put accents where the picture changes: a `hit` or `pop` on a hard cut or an
   impact, a `whoosh` or `swoosh_up/down` across a slide or zoom transition, a `riser` into a
   reveal, a `chime` on a success state, a `click` or `tick` on a tap. One accent per event, not per
-  word. Only one track plays at a time: pick the one that carries the video, or make one longer
-  sound (`beat`, `drone`) and let the picture carry the accents.
+  word. Tracks mix: put a hit or whoosh on its own `sfx` track at the cut's time (`add_sound_track`
+  with `start_ms`), or let one longer sound (`beat`, `drone`) carry the video.
 - **Silence is a tool.** A short gap before the reveal makes the hit land. Do not fill every moment.
 - **Where sound comes from.** `make_sound` (kind, duration_ms, seed, pitch_hz): synthesized in the
   project, no licence. `search_sounds` then `import_sound` for music and real recordings (needs
@@ -99,4 +115,14 @@ silence (an App Store preview autoplays muted, but still gets a track for when s
   as minimax-mcp, if `get_guidance` lists one: write the script short, ask before spending credits
   on long text, then import the file it makes. `list_sounds` shows what is in `media/`.
 - **Setting it.** `{"op": "set_video", "video": ..., "prop": {"name": "audio", "value": {"file":
-  "media/x.wav", "start_ms": 0, "gain": 0.25, "fade_in_ms": 500, "fade_out_ms": 600}}}`.
+  "media/x.wav", "start_ms": 0, "gain": 0.25, "fade_in_ms": 500, "fade_out_ms": 600}}}` sets the
+  one older track. For several, `add_sound_track {video, file, role, start_ms, in_ms, out_ms, gain,
+  fade_in_ms, fade_out_ms, pan}` (role `music`, `voice` or `sfx`; up to 8), then `set_sound_track`
+  and `remove_sound_track`.
+- **Ducking.** A `music` track with `duck: {depth: 0.7}` lowers itself while any `voice` track
+  speaks and comes back after (`attack_ms` 40 and `release_ms` 500 by default; the mix is one ffmpeg
+  pass). Prefer ducking to a very low fixed gain: the bed can be 0.4 to 0.6 between lines.
+- **Pauses and waveforms.** `detect_pauses {file}` lists the quiet stretches of audio or footage,
+  `remove_pauses {video, clip}` cuts them out of a footage clip as one undoable step (the clip
+  becomes several; overlays, captions and tracks keep their times, so move them after), and
+  `get_waveform {file}` gives peaks to find where a hit should land. They need ffmpeg.

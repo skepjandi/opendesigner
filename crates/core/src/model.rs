@@ -8,8 +8,10 @@ use crate::limits::{self, finite_in, text_within};
 use crate::paint::{Paint, valid_token_name};
 
 /// Version of the on-disk project format. A loader refuses a newer one. Version 2 added 3D
-/// devices and keyframe animations; every version 1 project is a valid version 2 project.
-pub const FORMAT_VERSION: u32 = 2;
+/// devices and keyframe animations; version 3 added sound tracks, captions, clip speed and grades,
+/// transitions and template variables. Every older project is a valid version 3 project, because
+/// each addition is an optional field.
+pub const FORMAT_VERSION: u32 = 3;
 
 /// Stable identifier of a node or page. Never reused within a document.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
@@ -167,6 +169,9 @@ pub struct Node {
     /// The 3D device a `device3d` node draws (present exactly on those nodes).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub device3d: Option<crate::device3d::Device3d>,
+    /// Colour grading and effects on an image node (`crate::grade`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grade: Option<crate::grade::Grade>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub children: Vec<Node>,
 }
@@ -211,6 +216,7 @@ impl Node {
             image: None,
             image_fit: None,
             device3d: (kind == NodeKind::Device3d).then(crate::device3d::Device3d::default),
+            grade: None,
             children: Vec::new(),
         }
     }
@@ -259,6 +265,9 @@ pub struct Document {
     pub pages: Vec<Page>,
     /// Timelines of clips that show frames of the pages.
     pub videos: Vec<crate::video::Video>,
+    /// Template variables: typed slots bound to node properties (`crate::variables`).
+    pub variables: Vec<crate::variables::Variable>,
+    pub(crate) index: crate::index::NodeIndex,
 }
 
 /// Where a node sits: the page index and the child indices from the page root.
@@ -278,6 +287,8 @@ impl Document {
             locales: BTreeMap::new(),
             pages: Vec::new(),
             videos: Vec::new(),
+            variables: Vec::new(),
+            index: crate::index::NodeIndex::default(),
         }
     }
 
@@ -302,6 +313,9 @@ impl Document {
             name: name.to_string(),
             root: Node::blank(root_id, NodeKind::Group, "Root".to_string()),
         });
+        if let Some(page) = self.pages.last() {
+            self.index.note_page(self.pages.len() - 1, &page.root);
+        }
         Ok(id)
     }
 
@@ -410,13 +424,7 @@ impl Document {
     }
 
     pub fn locate(&self, id: &NodeId) -> Option<Location> {
-        for (page, p) in self.pages.iter().enumerate() {
-            let mut path = Vec::new();
-            if find_path(&p.root, id, &mut path) {
-                return Some(Location { page, path });
-            }
-        }
-        None
+        self.index.locate(&self.pages, id)
     }
 
     pub fn node_at(&self, loc: &Location) -> Option<&Node> {
@@ -490,6 +498,7 @@ impl Document {
             }
             self.validate_tree(&page.root, 0, &mut seen, &mut total)?;
         }
+        self.validate_variables()?;
         self.validate_videos()
     }
 
@@ -547,20 +556,6 @@ impl Document {
         }
         Ok(())
     }
-}
-
-fn find_path(node: &Node, id: &NodeId, path: &mut Vec<usize>) -> bool {
-    if &node.id == id {
-        return true;
-    }
-    for (i, child) in node.children.iter().enumerate() {
-        path.push(i);
-        if find_path(child, id, path) {
-            return true;
-        }
-        path.pop();
-    }
-    false
 }
 
 /// Field-level checks shared by loading and by `Restore`.
@@ -625,6 +620,15 @@ pub(crate) fn validate_node_fields(
             });
         }
         (None, _) => {}
+    }
+    if let Some(grade) = &node.grade {
+        if node.kind != NodeKind::Image {
+            return Err(OpError::NotApplicable {
+                property: "grade",
+                kind: node.kind.as_str(),
+            });
+        }
+        grade.checked()?;
     }
     Ok(())
 }

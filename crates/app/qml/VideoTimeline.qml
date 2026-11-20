@@ -53,8 +53,13 @@ Item {
     readonly property int laneCount: Math.max(1, laneOf.length ? Math.max.apply(null, laneOf) + 1 : 1)
     readonly property int videoTrackH: clipH + 10
     readonly property int overlayTrackH: laneCount * laneH + 10
-    readonly property int audioTrackH: audioH + 8
-    readonly property int tracksH: videoTrackH + overlayTrackH + audioTrackH
+    readonly property var soundRows: video && video.sound_rows ? video.sound_rows : []
+    readonly property int audioRowH: audioH + 8
+    readonly property int audioTrackH: Math.max(1, soundRows.length) * audioRowH
+    readonly property bool hasCaptions: !!video && !!video.captions && video.captions.cues.length > 0
+    readonly property int captionTrackH: hasCaptions ? laneH + 14 : 0
+    readonly property int captionTop: videoTrackH + overlayTrackH + audioTrackH
+    readonly property int tracksH: captionTop + captionTrackH
 
     implicitHeight: rulerH + tracksH
     clip: true
@@ -64,6 +69,10 @@ Item {
     readonly property color overlayFill: "#35264a"
     readonly property color overlayEdge: "#b07ad8"
     readonly property color audioFill: "#1f3a2c"
+    readonly property color voiceFill: "#1f3347"
+    readonly property color sfxFill: "#3a2f1f"
+    readonly property color captionFill: "#2a2a3a"
+    function soundFill(role) { return role === "voice" ? voiceFill : role === "sfx" ? sfxFill : audioFill }
 
     function pad2(n) { return n < 10 ? "0" + n : String(n) }
     function tc(ms) {
@@ -123,11 +132,15 @@ Item {
         x: 0; y: tl.rulerH
         width: tl.headerW
         Repeater {
-            model: [
-                { icon: "film", label: "Video", h: tl.videoTrackH },
-                { icon: "layers", label: "Overlays", h: tl.overlayTrackH },
-                { icon: "music", label: "Sound", h: tl.audioTrackH }
-            ]
+            model: {
+                const rows = [
+                    { icon: "film", label: "Video", h: tl.videoTrackH },
+                    { icon: "layers", label: "Overlays", h: tl.overlayTrackH },
+                    { icon: "music", label: "Sound", h: tl.audioTrackH }
+                ]
+                if (tl.hasCaptions) rows.push({ icon: "type", label: "Captions", h: tl.captionTrackH })
+                return rows
+            }
             delegate: Rectangle {
                 id: head
                 required property var modelData
@@ -231,6 +244,8 @@ Item {
             Rectangle { y: tl.videoTrackH + tl.overlayTrackH; width: hf.contentWidth; height: tl.audioTrackH; color: Theme.field }
             Rectangle { y: tl.videoTrackH - 1; width: hf.contentWidth; height: 1; color: Theme.border }
             Rectangle { y: tl.videoTrackH + tl.overlayTrackH - 1; width: hf.contentWidth; height: 1; color: Theme.border }
+            Rectangle { visible: tl.hasCaptions; y: tl.captionTop; width: hf.contentWidth; height: tl.captionTrackH; color: Theme.panel }
+            Rectangle { visible: tl.hasCaptions; y: tl.captionTop - 1; width: hf.contentWidth; height: 1; color: Theme.border }
             // the end of the video
             Rectangle { x: tl.xOf(tl.duration); width: Math.max(0, hf.contentWidth - x); height: hf.contentHeight; color: Qt.rgba(0, 0, 0, 0.35) }
             MouseArea {
@@ -432,68 +447,107 @@ Item {
                 font.pixelSize: 11
             }
 
-            // sound
-            Rectangle {
-                id: soundBar
-                readonly property var a: tl.video ? tl.video.audio : null
-                visible: !!a
-                x: a ? tl.xOf(a.start_ms) + 1 : 0
-                y: tl.videoTrackH + tl.overlayTrackH + 5
-                width: a ? Math.max(6, (tl.duration - a.start_ms) / 1000 * tl.zoom - 2) : 0
-                height: tl.audioH
-                radius: 5
-                color: tl.audioFill
-                border.width: tl.selKind === "audio" ? 2 : 1
-                border.color: tl.selKind === "audio" ? Theme.accent : Theme.success
-                clip: true
-                // the fades, drawn from the start and (assuming the sound runs to the end of the video) the end
-                Rectangle {
-                    visible: !!soundBar.a && soundBar.a.fade_in_ms > 0
-                    width: soundBar.a ? Math.min(soundBar.width, soundBar.a.fade_in_ms / 1000 * tl.zoom) : 0
-                    height: parent.height
-                    gradient: Gradient {
-                        orientation: Gradient.Horizontal
-                        GradientStop { position: 0; color: Qt.rgba(0, 0, 0, 0.6) }
-                        GradientStop { position: 1; color: "transparent" }
+            // sound: the older single track, then the others, one row each
+            Repeater {
+                model: tl.soundRows
+                delegate: Rectangle {
+                    id: soundBar
+                    required property var modelData
+                    required property int index
+                    readonly property var a: modelData
+                    readonly property real room: Math.max(0, tl.duration - a.start_ms)
+                    readonly property real fileEnd: a.file_ms ? Math.min(a.file_ms, a.out_ms ? a.out_ms : a.file_ms) : 0
+                    readonly property real playedMs: a.file_ms ? Math.min(room, Math.max(0, fileEnd - (a.in_ms ? a.in_ms : 0))) : room
+                    readonly property bool selected: tl.selKind === (a.legacy ? "audio" : "track") && (a.legacy || tl.selId === a.id)
+                    x: tl.xOf(a.start_ms) + 1
+                    y: tl.videoTrackH + tl.overlayTrackH + 5 + index * tl.audioRowH
+                    width: Math.max(6, playedMs / 1000 * tl.zoom - 2)
+                    height: tl.audioH
+                    radius: 5
+                    color: tl.soundFill(a.role)
+                    border.width: selected ? 2 : 1
+                    border.color: selected ? Theme.accent : Theme.success
+                    clip: true
+                    // the waveform of the part of the file that plays
+                    Canvas {
+                        id: wave
+                        anchors.fill: parent
+                        visible: soundBar.a.peaks.length > 0 && !!soundBar.a.file_ms
+                        onPaint: {
+                            const ctx = getContext("2d")
+                            ctx.clearRect(0, 0, width, height)
+                            const peaks = soundBar.a.peaks
+                            if (!peaks.length || !soundBar.a.file_ms) return
+                            ctx.fillStyle = Qt.rgba(1, 1, 1, 0.32)
+                            const mid = height / 2
+                            const from = soundBar.a.in_ms ? soundBar.a.in_ms : 0
+                            for (let x = 0; x < width; x += 2) {
+                                const t = from + x / tl.zoom * 1000
+                                const i = Math.min(peaks.length - 1, Math.floor(t / soundBar.a.file_ms * peaks.length))
+                                const h = Math.max(1, peaks[i] * (height - 6))
+                                ctx.fillRect(x, mid - h / 2, 1, h)
+                            }
+                        }
+                        Connections {
+                            target: soundBar
+                            function onWidthChanged() { wave.requestPaint() }
+                        }
+                        Connections {
+                            target: tl
+                            function onZoomChanged() { wave.requestPaint() }
+                        }
+                        onVisibleChanged: if (visible) requestPaint()
+                        Component.onCompleted: requestPaint()
                     }
-                }
-                Rectangle {
-                    visible: !!soundBar.a && soundBar.a.fade_out_ms > 0
-                    readonly property real w: soundBar.a ? Math.min(soundBar.width, soundBar.a.fade_out_ms / 1000 * tl.zoom) : 0
-                    x: soundBar.width - w
-                    width: w
-                    height: parent.height
-                    gradient: Gradient {
-                        orientation: Gradient.Horizontal
-                        GradientStop { position: 0; color: "transparent" }
-                        GradientStop { position: 1; color: Qt.rgba(0, 0, 0, 0.6) }
+                    // the fades, drawn from the start and the end of what plays
+                    Rectangle {
+                        visible: soundBar.a.fade_in_ms > 0
+                        width: Math.min(soundBar.width, soundBar.a.fade_in_ms / 1000 * tl.zoom)
+                        height: parent.height
+                        gradient: Gradient {
+                            orientation: Gradient.Horizontal
+                            GradientStop { position: 0; color: Qt.rgba(0, 0, 0, 0.6) }
+                            GradientStop { position: 1; color: "transparent" }
+                        }
                     }
-                }
-                Row {
-                    x: 8
-                    anchors.verticalCenter: parent.verticalCenter
-                    spacing: 5
-                    Icon { name: "music"; size: 12; color: Theme.text; anchors.verticalCenter: parent.verticalCenter }
-                    Label {
-                        text: soundBar.a ? soundBar.a.file.replace("media/", "") : ""
-                        color: Theme.text
-                        font.pixelSize: 10
+                    Rectangle {
+                        visible: soundBar.a.fade_out_ms > 0
+                        readonly property real w: Math.min(soundBar.width, soundBar.a.fade_out_ms / 1000 * tl.zoom)
+                        x: soundBar.width - w
+                        width: w
+                        height: parent.height
+                        gradient: Gradient {
+                            orientation: Gradient.Horizontal
+                            GradientStop { position: 0; color: "transparent" }
+                            GradientStop { position: 1; color: Qt.rgba(0, 0, 0, 0.6) }
+                        }
+                    }
+                    Row {
+                        x: 8
                         anchors.verticalCenter: parent.verticalCenter
+                        spacing: 5
+                        Icon { name: "music"; size: 12; color: Theme.text; anchors.verticalCenter: parent.verticalCenter }
+                        Label {
+                            text: soundBar.a.role + "  " + soundBar.a.file.replace("media/", "")
+                            color: Theme.text
+                            font.pixelSize: 10
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
                     }
-                }
-                MouseArea {
-                    anchors.fill: parent
-                    preventStealing: true
-                    onPressed: m => {
-                        tl.forceActiveFocus()
-                        tl.picked("audio", "")
-                        tl.seek(tl.msAtContent(mapToItem(hf.contentItem, m.x, 0).x))
+                    MouseArea {
+                        anchors.fill: parent
+                        preventStealing: true
+                        onPressed: m => {
+                            tl.forceActiveFocus()
+                            tl.picked(soundBar.a.legacy ? "audio" : "track", soundBar.a.legacy ? "" : soundBar.a.id)
+                            tl.seek(tl.msAtContent(mapToItem(hf.contentItem, m.x, 0).x))
+                        }
+                        onPositionChanged: m => { if (pressed) tl.seek(tl.msAtContent(mapToItem(hf.contentItem, m.x, 0).x)) }
                     }
-                    onPositionChanged: m => { if (pressed) tl.seek(tl.msAtContent(mapToItem(hf.contentItem, m.x, 0).x)) }
                 }
             }
             Row {
-                visible: !!tl.video && !tl.video.audio
+                visible: !!tl.video && tl.soundRows.length === 0
                 x: hf.contentX + 8
                 y: tl.videoTrackH + tl.overlayTrackH + (tl.audioTrackH - height) / 2
                 spacing: 8
@@ -505,6 +559,39 @@ Item {
                     font.pixelSize: 11
                     tip: "Ask the agent to find a sound on Freesound"
                     onClicked: tl.findSound()
+                }
+            }
+            // captions: one block per cue
+            Repeater {
+                model: tl.hasCaptions ? tl.video.captions.cues : []
+                delegate: Rectangle {
+                    id: cueItem
+                    required property var modelData
+                    x: tl.xOf(modelData.start_ms) + 1
+                    y: tl.captionTop + 7
+                    width: Math.max(4, (modelData.end_ms - modelData.start_ms) / 1000 * tl.zoom - 2)
+                    height: tl.laneH
+                    radius: 4
+                    color: tl.captionFill
+                    border.width: 1
+                    border.color: Theme.muted
+                    clip: true
+                    Label {
+                        x: 5
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: cueItem.modelData.text
+                        color: Theme.text
+                        font.pixelSize: 10
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        preventStealing: true
+                        onPressed: m => {
+                            tl.forceActiveFocus()
+                            tl.seek(tl.msAtContent(mapToItem(hf.contentItem, m.x, 0).x))
+                        }
+                        onPositionChanged: m => { if (pressed) tl.seek(tl.msAtContent(mapToItem(hf.contentItem, m.x, 0).x)) }
+                    }
                 }
             }
         }

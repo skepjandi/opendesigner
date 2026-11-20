@@ -1,0 +1,22 @@
+{
+  "name": "opendesigner",
+  "owner": {
+    "name": "OpenDesigner contributors"
+  },
+  "plugins": [
+    {
+      "category": "design",
+      "description": "Teaches coding agents to design store assets, images and videos in the OpenDesigner editor over MCP. Ships the skill only; connect the editor's MCP server as the README describes.",
+      "keywords": [
+        "design",
+        "video",
+        "app-store",
+        "mcp",
+        "opendesigner"
+      ],
+      "name": "opendesigner",
+      "source": "./plugins/opendesigner",
+      "version": "0.0.1"
+    }
+  ]
+}

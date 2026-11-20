@@ -137,6 +137,10 @@ pub fn generate() -> Vec<SkillFile> {
             path: "references/formats.md",
             contents: playbook::topic("formats").unwrap_or_default().to_string(),
         },
+        SkillFile {
+            path: "references/blocks-playbook.md",
+            contents: playbook::topic("blocks").unwrap_or_default().to_string(),
+        },
     ]
 }
 
@@ -189,7 +193,9 @@ project files directly: that bypasses validation, checkpoints and the user's vie
    Prefer `set` and `move` on existing nodes over deleting and recreating them: ids stay stable and
    the user's outline and notes stay attached. Use design tokens (`{brand.gold}`) over hard-coded
    colors when `list_tokens` has a fitting one. Never invent ids: they are minted for you, and the
-   result lists what was created.
+   result lists what was created. Unsure a batch is valid (a delete, a large reparent)? Send it with
+   `dry_run: true` first: you get what would change, or a stable error code and a hint, and nothing
+   is applied. An applied result says `stage: applied` and names the checkpoint and the changed ids.
 4. **Check your work.** `render_preview` again. For store assets, run `export` with the right
    `preset`. A listing is a set: use `export_set` for several frames, or lay the slides edge to
    edge on one wide frame (so a background or a device can cross the seams) and use
@@ -198,7 +204,8 @@ project files directly: that bypasses validation, checkpoints and the user's vie
    you exactly which rule broke; fix that, do not argue with it. For a phone or tablet around a
    screenshot, call `device_template`, put its node in `apply_ops`, and ask the user to drop the
    capture on the `Screen` (or use an image from `list_media` as the template's `image`).
-5. **Close the loop.** Call `resolve_annotation` for each note you acted on, saying what you
+5. **Close the loop.** Call `validate_document` and fix every error and warning it reports (stable
+   codes like `OD013`), or say why you left one. Call `resolve_annotation` for each note you acted on, saying what you
    changed in the user's terms (\"raised the headline to 96 px\"). End your turn by saying what you
    changed and what you left alone.
 
@@ -380,10 +387,12 @@ for motion, use several overlays or `set_overlay` over time. Match the video's s
 
 The ids of a created video and clips come back in `created` (`v_...`, `c_...`). Width and height
 are even numbers; a frame of another shape is scaled to cover the video and cropped in the middle,
-so use frames of the video's shape. A transition (`cut`, `fade`, `slide_left`, `slide_right`)
+so use frames of the video's shape. A transition (`cut`, `fade`, `slide_left`, `slide_right`, `slide_up`, `slide_down`, `dip`, `zoom_in`,
+`wipe_left`, `wipe_right`, `wipe_up`, `wipe_down`, `iris`, `flash`, `blur_dissolve`, `glitch_slice`)
 overlaps the end of the clip before it, so it makes the video shorter by its length; the first
 clip's transition is not shown. `motion` zooms slowly from `scale_from` to `scale_to` (1 to 3) over
-the clip. Change a clip with `set_clip` (`duration_ms`, `frame`, `transition`, `motion`), reorder
+the clip. Change a clip with `set_clip` (`duration_ms`, `frame`, `source`, `transition`, `motion`, and for footage
+`speed`, `speed_ramp`; for any clip `grade`), reorder
 with `move_clip`, remove with `remove_clip`. A frame that a clip shows cannot be deleted until the
 clip is removed. Look at a moment with `render_video_frame` (try the middle of a transition) and
 write the file with `export_video`, which needs `ffmpeg` on the user's computer and tells you if it
@@ -400,9 +409,29 @@ never makes the video longer: it is cut at the end. To find music or sound effec
 hit, chime, drone, beat, stinger; no licence, but no music), `search_sounds` (Freesound; it needs
 the user's token, and the answer says so if there is none), `import_sound` to bring one into
 `media/`, or `import_file` with a sound file of the user's (`find_files` kind audio); `list_sounds`
-shows them all. Then set the track. A Freesound sound keeps its
+shows them all. Then set the track. For more than one (music, a voice-over, effects), use
+`add_sound_track` (role `music`, `voice` or `sfx`, up to 8; start, trim, gain, fades, pan; music can
+`duck` under the voice), `set_sound_track` and `remove_sound_track`. Captions are data: bring a
+transcript from the user's own speech server with `import_captions` (`srt`, `vtt`, `words_json`;
+OpenDesigner does no speech recognition), or estimate from a script with `captions_from_script`,
+then `set_caption_style`. `detect_pauses`, `remove_pauses` and `get_waveform` need ffmpeg. A Freesound sound keeps its
 author's license: show the attribution the tool gives you (title, author, license, link) wherever
 the sound is used, and prefer CC0.
+
+Template variables: slots you can fill many times (one card per customer, one video per
+language). Declare one with its kind and what it drives, then set its value:
+
+```json
+{"ops": [{"op": "declare_variable", "variable": {
+            "id": "title", "kind": "string", "label": "Headline", "default": "Welcome",
+            "portrays": "subject_name", "binds": [{"node": "n_7", "prop": "text"}]}}]}
+{"ops": [{"op": "set_variable_value", "id": "title", "value": "Acme"}]}
+```
+
+Setting a value rewrites every bound node property through the same validated path as `set`, so it
+is attributed, checkpointed and undoable like any other edit. `list_variables` shows the slots and
+what they portray; a slot that portrays the subject's identity must come from the user, never from
+you. `batch_export` renders the design once per row of values without changing the project.
 "##;
 
 fn store_specs_md() -> String {

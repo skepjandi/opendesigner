@@ -67,6 +67,10 @@ pub struct EditorState {
     showcase: crate::showcase::ShowcaseSession,
     /// What the user copied (`od_core::arrange::Clip` as JSON), kept in memory.
     clipboard: Option<String>,
+    /// The picture of the open frame, kept so an edit redraws only what it touched.
+    canvas: Mutex<crate::canvas::Canvas>,
+    /// The sound mixed for the video the Video tab plays.
+    audio: crate::preview::AudioSlot,
 }
 
 /// A running or finished preview and what it was made from: it is stale when the project has
@@ -177,6 +181,8 @@ impl EditorState {
             preview: None,
             showcase: Default::default(),
             clipboard: None,
+            canvas: Mutex::default(),
+            audio: Default::default(),
         }
     }
 
@@ -203,6 +209,8 @@ impl EditorState {
             .first()
             .and_then(|f| NodeId::parse(&f.id).ok());
         self.ws = Some(Arc::new(Mutex::new(ws)));
+        self.forget_canvas();
+        self.audio.stop();
         self.active_frame = first_frame;
         self.language = None;
         self.agent_changed.clear();
@@ -765,8 +773,9 @@ impl EditorState {
 
     /// Starts drawing the preview of `video` on a worker thread unless the one already running
     /// or finished is for the same video and the project has not changed since. A different
-    /// video, or an edit, cancels the old one first. Returns the status, or `{"error": ...}`
-    /// when the preview could not be started.
+    /// video, or an edit, replaces it: the new preview takes the pictures the edit left alone
+    /// from the old one, which is then cancelled. The sound is mixed alongside. Returns the
+    /// status, or `{"error": ...}` when the preview could not be started.
     pub fn preview_start(&mut self, video: &str) -> Res<String> {
         let id = parse_id(video)?;
         let log_len = self.with_ws(|ws| Ok(ws.session.log().len()))?;
@@ -775,16 +784,22 @@ impl EditorState {
             .as_ref()
             .is_some_and(|p| p.video == video && p.log_len == log_len);
         if !current {
-            let (src, log_len) = self.with_ws(|ws| {
+            let (src, sound_src) = self.with_ws(|ws| {
                 Ok((
                     od_agent::video_export::Source::of(ws),
-                    ws.session.log().len(),
+                    od_agent::video_export::Source::of(ws),
                 ))
             })?;
+            let reuse = self
+                .preview
+                .as_ref()
+                .map(|p| p.preview.reusable())
+                .unwrap_or_default();
             let preview = match od_agent::video_preview::Preview::start(
                 src,
                 &id,
                 od_agent::video_preview::Limits::default(),
+                reuse,
             ) {
                 Ok(p) => p,
                 Err(e) => return Ok(json!({ "error": e.0 }).to_string()),
@@ -795,13 +810,16 @@ impl EditorState {
                 log_len,
                 preview,
             });
+            if let Err(e) = self.audio.start(sound_src, &id) {
+                return Ok(json!({ "error": e }).to_string());
+            }
         }
         Ok(self.preview_status())
     }
 
     /// The preview's progress as JSON: `video`, `ready`, `total`, `fps`, `width`, `height`,
-    /// `done`, `capped`, `error` and `stale` (the project changed since it was made). `{}` when
-    /// there is none.
+    /// `drawn`, `reused`, `done`, `capped`, `error`, `stale` (the project changed since it was
+    /// made) and `audio` (see [`crate::preview::AudioSlot::status`]). `{}` when there is none.
     pub fn preview_status(&self) -> String {
         let Some(p) = &self.preview else {
             return "{}".into();
@@ -812,21 +830,37 @@ impl EditorState {
         let mut status = serde_json::to_value(p.preview.status()).unwrap_or(Value::Null);
         status["video"] = json!(p.video);
         status["stale"] = json!(stale);
+        status["audio"] = self.audio.status();
         status.to_string()
     }
 
-    /// Picture `index` of the preview as a PNG data URL; empty when it is not drawn yet.
-    pub fn preview_frame(&self, index: u64) -> String {
-        self.preview
-            .as_ref()
-            .and_then(|p| p.preview.frame(index))
-            .map(|png| format!("data:image/png;base64,{}", STANDARD.encode(png.as_slice())))
-            .unwrap_or_default()
+    /// Hands picture `index` of the preview, as premultiplied RGBA, to `sink`; `false` when it
+    /// is not drawn yet. With `max_side` the picture is shrunk to at most that on a side.
+    pub fn preview_frame_into(
+        &self,
+        index: u64,
+        max_side: Option<u32>,
+        sink: &mut dyn FnMut(u32, u32, &[u8]),
+    ) -> bool {
+        let Some(frame) = self.preview.as_ref().and_then(|p| p.preview.frame(index)) else {
+            return false;
+        };
+        let mut pixels = Vec::new();
+        frame.decode_into(&mut pixels);
+        match max_side {
+            Some(side) => {
+                let (w, h, small) = shrink(frame.width, frame.height, &pixels, side);
+                sink(w, h, &small);
+            }
+            None => sink(frame.width, frame.height, &pixels),
+        }
+        true
     }
 
-    /// Cancels and forgets the preview.
+    /// Cancels and forgets the preview and its sound.
     pub fn preview_stop(&mut self) {
         self.preview = None;
+        self.audio.stop();
     }
 
     /// For a video file the user chose: the project folder to copy it into, so the copy (it can
@@ -1059,49 +1093,60 @@ impl EditorState {
 
     // ---- rendering and export ----
 
-    /// The active frame as a PNG data URL at `scale`, limited to 4096 px on a side.
-    pub fn render_canvas(&self, scale: f64) -> Res<String> {
-        self.render_canvas_of(scale, None)
+    /// Draws the active frame at `scale` (limited to 4096 px on a side) and hands its pixels, as
+    /// premultiplied RGBA, to `sink`. After an edit only the tiles the touched nodes reach are
+    /// drawn again.
+    pub fn render_canvas_into(
+        &self,
+        scale: f64,
+        sink: &mut dyn FnMut(u32, u32, &[u8]),
+    ) -> Res<crate::canvas::Drawn> {
+        let frame = self.active_frame.as_ref().ok_or("no frame is open")?;
+        self.with_ws(|ws| {
+            let language = self.language.as_deref();
+            let localized = language.and_then(|l| ws.session.document().localized(l));
+            let doc = localized.as_ref().unwrap_or_else(|| ws.session.document());
+            let node = doc.node(frame).ok_or("the frame no longer exists")?;
+            let scale = canvas_scale(node, scale);
+            let request = crate::canvas::Request {
+                ws,
+                doc,
+                language,
+                frame,
+                scale,
+            };
+            let full = || od_agent::video_export::render_still(doc, frame, scale, ws.dir());
+            let mut canvas = self
+                .canvas
+                .lock()
+                .map_err(|_| "the canvas is unavailable")?;
+            canvas.draw(&request, full, sink)
+        })
+    }
+
+    fn forget_canvas(&self) {
+        if let Ok(mut canvas) = self.canvas.lock() {
+            canvas.forget();
+        }
     }
 
     /// Draws the open frame with the 3D device `id` turned by `rotate_x` and `rotate_y` degrees
-    /// more than it is, without touching the document: the ghost shown while an orbit drag runs.
+    /// more than it is, without touching the document, as a PNG data URL: the ghost shown while
+    /// an orbit drag runs.
     pub fn render_orbit(&self, scale: f64, id: &str, rotate_x: f64, rotate_y: f64) -> Res<String> {
-        self.render_canvas_of(scale, Some((parse_id(id)?, rotate_x, rotate_y)))
-    }
-
-    fn render_canvas_of(&self, scale: f64, orbit: Option<(NodeId, f64, f64)>) -> Res<String> {
         let frame = self.active_frame.as_ref().ok_or("no frame is open")?;
+        let device = parse_id(id)?;
         self.with_ws(|ws| {
-            let localized = self
+            let base = self
                 .language
                 .as_deref()
                 .and_then(|l| ws.session.document().localized(l));
-            let turned = orbit
-                .as_ref()
-                .map(|(id, x, y)| {
-                    turned_copy(
-                        localized.as_ref().unwrap_or_else(|| ws.session.document()),
-                        id,
-                        *x,
-                        *y,
-                    )
-                })
-                .transpose()?;
-            let doc = turned
-                .as_ref()
-                .or(localized.as_ref())
-                .unwrap_or_else(|| ws.session.document());
+            let source = base.as_ref().unwrap_or_else(|| ws.session.document());
+            let doc = turned_copy(source, &device, rotate_x, rotate_y)?;
             let node = doc.node(frame).ok_or("the frame no longer exists")?;
-            let longest = node.width.max(node.height).max(1.0);
-            let scale = scale.clamp(0.01, MAX_CANVAS_SIDE / longest).min(16.0);
-            // the orbit ghost must stay quick: it never decodes a recording
-            let rendered = if turned.is_some() {
-                od_render::render_frame(doc, frame, scale as f32, ws.dir())
-            } else {
-                od_agent::video_export::render_still(doc, frame, scale as f32, ws.dir())
-            }
-            .map_err(|e| e.to_string())?;
+            let scale = canvas_scale(node, scale);
+            let rendered =
+                od_render::render_frame(&doc, frame, scale, ws.dir()).map_err(|e| e.to_string())?;
             // keep the alpha: a frame with no background is transparent, and the canvas shows
             // that as a checkerboard instead of a white screen
             let png = od_render::encode_png(&rendered.pixmap, true).map_err(|e| e.to_string())?;
@@ -2083,7 +2128,7 @@ impl EditorState {
                     .unwrap_or_default(),
             ),
             memory: memory_of(&ws).to_string(),
-            videos: videos_json(doc),
+            videos: videos_json(doc, ws.dir()),
             jobs: self.jobs_json(),
             workspaces: workspaces_of(&ws),
             brief: brief_of(&ws),
@@ -2151,6 +2196,36 @@ fn workspaces_of(ws: &Workspace) -> String {
     .to_string()
 }
 
+/// `pixels` (premultiplied RGBA, `width` x `height`) shrunk by picking pixels so the longest side
+/// is at most `side`: a timeline thumbnail does not need more.
+fn shrink(width: u32, height: u32, pixels: &[u8], side: u32) -> (u32, u32, Vec<u8>) {
+    let longest = width.max(height).max(1);
+    if longest <= side {
+        return (width, height, pixels.to_vec());
+    }
+    let scale = f64::from(side.max(1)) / f64::from(longest);
+    let (w, h) = (
+        ((f64::from(width) * scale).round() as u32).max(1),
+        ((f64::from(height) * scale).round() as u32).max(1),
+    );
+    let mut out = Vec::with_capacity(w as usize * h as usize * 4);
+    for y in 0..h {
+        let sy = (u64::from(y) * u64::from(height) / u64::from(h)) as usize;
+        for x in 0..w {
+            let sx = (u64::from(x) * u64::from(width) / u64::from(w)) as usize;
+            let at = (sy * width as usize + sx) * 4;
+            out.extend_from_slice(&pixels[at..at + 4]);
+        }
+    }
+    (w, h, out)
+}
+
+/// The scale to draw `frame` at: `wanted`, kept between 0.01, 16 and what fits 4096 px.
+fn canvas_scale(frame: &Node, wanted: f64) -> f32 {
+    let longest = frame.width.max(frame.height).max(1.0);
+    wanted.clamp(0.01, MAX_CANVAS_SIDE / longest).min(16.0) as f32
+}
+
 /// A copy of `doc` with the 3D device `id` turned; the real document is untouched.
 fn turned_copy(
     doc: &od_core::Document,
@@ -2183,7 +2258,7 @@ fn device_model_label(model: DeviceModel) -> &'static str {
 }
 
 /// The videos the panel shows: each animation also carries its node's name, for its lane.
-fn videos_json(doc: &od_core::Document) -> String {
+fn videos_json(doc: &od_core::Document, dir: Option<&Path>) -> String {
     let mut videos = serde_json::to_value(view::videos(doc)).unwrap_or(Value::Null);
     let rows = videos.as_array_mut().into_iter().flatten();
     for animation in rows
@@ -2200,6 +2275,7 @@ fn videos_json(doc: &od_core::Document) -> String {
             m.insert("node_name".into(), json!(name.unwrap_or_default()));
         }
     }
+    crate::sound_rows::annotate(&mut videos, dir);
     videos.to_string()
 }
 
@@ -2455,6 +2531,13 @@ mod tests {
         (s, tmp)
     }
 
+    /// The canvas as the window gets it: size, premultiplied RGBA and what the draw did.
+    fn draw_canvas(s: &EditorState, scale: f64) -> Res<(u32, u32, Vec<u8>, crate::canvas::Drawn)> {
+        let mut picture = (0, 0, Vec::new());
+        let drawn = s.render_canvas_into(scale, &mut |w, h, px| picture = (w, h, px.to_vec()))?;
+        Ok((picture.0, picture.1, picture.2, drawn))
+    }
+
     fn insp(s: &EditorState) -> Value {
         serde_json::from_str(&s.snapshot().inspector).unwrap()
     }
@@ -2609,17 +2692,15 @@ mod tests {
     }
 
     #[test]
-    fn the_canvas_renders_to_a_png_data_url_and_exports_validate_against_presets() {
+    fn the_canvas_renders_raw_pixels_and_exports_validate_against_presets() {
         let (mut s, _t) = state();
         s.create_node("rect", 10.0, 10.0, 80.0, 40.0).unwrap();
-        let url = s.render_canvas(1.0).unwrap();
-        let b64 = url.strip_prefix("data:image/png;base64,").unwrap();
-        let bytes = STANDARD.decode(b64).unwrap();
-        let facts = od_store::inspect_png(&bytes).unwrap();
-        assert_eq!((facts.width, facts.height), (400, 300));
+        let (w, h, pixels, _) = draw_canvas(&s, 1.0).unwrap();
+        assert_eq!((w, h), (400, 300));
+        assert_eq!(pixels.len(), 400 * 300 * 4);
         // huge scales are clamped instead of exhausting memory
-        let big = s.render_canvas(100.0).unwrap();
-        assert!(big.len() < 40_000_000);
+        let (bw, bh, big, _) = draw_canvas(&s, 100.0).unwrap();
+        assert!(bw <= 4096 && bh <= 4096 && big.len() < 80_000_000);
 
         let err = s
             .export("frame", Some("apple-iphone-6.9"), "shot.png", 1, false)
@@ -2784,7 +2865,7 @@ mod tests {
                 .unwrap_err()
                 .contains("no project")
         );
-        assert!(s.render_canvas(1.0).is_err());
+        assert!(draw_canvas(&s, 1.0).is_err());
         assert_eq!(s.hit_test(0.0, 0.0), None);
         assert_eq!(s.connect_recipes(), "[]");
     }
@@ -2841,30 +2922,46 @@ mod tests {
         assert_eq!(s.preview_status(), "{}", "none until started");
         let status =
             |s: &EditorState| -> Value { serde_json::from_str(&s.preview_status()).unwrap() };
+        let wait_done = |s: &EditorState| {
+            for _ in 0..1000 {
+                if status(s)["done"] == true && status(s)["audio"]["state"] != "mixing" {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            status(s)
+        };
         let first: Value = serde_json::from_str(&s.preview_start(&video).unwrap()).unwrap();
         assert_eq!(first["video"], video.as_str());
+        let done = wait_done(&s);
+        let fps = done["fps"].as_u64().unwrap();
+        assert!(fps == 15 || fps == 30, "{done}");
         assert_eq!(
-            (first["total"].as_u64(), first["fps"].as_u64()),
-            (Some(30), Some(15))
-        );
-        for _ in 0..400 {
-            if status(&s)["done"] == true {
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
-        let done = status(&s);
-        assert_eq!(
-            (done["ready"].as_u64(), done["stale"].as_bool()),
-            (Some(30), Some(false)),
+            (
+                done["ready"].as_u64(),
+                done["total"].as_u64(),
+                done["stale"].as_bool()
+            ),
+            (Some(2 * fps), Some(2 * fps), Some(false)),
             "{done}"
         );
-        assert!(s.preview_frame(0).starts_with("data:image/png;base64,"));
-        assert_eq!(s.preview_frame(30), "", "past the end");
+        assert_eq!(
+            done["audio"]["state"], "silent",
+            "a design video has no sound"
+        );
+        let mut shown = (0, 0, 0);
+        assert!(s.preview_frame_into(0, None, &mut |w, h, px| shown = (w, h, px.len())));
+        assert_eq!(shown, (100, 200, 100 * 200 * 4));
+        assert!(s.preview_frame_into(0, Some(50), &mut |w, h, px| shown = (w, h, px.len())));
+        assert_eq!(shown, (25, 50, 25 * 50 * 4), "a thumbnail is shrunk");
+        assert!(
+            !s.preview_frame_into(2 * fps, None, &mut |_, _, _| {}),
+            "past the end"
+        );
         // starting again with nothing changed keeps the finished preview
         s.preview_start(&video).unwrap();
         assert_eq!(status(&s)["done"], true);
-        // an edit makes it stale; starting again draws a new one
+        // an edit makes it stale; starting again draws a new one that keeps the old pictures
         s.apply_user(&[Operation::AddClip {
             video: ids[0].clone(),
             frame: Some(parse_id(&frame).unwrap()),
@@ -2876,11 +2973,14 @@ mod tests {
         }])
         .unwrap();
         assert_eq!(status(&s)["stale"], true);
-        let again: Value = serde_json::from_str(&s.preview_start(&video).unwrap()).unwrap();
+        s.preview_start(&video).unwrap();
+        let again = wait_done(&s);
         assert_eq!(
             (again["total"].as_u64(), again["stale"].as_bool()),
-            (Some(45), Some(false))
+            (Some(3 * again["fps"].as_u64().unwrap()), Some(false)),
+            "{again}"
         );
+        assert!(again["reused"].as_u64().unwrap() > 0, "{again}");
         s.preview_stop();
         assert_eq!(s.preview_status(), "{}");
         let missing = s.preview_start("v_999").unwrap();
@@ -3471,13 +3571,13 @@ mod tests {
         s.set_property(&text, "text", "\"守る\"").unwrap();
         assert_eq!(insp(&s)["text"], "守る");
         assert_eq!(insp(&s)["translated"], true);
-        let ja_canvas = s.render_canvas(1.0).unwrap();
+        let ja_canvas = draw_canvas(&s, 1.0).unwrap().2;
 
         s.switch_language("").unwrap();
         assert_eq!(insp(&s)["text"], "Text", "the default text did not change");
         assert!(insp(&s).get("translated").is_none());
         assert_ne!(
-            s.render_canvas(1.0).unwrap(),
+            draw_canvas(&s, 1.0).unwrap().2,
             ja_canvas,
             "the canvas follows the language"
         );
@@ -3940,6 +4040,86 @@ mod tests {
         let videos: Value = serde_json::from_str(&s.snapshot().videos).unwrap();
         assert_eq!(videos[0]["audio"]["file"], "media/song.mp3");
     }
+    #[test]
+    fn the_snapshot_publishes_sound_tracks_sound_rows_and_captions_for_the_timeline() {
+        let (s, _t) = state();
+        let video = s
+            .with_ws(|ws| {
+                let created = ws
+                    .session
+                    .apply(
+                        Actor::User,
+                        None,
+                        &[Operation::CreateVideo {
+                            name: "Teaser".into(),
+                            fps: 30,
+                            width: 400,
+                            height: 300,
+                        }],
+                    )
+                    .map_err(|e| e.to_string())?;
+                Ok(created.created[0].clone())
+            })
+            .unwrap();
+        let frame = s.snapshot().active_frame;
+        s.with_ws(|ws| {
+            let v = ws.session.document().video(&video).cloned();
+            assert!(v.is_some());
+            ws.session
+                .apply(
+                    Actor::User,
+                    None,
+                    &[Operation::AddClip {
+                        video: video.clone(),
+                        frame: NodeId::parse(&frame).ok(),
+                        footage: None,
+                        duration_ms: 4000,
+                        index: None,
+                        transition: None,
+                        motion: None,
+                    }],
+                )
+                .map_err(|e| e.to_string())?;
+            let doc = ws.session.document().video(&video).cloned().unwrap();
+            let (tracks, _) = doc
+                .tracks_with_added(
+                    serde_json::from_value(json!({"role": "voice", "file": "media/vo.wav"}))
+                        .unwrap(),
+                )
+                .map_err(|e| e.to_string())?;
+            let cues =
+                od_core::captions::parse_subtitles("1\n00:00:00,500 --> 00:00:01,500\nHello\n")
+                    .map_err(|e| e.to_string())?;
+            let captions = doc.captions_with_cues(cues).map_err(|e| e.to_string())?;
+            ws.session
+                .apply(
+                    Actor::User,
+                    None,
+                    &[
+                        Operation::SetVideo {
+                            id: video.clone(),
+                            prop: od_core::VideoProperty::Tracks(tracks),
+                        },
+                        Operation::SetVideo {
+                            id: video.clone(),
+                            prop: od_core::VideoProperty::Captions(captions),
+                        },
+                    ],
+                )
+                .map_err(|e| e.to_string())?;
+            Ok(())
+        })
+        .unwrap();
+        let videos: Value = serde_json::from_str(&s.snapshot().videos).unwrap();
+        let v = &videos[0];
+        assert_eq!(v["tracks"][0]["role"], "voice");
+        assert_eq!(v["sound_rows"][0]["id"], "a1");
+        assert_eq!(v["sound_rows"][0]["legacy"], false);
+        assert_eq!(v["captions"]["cues"][0]["text"], "Hello");
+        assert_eq!(v["captions"]["cues"][0]["end_ms"], 1500);
+        assert!(v["captions"]["style"]["font_family"].is_string());
+    }
+
     fn offer_two(s: &EditorState) -> (Vec<String>, Value) {
         let frames: Vec<String> = serde_json::from_str::<Vec<Value>>(&s.snapshot().frames)
             .unwrap()
@@ -4054,5 +4234,62 @@ mod tests {
         assert!(s.set_preview_override("frame", "n_99999").is_err());
         s.clear_preview_override();
         assert_eq!(view(&s)["preview"]["chosen_by"], "default");
+    }
+
+    #[test]
+    fn edits_redraw_only_their_tiles_and_equal_a_fresh_draw() {
+        use crate::canvas::Drawn;
+        let (mut s, _t) = state();
+        let id = s.create_node("rect", 10.0, 10.0, 80.0, 40.0).unwrap();
+        s.create_node("ellipse", 200.0, 250.0, 60.0, 40.0).unwrap();
+        let (_, _, _, first) = draw_canvas(&s, 1.0).unwrap();
+        assert_eq!(first, Drawn::Full);
+        assert_eq!(draw_canvas(&s, 1.0).unwrap().3, Drawn::Reused);
+
+        s.move_node(&id, 30.0, 12.0).unwrap();
+        let (w, h, kept, drawn) = draw_canvas(&s, 1.0).unwrap();
+        let Drawn::Tiles { redrawn, tiles } = drawn else {
+            panic!("expected a partial redraw, got {drawn:?}");
+        };
+        assert!(redrawn < tiles, "{redrawn} of {tiles}");
+
+        s.undo().unwrap();
+        s.redo().unwrap();
+        s.set_property(&id, "width", "150").unwrap();
+        let kept_after = draw_canvas(&s, 1.0).unwrap();
+        s.forget_canvas();
+        let fresh = draw_canvas(&s, 1.0).unwrap();
+        assert_eq!(fresh.3, Drawn::Full);
+        assert_eq!((w, h), (fresh.0, fresh.1));
+        assert!(
+            kept_after.2 == fresh.2,
+            "the kept picture equals a fresh draw"
+        );
+        assert_ne!(kept, fresh.2);
+    }
+
+    #[test]
+    fn a_new_scale_language_or_project_draws_the_frame_whole() {
+        use crate::canvas::Drawn;
+        let (mut s, _t) = state();
+        s.create_node("rect", 10.0, 10.0, 80.0, 40.0).unwrap();
+        s.create_node("text", 10.0, 60.0, 200.0, 30.0).unwrap();
+        draw_canvas(&s, 1.0).unwrap();
+        assert_eq!(draw_canvas(&s, 0.5).unwrap().3, Drawn::Full, "scale");
+        s.add_language("ja").unwrap();
+        s.switch_language("ja").unwrap();
+        assert_eq!(draw_canvas(&s, 0.5).unwrap().3, Drawn::Full, "language");
+        s.switch_language("").unwrap();
+        assert_eq!(
+            draw_canvas(&s, 0.5).unwrap().3,
+            Drawn::Full,
+            "back to the default"
+        );
+        let (_, _, _, again) = draw_canvas(&s, 0.5).unwrap();
+        assert_eq!(again, Drawn::Reused);
+        let other = tempfile::tempdir().unwrap();
+        s.new_project(&other.path().join("q.od"), "Other", 400.0, 300.0)
+            .unwrap();
+        assert_eq!(draw_canvas(&s, 0.5).unwrap().3, Drawn::Full, "project");
     }
 }

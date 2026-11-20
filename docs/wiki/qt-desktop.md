@@ -10,7 +10,7 @@ Alternatives considered: GPUI (fast, pre-1.0, small component set, widgets for d
 
 Costs, stated plainly:
 
-- **Two languages, one build.** Rust core and Rust glue, QML for presentation, no C++ sources (yet). `cxx-qt` generates the C++ the `QObject` needs; Cargo drives the whole build.
+- **Two languages, one build.** Rust core and Rust glue, QML for presentation, and one hand-written C++ file (the image provider that hands the canvas picture to Qt Quick). `cxx-qt` generates the C++ the `QObject` needs; Cargo drives the whole build.
 - **`cxx-qt` is pre-1.0** (0.10.0, 2026-08-24; MIT or Apache-2.0; MSRV 1.85), pinned exactly. The churn risk moved from the UI toolkit to the bridge, but the bridge surface is one `QObject`.
 - **Heavier distribution and LGPL obligations** ([Licensing](#licensing)).
 - **Qt's own deprecations across minor versions** (it already deprecates media backends, see [Video Editing](./video-editing.md#qt-multimedia-and-ffmpeg)).
@@ -28,13 +28,13 @@ Costs, stated plainly:
 | `EditorState` | `crates/app/src/state.rs` | The editor's state and actions without Qt: open/save, selection, hit testing, drawing, move/resize, the inspector's typed `set`, undo/redo, checkpoints, pins, canvas rendering, export, starting the MCP server, the skill installer. Unit-tested without a window |
 | Rust crates | `crates/core`, `render`, `store`, `agent` | Never depend on Qt. Geometry (`core::geometry`: bounds and hit tests) and panel views (`core::view`: layers, frames) live in `core` so the shells only present them |
 
-`cxx-qt` is used in its Cargo-only mode (the `qml_module` of `cxx-qt-build`): no CMake and no C++ sources. A C++ `QQuickItem` for the canvas stays an option if the Phase 0 canvas spike needs it. The canvas today is a PNG rendered by the Rust core and shown by a QML `Image`; pan and zoom move that picture, and the core re-renders when the zoom settles. The picture is drawn by two `Image` items that take turns (the new drawing loads in the hidden one and replaces the other only when ready; an `Image` that gets a new source drops its old picture first, which showed as a flash), and every list that changes while an agent works goes through `qml/JsonModel.qml`, which updates only the rows that changed so delegates are not rebuilt.
+`cxx-qt` is used in its Cargo-only mode (the `qml_module` of `cxx-qt-build`): no CMake, and exactly one hand-written C++ file. The canvas picture is drawn by the Rust core into raw premultiplied RGBA and handed to Qt Quick as `image://pictures/<id>` by a `QQuickImageProvider` (`crates/app/cpp/picture_provider.cpp`, the only C++ in the repository; it is registered in `crates/app/src/frame_bridge.rs` and installed in `run()`). No PNG is written and no base64 travels. Pan and zoom move that picture, and the core re-renders when the zoom settles. The picture is drawn by two `Image` items that take turns (the new drawing loads in the hidden one and replaces the other only when ready; an `Image` that gets a new source drops its old picture first, which showed as a flash), and every list that changes while an agent works goes through `qml/JsonModel.qml`, which updates only the rows that changed so delegates are not rebuilt.
 
 Two cxx-qt/QML pitfalls worth knowing: a QML property named `onFoo` is parsed as a signal handler (the theme's `onAccent` had to become `textOnAccent`), and an invokable `setX` collides with the generated setter of a property `x` (hence `openFrame`, `setNodeProperty`). Multi-word properties need an explicit `cxx_name` to be camelCase in QML.
 
 ## Qt version and modules
 
-Qt 6.12 from Homebrew was used. The exact Qt minor is still to be pinned for releases. **Linked modules** (from `cxx-qt-lib`'s `qt_full` plus `Network`, which Qt Qml needs on macOS): Core, Gui, Qml, Quick Controls 2, Network. **QML imports at runtime**: `QtQuick`, `QtQuick.Controls` (the Basic style), `QtQuick.Layouts`, `QtQuick.Dialogs`. None of these is on the GPL-only list below. `crates/app/build.rs` keeps the linked list in one constant (`QT_MODULES`); adding a module there needs a licensing check in the PR. Qt Multimedia, Qt Test and Qt Quick Test are not used yet.
+Qt 6.12 from Homebrew was used. The exact Qt minor is still to be pinned for releases. **Linked modules** (from `cxx-qt-lib`'s `qt_full` plus the ones in `crates/app/build.rs`): Core, Gui, Qml, Quick Controls 2, Network, Quick (the image provider) and Multimedia (the preview's sound). **QML imports at runtime**: `QtQuick`, `QtQuick.Controls` (the Basic style), `QtQuick.Layouts`, `QtQuick.Dialogs`, `QtMultimedia`. None of these is on the GPL-only list below. `crates/app/build.rs` keeps the linked list in one constant (`QT_MODULES`); adding a module there needs a licensing check in the PR. Qt Test and Qt Quick Test are not used yet.
 
 ## Licensing
 
@@ -51,6 +51,8 @@ Qt's open-source licensing (read from Qt 6.12's licensing page): most modules ar
 
 **What the bundler does (found on 2026-11-19, macOS, Qt 6.12 from Homebrew).** `macdeployqt` with the app's QML folder copied the *Qt Quick Timeline* and *Qt Virtual Keyboard* plug-ins into the bundle, although nothing in the app imports them (it bundles the plug-ins that sit beside the modules it does import). Linking only the allowlisted modules is therefore not enough for the shipped bundle. `scripts/package-macos.sh` deletes every file or folder whose name matches a banned module, fails if any remain, and then runs the app's scripted session from the bundle to prove it still works. The build-time question about the *Qt Qml Compiler* stays open: the app's QML is compiled by `cxx-qt-build` through Qt's `qmlcachegen`, and `[INFERENCE]` whether that tool's output carries any license obligation beyond the tool exception above has not been checked against Qt's licensing text.
 
+**The modules added after the first release (checked 2026-11-20, Qt 6.12 from Homebrew).** `Quick` (for the `QQuickImageProvider` that serves the canvas picture) and `Multimedia` (for the preview's sound) are both offered under the LGPL: the SPDX header of their own headers reads `LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only`, so the LGPLv3 option is available and neither is on the GPL-only list above. Qt Multimedia's FFmpeg backend is the default on macOS, but nothing in the app depends on it: the sound the preview plays is a WAV that `od_media` mixes with the user's own `ffmpeg`, the same way the export does, and the app runs no decoder of its own through Qt. Qt's bundled FFmpeg would be a GPL build (Homebrew's `ffmpeg` here is `--enable-gpl`), so a bundle that carries Qt's FFmpeg libraries would break invariant 10; `scripts/package-macos.sh` refuses a bundle that contains them.
+
 **Banned: GPL-only third-party libraries.** KDDockWidgets, the obvious docking library, is GPLv2/GPLv3 (or commercial) per its `LICENSE.txt` (read), so it is out; docking is built in QML with Qt Quick Controls' `SplitView` and our own panel manager.
 
 **Alternative:** a commercial Qt license removes these limits. Not planned; the invariant exists so that choice is never forced by accident.
@@ -63,6 +65,8 @@ Qt's open-source licensing (read from Qt 6.12's licensing page): most modules ar
 | macOS | Xcode and command line tools; Metal through Qt's RHI `[INFERENCE]` |
 | Windows | MSVC; Direct3D through Qt's RHI `[INFERENCE]` |
 | Linux | Qt's X11 and Wayland platform plugin dependencies, Vulkan or OpenGL drivers; deployment is not automated by Qt's tools on Linux/X11 for FFmpeg (read), so packaging needs its own step |
+
+**CI.** `.github/workflows/ci.yml` has one editor job per platform, each building the `app` crate and running `cargo clippy -p opendesigner-app` and `cargo test -p opendesigner-app` (the unit tests and the offscreen scripted session): `app-macos` (Homebrew Qt), `app-linux` (Ubuntu 24.04 with the distribution's Qt 6.4 packages, the set `packaging/linux/Dockerfile` uses, `QT_QPA_PLATFORM=offscreen`, `QT_QUICK_BACKEND=software`) and `app-windows` (Qt 6.8.3 for `win64_msvc2022_64` through `jurplel/install-qt-action@v4`). Only the macOS job has been run by hand. **The Linux and Windows jobs are unverified until a CI run is green**: they were written without being run, the Windows one in particular (the Qt arch name, the `QMAKE` path from `QT_ROOT_DIR`, and whether the scripted session works offscreen there are assumptions). They are separate jobs, so a failure in one does not hide another.
 
 Details and commands: [Development Guide](./development-guide.md).
 
@@ -157,15 +161,11 @@ What the canvas does with the pointer (`qml/CanvasView.qml`; every result is an 
 
 ## Canvas rendering
 
-The canvas is a custom item in the Qt Quick scene graph, with overlays (selection handles, guides, snapping, pins, the agent-change outline) as ordinary QML items above it, not part of the document. How the canvas pixels get there is **the** Phase 0 spike; candidates, all `[INFERENCE]` on exact API availability per Qt version:
+The canvas is a picture of the open frame, with overlays (selection handles, guides, snapping, pins, the agent-change outline) as ordinary QML items above it, not part of the document. The pixels come from our own rasterizer, so the canvas and the export are the same drawing; the export is the product, the canvas is a preview of it.
 
-| Option | Idea | Trade-off |
-|--------|------|-----------|
-| A. `render` output as a texture | Our Rust rasterizer draws visible tiles; the item uploads them | Matches export by construction; update cost on every change |
-| B. Custom scene-graph node / `QRhi` item | Draw primitives on the GPU through Qt's RHI | Fast, but a second renderer that must match export |
-| C. `QQuickPaintedItem` / `QPainter` | Simplest | Likely too slow at 10k nodes; a baseline for comparison |
+**How the pixels get there (built).** `render` draws the frame into horizontal tiles of 32 rows; a tile's pixels depend only on the document and the tile's row, so a tile drawn on its own is byte for byte the tile of a full draw. The editor keeps the drawn frame (`render::Retained`) and, after an edit, redraws only the tiles the touched nodes reach: the core says which nodes an edit touched (`Session::touched_since`) and each node's rows are recorded at every draw. A frame that cannot be drawn that way (a different size, scale or token set, a root frame whose own look changed, a 3D device) is drawn whole. The picture then goes to Qt as raw premultiplied RGBA through the image provider, so nothing is encoded and decoded on the way.
 
-Banned: Qt Canvas Painter (GPL-only). If A and B disagree with export, `render` wins: export is the product, the canvas is a preview of it.
+The options that were weighed: a `QQuickItem` that uploads a texture (a second renderer that has to match the export) and `QQuickPaintedItem` (a baseline). Banned: Qt Canvas Painter (GPL-only).
 
 ## Text
 

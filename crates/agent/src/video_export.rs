@@ -3,7 +3,9 @@
 //! `ffmpeg` only compresses them (see `od_media`).
 
 use od_core::{Document, NodeId, Workspace};
-use od_media::{AudioPiece, EncodeSettings, Ffmpeg, FootageDecoder, VideoWriter};
+use od_media::{
+    AudioPiece, DuckSettings, EncodeSettings, Ffmpeg, FootageDecoder, PieceRole, VideoWriter,
+};
 use od_render::video::{FootageSource, VideoRenderer};
 use od_store::video::{VideoFacts, VideoPreset, VideoViolation};
 
@@ -26,6 +28,11 @@ impl Source {
 
     pub fn dir(&self) -> Option<&std::path::Path> {
         self.dir.as_deref()
+    }
+
+    /// A source with no project folder, for a document that exists only in memory.
+    pub fn of_document(doc: Document) -> Source {
+        Source { doc, dir: None }
     }
 }
 
@@ -311,6 +318,31 @@ pub fn export_video(
     ffmpeg: &Ffmpeg,
     progress: &mut dyn FnMut(u64, u64) -> bool,
 ) -> Result<VideoOutcome, ToolError> {
+    export_video_with(
+        ws,
+        video,
+        file,
+        locale,
+        preset_id,
+        ffmpeg,
+        od_render::export::default_workers(),
+        progress,
+    )
+}
+
+/// [`export_video`] drawing frames on `workers` threads (`od_render::export`); the file does not
+/// depend on the number.
+#[allow(clippy::too_many_arguments)]
+pub fn export_video_with(
+    ws: &Source,
+    video: &NodeId,
+    file: &str,
+    locale: Option<&str>,
+    preset_id: Option<&str>,
+    ffmpeg: &Ffmpeg,
+    workers: usize,
+    progress: &mut dyn FnMut(u64, u64) -> bool,
+) -> Result<VideoOutcome, ToolError> {
     let preset = check_export(ws, video, file, locale, preset_id)?;
     let file = video_file_name(file)?;
     let dir = exports_dir(ws)?;
@@ -322,6 +354,7 @@ pub fn export_video(
     let project = ws.dir().map(std::path::Path::to_path_buf);
     let mut audio: Vec<AudioPiece> = Vec::new();
     let mut lengths: std::collections::HashMap<String, od_media::FileInfo> = Default::default();
+    let mut temporary = TempFiles::default();
     for (clip, placed) in v.clips.iter().zip(v.placed()) {
         let Some(f) = &clip.footage else { continue };
         let project = project
@@ -336,28 +369,32 @@ pub fn export_video(
             lengths.insert(f.file.clone(), info);
         }
         let info = &lengths[&f.file];
-        let needs = f.in_ms + u64::from(clip.duration_ms);
+        let needs = f.in_ms + clip.source_span_ms();
         if needs > info.duration_ms + 100 {
             return fail(format!(
-                "clip {} plays {} to {} ms of {}, which is only {} ms long; shorten the clip or move its in point",
+                "clip {} plays {} to {} ms of {}, which is only {} ms long; shorten the clip, slow it down or move its in point",
                 clip.id, f.in_ms, needs, f.file, info.duration_ms
             ));
         }
         if info.has_audio {
-            audio.push(AudioPiece {
-                file: path,
-                in_ms: f.in_ms,
-                start_ms: placed.start_ms,
-                duration_ms: u64::from(clip.duration_ms),
-                gain: 1.0,
-                fade_in_ms: 0,
-                fade_out_ms: 0,
-            });
+            let piece = if clip.retimed() {
+                let wav = dir.join(format!(".{file}.{}.retimed.wav", clip.id));
+                retime_clip_sound(ffmpeg, clip, &path, f.in_ms, &wav)?;
+                temporary.0.push(wav.clone());
+                AudioPiece {
+                    file: wav,
+                    in_ms: 0,
+                    ..footage_piece(path, 0, placed.start_ms, u64::from(clip.duration_ms))
+                }
+            } else {
+                footage_piece(path, f.in_ms, placed.start_ms, u64::from(clip.duration_ms))
+            };
+            audio.push(piece);
         }
     }
-    // The sound track of the video: played under the picture, cut at the end of the video.
+    // The sound tracks of the video: played under the picture, cut at the end of the video.
     let mut warnings: Vec<String> = Vec::new();
-    if let Some(track) = &v.audio {
+    for track in v.sound_tracks() {
         let project = project
             .as_deref()
             .ok_or_else(|| ToolError("the project has no folder, so no sound track".into()))?;
@@ -367,22 +404,15 @@ pub fn export_video(
             .probe_duration(&path)
             .map_err(|e| ToolError(e.to_string()))?;
         let start = u64::from(track.start_ms);
-        let left = v.duration_ms().saturating_sub(start);
-        if left == 0 {
+        let room = v.duration_ms().saturating_sub(start);
+        let played = track.played_ms(length, room);
+        if played == 0 {
             warnings.push(format!(
-                "the sound track {} starts after the video ends, so it is not in the file",
-                track.file
+                "the sound track {} ({}) is not in the file: it starts after the video ends or its trim is empty",
+                track.id, track.file
             ));
         } else {
-            audio.push(AudioPiece {
-                file: path,
-                in_ms: 0,
-                start_ms: start,
-                duration_ms: length.min(left),
-                gain: track.gain,
-                fade_in_ms: u64::from(track.fade_in_ms),
-                fade_out_ms: u64::from(track.fade_out_ms),
-            });
+            audio.push(piece_of(&track, path, start, played));
         }
     }
     std::fs::create_dir_all(&dir).map_err(|e| ToolError(format!("{}: {e}", dir.display())))?;
@@ -398,49 +428,36 @@ pub fn export_video(
         fps: v.fps,
         output: picture_path.clone(),
     };
-    let mut source = match &project {
-        Some(p) if has_footage(&doc, v) => Some(Decoder(FootageDecoder::new(
-            ffmpeg.clone(),
-            p.clone(),
-            v.fps,
-        ))),
-        _ => None,
-    };
     let mut writer = VideoWriter::start(ffmpeg, &settings).map_err(|e| ToolError(e.to_string()))?;
-    let mut renderer = VideoRenderer::new(&doc, v, ws.dir());
-    if let Some(s) = source.as_mut() {
-        renderer = renderer.with_footage(s);
-    }
     let total = v.frame_count();
-    // While nothing moves the picture is the same: draw it once and send it again.
-    let mut held: Option<(Vec<i64>, Vec<u8>)> = None;
-    for n in 0..total {
-        let time_ms = n * 1000 / u64::from(v.fps);
-        let sig = renderer.signature(time_ms);
-        let sent = match (&sig, &held) {
-            (Some(s), Some((last, pixels))) if s == last => writer
-                .write_frame(pixels)
-                .map_err(|e| ToolError(e.to_string())),
-            _ => renderer
-                .frame_at(time_ms)
-                .map_err(|e| ToolError(e.to_string()))
-                .and_then(|p| {
-                    let sent = writer
-                        .write_frame(p.data())
-                        .map_err(|e| ToolError(e.to_string()));
-                    held = sig.map(|s| (s, p.data().to_vec()));
-                    sent
-                }),
-        };
-        if let Err(e) = sent {
-            writer.abort();
-            return Err(e);
-        }
-        if !progress(n + 1, total) {
+    let footage = has_footage(&doc, v);
+    let new_source = || -> Option<Box<dyn FootageSource + Send>> {
+        let dir = project.as_ref().filter(|_| footage)?;
+        let decoder = FootageDecoder::new(ffmpeg.clone(), dir.clone(), v.fps);
+        Some(Box::new(Decoder(decoder)))
+    };
+    let drawn = od_render::export::export_frames(
+        &doc,
+        v,
+        ws.dir(),
+        &new_source,
+        workers,
+        &mut |n, pixels| {
+            writer.write_frame(pixels).map_err(|e| e.to_string())?;
+            Ok(progress(n + 1, total))
+        },
+    );
+    let drawn = match drawn {
+        Ok(d) if !d.stopped => d,
+        Ok(_) => {
             writer.abort();
             return fail("the export was cancelled");
         }
-    }
+        Err(e) => {
+            writer.abort();
+            return Err(ToolError(e.to_string()));
+        }
+    };
     let encoder = writer.encoder.to_string();
     let mut bytes = writer.finish().map_err(|e| ToolError(e.to_string()))?;
     if !audio.is_empty() {
@@ -481,9 +498,37 @@ pub fn export_video(
         audio_pieces: audio.len(),
         warnings: warnings
             .into_iter()
-            .chain(renderer.warnings().iter().map(ToString::to_string))
+            .chain(drawn.warnings.iter().map(ToString::to_string))
             .collect(),
     })
+}
+
+pub(crate) fn piece_of(
+    track: &od_core::SoundTrack,
+    file: std::path::PathBuf,
+    start_ms: u64,
+    duration_ms: u64,
+) -> AudioPiece {
+    AudioPiece {
+        file,
+        role: match track.role {
+            od_core::TrackRole::Music => PieceRole::Music,
+            od_core::TrackRole::Voice => PieceRole::Voice,
+            od_core::TrackRole::Sfx => PieceRole::Sfx,
+        },
+        in_ms: u64::from(track.in_ms),
+        start_ms,
+        duration_ms,
+        gain: track.gain,
+        fade_in_ms: u64::from(track.fade_in_ms),
+        fade_out_ms: u64::from(track.fade_out_ms),
+        pan: track.pan,
+        duck: track.duck.map(|d| DuckSettings {
+            depth: d.depth,
+            attack_ms: d.attack_ms,
+            release_ms: d.release_ms,
+        }),
+    }
 }
 
 fn violations_message(preset: &VideoPreset, broken: &[VideoViolation]) -> String {
@@ -494,4 +539,75 @@ fn violations_message(preset: &VideoPreset, broken: &[VideoViolation]) -> String
         preset.source,
         list.join("\n")
     )
+}
+
+/// Files written next to the export that are removed when the export ends, however it ends.
+#[derive(Default)]
+struct TempFiles(Vec<std::path::PathBuf>);
+
+impl Drop for TempFiles {
+    fn drop(&mut self) {
+        for file in &self.0 {
+            let _ = std::fs::remove_file(file);
+        }
+    }
+}
+
+pub(crate) fn footage_piece(
+    file: std::path::PathBuf,
+    in_ms: u64,
+    start_ms: u64,
+    duration_ms: u64,
+) -> AudioPiece {
+    AudioPiece {
+        file,
+        role: PieceRole::Footage,
+        in_ms,
+        start_ms,
+        duration_ms,
+        gain: 1.0,
+        fade_in_ms: 0,
+        fade_out_ms: 0,
+        pan: 0.0,
+        duck: None,
+    }
+}
+
+/// How finely a speed ramp's sound is cut: one slice per this many milliseconds of clip time.
+const RAMP_SLICE_MS: u64 = 250;
+
+/// Writes the sound of a retimed clip: its stretch of the file squeezed or stretched to the
+/// clip's length on the timeline (`od_media::retime`).
+pub(crate) fn retime_clip_sound(
+    ffmpeg: &Ffmpeg,
+    clip: &od_core::Clip,
+    source: &std::path::Path,
+    in_ms: u64,
+    output: &std::path::Path,
+) -> Result<(), ToolError> {
+    if let Some(parent) = output.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| ToolError(format!("{}: {e}", parent.display())))?;
+    }
+    let map = od_core::speed::SpeedMap::new(clip);
+    let length = u64::from(clip.duration_ms);
+    let step = if clip.speed_ramp.is_empty() {
+        length
+    } else {
+        RAMP_SLICE_MS
+    };
+    let slices: Vec<od_media::retime::Slice> = (0..length)
+        .step_by(step as usize)
+        .map(|from| {
+            let to = (from + step).min(length);
+            let (a, b) = (map.source_ms(from), map.source_ms(to));
+            od_media::retime::Slice {
+                source_start_ms: in_ms + a,
+                source_ms: (b - a).max(1),
+                timeline_ms: to - from,
+            }
+        })
+        .collect();
+    od_media::retime::retime_audio(ffmpeg, source, &slices, output)
+        .map_err(|e| ToolError(e.to_string()))
 }

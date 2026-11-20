@@ -108,6 +108,36 @@ All three are 3D, which OpenDesigner cannot place yet, so they are recommended f
 
 **Size accounting** (measured): the repository gains 149,898 bytes of data (+3,208 of licence text); a release CLI binary grew by 1,382,400 bytes (646,246 gzip-compressed) with the bundled set and `resvg`, measured by building `main` and this branch; `list_asset_packs` reports each pack's size on disk, `installed_bytes` and the cap, and the test checks that the reported size is the file's length.
 
+## Blocks: a catalog of ready-made designs
+
+> **Status: Built** (`crates/agent/src/blocks/`; read on 2026-11-20). A block is a named, parameterized, deterministic generator: it expands into ordinary nodes (frames, rectangles, ellipses, text, images, groups) and, where it has motion, ordinary `animate` keyframes on the video. Everything is applied as **one attributed, undoable transaction through the same path as `apply_ops`**: no new operation, no way around the history.
+
+**The catalog** (31 blocks, `list_blocks`/`get_block`/`add_block`, and `opendesigner blocks list|show|add`):
+
+| Category | Blocks |
+|----------|--------|
+| Titles and text | `title_card`, `kinetic_headline`, `subtitle_under`, `quote_card`, `stat_callout`, `badge_pill`, `eyebrow_label` |
+| Lower thirds and overlays | `lower_third` (bar or card), `name_tag`, `cta_button`, `tooltip_callout`, `highlight_box`, `spotlight_dim`, `cursor_click`, `notification_toast` |
+| Backgrounds | `gradient_wash`, `aurora_backdrop`, `grid_backdrop`, `noise_backdrop` |
+| Data | `bar_chart`, `line_chart`, `donut_chart`, `progress_bar`, `comparison_table` |
+| Social and store | `app_store_headline_pair`, `feature_list`, `rating_stars`, `review_card` |
+| Motion | `stagger_in`, `logo_sting`, `end_card` |
+
+**How a block is used.** `add_block {block, frame?, video?, start_ms?, hold_ms?, box?, colors?, font?, params?, dry_run?}`: the frame and the video are optional when the document has one of each; `params` are the block's own typed, bounded parameters (from `get_block`, each with a type, a range or options and a default); `box` places the block in `{x, y, width, height}` in frame coordinates (a side that is left out keeps the block's default); `start_ms` and `hold_ms` time it in the video. The result lists the group it made, its parts by name and a one-sentence description, so the agent can keep editing them as ordinary nodes.
+
+**Naming.** The group is `block:<id>#<n>` (`block:lower_third#1`) and its parts are `block:lower_third#1/<part>`; a second block of the same kind gets the next number. That name is the only trace of a block in the document: the nodes are plain nodes, editable with `apply_ops`, and deleting the group removes the whole block.
+
+**Colors.** A block takes its colors from the document's tokens (`brand.background`/`background`, `brand.text`/`text`, `brand.accent`/`accent`, `brand.muted`/`muted`, or the plain names) and, when there are none, creates `block.background`, `block.foreground`, `block.accent` and `block.muted` once with `set_token` (so one change recolors every block). `colors` overrides a role with a `#rrggbb` or a `{token}`.
+
+**Sizes.** Everything is a share of the frame's shorter side, so a block scales from a 1290 x 2796 store slide to 1920 x 1080 to a square post; text is measured with the renderer (`od_render::measure_text`) and shrunk until it fits, and a block that cannot fit refuses with a reason instead of overflowing.
+
+**Pictures.** Backdrops and icons are written to the project's `media/` folder (the file name is the hash of the recipe, so the same block asks for the same file): the backdrops come from the procedural generators (`gradient`, `aurora`, `pattern`/`grid`, `grain`) and the icons from the bundled Lucide set, which asks for its credit line (returned in the result). A block that needs a picture needs a project folder; without one the call says so.
+
+**Shapes.** The document has no path node, so a line or a ring is a chain of small ellipses (a dot every 0.45 of the stroke width), and a block never uses more than one font family.
+
+**Data.** The data blocks take JSON and check it: 12 bars, 24 points, 3 series, 6 slices, 6 columns by 8 rows; a negative value, a missing label or a value outside the bounds is refused with the reason.
+
+
 ## The studio (intended)
 
 A page type for listing art whose unit is a **set**, not a single frame:

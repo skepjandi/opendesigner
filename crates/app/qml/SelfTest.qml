@@ -38,7 +38,7 @@ Item {
 
     function fail(msg) { console.log("SELFTEST FAIL: " + msg); Qt.exit(1) }
     function check(cond, msg) { if (!cond) { fail(msg); return false } return true }
-    function pngReady() { return editor.canvas.indexOf("data:image/png;base64,") === 0 && editor.canvas.length > 400 }
+    function canvasDrawn() { return editor.canvas.indexOf("image://pictures/canvas-") === 0 }
     function insp() { return JSON.parse(editor.inspector) }
 
     readonly property var steps: [
@@ -58,7 +58,7 @@ Item {
         },
         function () { canvas.fit(); return true },
         function () {
-            return check(pngReady(), "the canvas was not rendered") &&
+            return check(canvasDrawn(), "the canvas was not rendered") &&
                    check(canvas.zoom > 0.05 && canvas.zoom < 1, "the frame should be fitted to the window")
         },
         function () {
@@ -233,7 +233,7 @@ Item {
             editor.switchLanguage("")
             const back = insp().text !== "守る"
             return check(!set.error && set.files[0].path === "exports/tr-ja-01.png", "an export in a language is named after it: " + JSON.stringify(set)) &&
-                   check(back, "the default text must be untouched by a translation") && check(pngReady(), "the canvas should still render")
+                   check(back, "the default text must be untouched by a translation") && check(canvasDrawn(), "the canvas should still render")
         },
         function () {
             const id = editor.importImage("file://" + folder + "/fixture.png")

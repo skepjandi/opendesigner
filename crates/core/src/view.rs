@@ -183,6 +183,12 @@ pub struct ClipRow {
     /// How long the transition into this clip really lasts.
     pub transition_ms: u32,
     pub motion: crate::video::Motion,
+    /// Footage speed (1 is as recorded) and, for a ramp, its keys; `source_span_ms` is how much
+    /// of the file the clip plays.
+    pub speed: f64,
+    pub speed_ramp: Vec<crate::speed::SpeedKey>,
+    pub source_span_ms: u64,
+    pub grade: Option<crate::grade::Grade>,
 }
 
 /// A video with its clips placed.
@@ -199,6 +205,10 @@ pub struct VideoRow {
     pub overlays: Vec<crate::video::Overlay>,
     /// The sound under the picture (none for a silent video).
     pub audio: Option<AudioRow>,
+    /// The other sound tracks: music, voice and effects.
+    pub tracks: Vec<crate::audio::SoundTrack>,
+    /// The captions: style and cues with their words.
+    pub captions: CaptionsRow,
     /// Numbers of nodes keyframed over the video's time.
     pub animations: Vec<crate::animation::Animation>,
     /// Pictures blended per frame for motion blur (0 is off).
@@ -206,6 +216,13 @@ pub struct VideoRow {
     /// What happens, in order, in words: the clips with their motion and how each one arrives,
     /// then the overlays by start time, then what is animated.
     pub story: Vec<String>,
+}
+
+/// A video's captions as listed: the style and every cue, empty or not.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct CaptionsRow {
+    pub style: crate::captions::CaptionStyle,
+    pub cues: Vec<crate::captions::Cue>,
 }
 
 /// The sound track of a video.
@@ -227,6 +244,33 @@ fn kind_name<T: serde::Serialize>(v: &T) -> String {
         .ok()
         .and_then(|j| j.as_str().map(str::to_string))
         .unwrap_or_default()
+}
+
+/// What a clip's speed, ramp and grade add to its sentence.
+fn retiming_and_grade(clip: &crate::video::Clip) -> String {
+    let mut out = String::new();
+    if !clip.speed_ramp.is_empty() {
+        out.push_str(&format!(
+            ", speed ramp over {} keys (plays {} of the file)",
+            clip.speed_ramp.len(),
+            secs(clip.source_span_ms())
+        ));
+    } else if clip.speed != 1.0 {
+        out.push_str(&format!(
+            ", at {}x speed (plays {} of the file)",
+            clip.speed,
+            secs(clip.source_span_ms())
+        ));
+    }
+    if let Some(g) = &clip.grade {
+        let set: Vec<String> = crate::grade::GradeParam::ALL
+            .iter()
+            .filter(|p| p.get(g) != 0.0)
+            .map(|p| format!("{} {}", p.as_str(), p.get(g)))
+            .collect();
+        out.push_str(&format!(", graded ({})", set.join(", ")));
+    }
+    out
 }
 
 /// The video as a list of sentences: what is on screen when, and what leads into what.
@@ -267,8 +311,9 @@ fn story_of(doc: &Document, v: &crate::video::Video) -> Vec<String> {
             String::new()
         };
         out.push(format!(
-            "{arrive}{what} for {}{zoom} (until {})",
+            "{arrive}{what} for {}{zoom}{} (until {})",
             secs(u64::from(clip.duration_ms)),
+            retiming_and_grade(clip),
             secs(p.end_ms)
         ));
     }
@@ -312,7 +357,45 @@ fn story_of(doc: &Document, v: &crate::video::Video) -> Vec<String> {
             a.gain
         ));
     }
+    out.extend(v.tracks.iter().map(track_story));
+    out.extend(caption_story(&v.captions));
     out
+}
+
+fn track_story(t: &crate::audio::SoundTrack) -> String {
+    let duck = t.duck.map_or(String::new(), |d| {
+        format!(", ducking under the voice (depth {:.2})", d.depth)
+    });
+    let trim = match (t.in_ms, t.out_ms) {
+        (0, None) => String::new(),
+        (i, None) => format!(", from {} into the file", secs(u64::from(i))),
+        (i, Some(o)) => format!(
+            ", {} to {} of the file",
+            secs(u64::from(i)),
+            secs(u64::from(o))
+        ),
+    };
+    format!(
+        "{} track {}: {} from {} at volume {:.2}{trim}{duck}",
+        t.role.name(),
+        t.id,
+        t.file,
+        secs(u64::from(t.start_ms)),
+        t.gain
+    )
+}
+
+fn caption_story(c: &crate::captions::Captions) -> Option<String> {
+    let (first, last) = (c.cues.first()?, c.cues.last()?);
+    let timed = c.cues.iter().filter(|q| !q.words.is_empty()).count();
+    Some(format!(
+        "captions: {} cues from {} to {}, {timed} with word timings; {} at {}% of the height",
+        c.cues.len(),
+        secs(u64::from(first.start_ms)),
+        secs(u64::from(last.end_ms)),
+        c.style.font_family,
+        c.style.size_pct
+    ))
 }
 
 /// Every video with its clips placed on the timeline.
@@ -357,6 +440,10 @@ pub fn videos(doc: &Document) -> Vec<VideoRow> {
                         transition: c.transition,
                         transition_ms: p.overlap_ms,
                         motion: c.motion,
+                        speed: c.speed,
+                        speed_ramp: c.speed_ramp.clone(),
+                        source_span_ms: c.source_span_ms(),
+                        grade: c.grade,
                     })
                     .collect(),
                 overlays: v.overlays.clone(),
@@ -367,6 +454,11 @@ pub fn videos(doc: &Document) -> Vec<VideoRow> {
                     fade_in_ms: a.fade_in_ms,
                     fade_out_ms: a.fade_out_ms,
                 }),
+                tracks: v.tracks.clone(),
+                captions: CaptionsRow {
+                    style: v.captions.style.clone(),
+                    cues: v.captions.cues.clone(),
+                },
                 animations: v.animations.clone(),
                 motion_blur: v.motion_blur,
                 story: story_of(doc, v),

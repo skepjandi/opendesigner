@@ -10,8 +10,11 @@ use od_core::{
     Actor, AnnotationTarget, Node, NodeId, OpError, Operation, ProjectError, Session, Workspace,
     project,
 };
+mod blocks;
+mod doccmd;
 mod serve;
 mod skillcmd;
+mod sound;
 
 use od_agent::export::{Plan, export_assets};
 use od_render::RenderError;
@@ -49,6 +52,9 @@ enum Command {
         /// Group the edit under an agent turn id.
         #[arg(long)]
         turn: Option<String>,
+        /// Check the operations on a scratch copy and print what would happen; changes nothing.
+        #[arg(long)]
+        dry_run: bool,
     },
     /// Name the current state so it can be restored.
     Checkpoint {
@@ -66,23 +72,39 @@ enum Command {
         #[arg(long)]
         agent: Option<String>,
     },
-    /// Render a frame to a PNG, validating it against a store preset when one is given.
+    /// Render a frame to a PNG, validating it against a store preset when one is given. With
+    /// --batch, render once per row of template-variable values instead.
     Export {
         dir: PathBuf,
-        #[arg(long)]
-        frame: String,
-        #[arg(long)]
-        out: PathBuf,
+        /// The frame to render (a PNG per row with --batch).
+        #[arg(long, required_unless_present_any = ["batch"])]
+        frame: Option<String>,
+        #[arg(long, required_unless_present = "batch", conflicts_with = "batch")]
+        out: Option<PathBuf>,
         #[arg(long)]
         preset: Option<String>,
         #[arg(long, default_value_t = 1.0)]
         scale: f32,
         /// Keep the alpha channel (stores reject it for screenshots).
-        #[arg(long)]
+        #[arg(long, conflicts_with = "batch")]
         alpha: bool,
         /// Show this language's translations.
-        #[arg(long)]
+        #[arg(long, conflicts_with = "batch")]
         locale: Option<String>,
+        /// A JSON file of rows `{name, variables, locale?}`: one export per row, on a scratch
+        /// copy; the project is not changed. Output goes to exports/ only.
+        #[arg(long)]
+        batch: Option<PathBuf>,
+        /// With --batch, an MP4 per row from this video instead of a PNG from --frame.
+        #[arg(long, requires = "batch", conflicts_with = "frame")]
+        video: Option<String>,
+        /// With --batch, where each row goes: exports/{name}.png (.mp4 for a video); {name} and
+        /// {index} are replaced.
+        #[arg(long, requires = "batch")]
+        out_template: Option<String>,
+        /// With --batch, fail a row that names an unknown variable or gives the wrong type.
+        #[arg(long, requires = "batch")]
+        strict_variables: bool,
     },
     /// List the project's languages and the text nodes each still lacks a translation for.
     Locales { dir: PathBuf },
@@ -257,10 +279,48 @@ enum Command {
         #[arg(long, default_value = "claude-code")]
         agent: String,
     },
+    /// The block catalog: ready-made titles, overlays, backgrounds, charts and motion.
+    Blocks {
+        #[command(subcommand)]
+        action: blocks::BlocksAction,
+    },
+    /// Sound tracks, pauses and waveforms of a video.
+    Sound {
+        #[command(subcommand)]
+        action: sound::SoundAction,
+    },
+    /// Captions of a video: import a transcript, set a style.
+    Captions {
+        #[command(subcommand)]
+        action: sound::CaptionsAction,
+    },
     /// Install, inspect or remove the Agent Skill that teaches coding agents to use OpenDesigner.
     Skill {
         #[command(subcommand)]
         action: skillcmd::SkillAction,
+    },
+    /// Lint the document and its videos: findings with stable rule codes (docs/wiki/lint-rules.md).
+    Lint {
+        dir: PathBuf,
+        /// Print the findings as JSON.
+        #[arg(long)]
+        json: bool,
+        /// Exit with code 2 when a finding is at or above this severity.
+        #[arg(long, value_enum, default_value = "error")]
+        fail_on: doccmd::FailOn,
+        /// Also check frame sizes against this store preset (repeat the flag for several).
+        #[arg(long = "preset")]
+        presets: Vec<String>,
+    },
+    /// Regenerate the agent plugin (skill and manifests under plugins/opendesigner and
+    /// .claude-plugin) from the tool schema; with --check, only report what is stale.
+    PackagePlugin {
+        /// The repository root to write into (default: the current folder).
+        #[arg(long, default_value = ".")]
+        out: PathBuf,
+        /// Write nothing; exit with code 2 if the committed plugin differs from the generator.
+        #[arg(long)]
+        check: bool,
     },
 }
 
@@ -387,14 +447,21 @@ fn run(cli: Cli) -> Result<(), CliError> {
             ops,
             agent,
             turn,
+            dry_run,
         } => {
-            let mut session = project::load(&dir)?;
             let ops: Vec<Operation> =
                 serde_json::from_slice(&read_capped(&ops, MAX_OPS_FILE_BYTES)?)
                     .map_err(|e| CliError::Invalid(format!("operations file: {e}")))?;
-            let receipt = session.apply(actor(agent)?, turn, &ops)?;
+            if dry_run {
+                return doccmd::dry_run_apply(&dir, &ops);
+            }
+            let mut session = project::load(&dir)?;
+            let receipt = session
+                .apply(actor(agent)?, turn, &ops)
+                .map_err(|e| CliError::Invalid(od_agent::doctools::failure_text(&e)))?;
             project::save(&dir, &session)?;
             let out = serde_json::json!({
+                "stage": "applied",
                 "transaction": receipt.id,
                 "created": receipt.created,
                 "touched": receipt.touched,
@@ -434,8 +501,22 @@ fn run(cli: Cli) -> Result<(), CliError> {
             scale,
             alpha,
             locale,
-        } => {
-            export(
+            batch,
+            video,
+            out_template,
+            strict_variables,
+        } => match (batch, frame, out) {
+            (Some(rows), frame, _) => doccmd::export_batch(doccmd::BatchArgs {
+                dir,
+                rows,
+                frame,
+                video,
+                preset: preset_id,
+                out_template,
+                strict_variables,
+                scale,
+            })?,
+            (None, Some(frame), Some(out)) => export(
                 &dir,
                 &frame,
                 &out,
@@ -443,8 +524,13 @@ fn run(cli: Cli) -> Result<(), CliError> {
                 scale,
                 alpha,
                 locale.as_deref(),
-            )?;
-        }
+            )?,
+            (None, ..) => {
+                return Err(CliError::Invalid(
+                    "export needs --frame and --out, or --batch".into(),
+                ));
+            }
+        },
         Command::Locales { dir } => {
             let ws = Workspace::open(&dir)?;
             let rows = od_core::view::locales(ws.session.document());
@@ -482,8 +568,13 @@ fn run(cli: Cli) -> Result<(), CliError> {
                     v.frame_count
                 );
                 for c in &v.clips {
+                    let speed = if c.speed != 1.0 {
+                        format!(" at {}x", c.speed)
+                    } else {
+                        String::new()
+                    };
                     println!(
-                        "  {}\t{} ({})\tstarts {} ms\t{} ms\t{:?} {} ms\tzoom {} to {}",
+                        "  {}\t{} ({}){}\tstarts {} ms\t{} ms\t{:?} {} ms\tzoom {} to {}",
                         c.id,
                         if c.footage.is_empty() {
                             c.frame_name.clone()
@@ -495,6 +586,7 @@ fn run(cli: Cli) -> Result<(), CliError> {
                         } else {
                             "footage"
                         },
+                        speed,
                         c.start_ms,
                         c.duration_ms,
                         c.transition.kind,
@@ -518,6 +610,26 @@ fn run(cli: Cli) -> Result<(), CliError> {
                 }
                 if v.motion_blur > 0 {
                     println!("  motion blur\t{} pictures per frame", v.motion_blur);
+                }
+                for t in &v.tracks {
+                    println!(
+                        "  sound track\t{}\t{}\t{}\tstarts {} ms\tvolume {:.2}{}",
+                        t.id,
+                        t.role.name(),
+                        t.file,
+                        t.start_ms,
+                        t.gain,
+                        match t.duck {
+                            Some(d) => format!("\tducks under the voice (depth {:.2})", d.depth),
+                            None => String::new(),
+                        }
+                    );
+                }
+                for q in &v.captions.cues {
+                    println!(
+                        "  caption\t{}\t{} to {} ms\t{}",
+                        q.id, q.start_ms, q.end_ms, q.text
+                    );
                 }
             }
         }
@@ -794,7 +906,17 @@ fn run(cli: Cli) -> Result<(), CliError> {
             rotate_token,
             agent,
         } => serve::run(&dir, port, show_token, rotate_token, &agent)?,
+        Command::Blocks { action } => blocks::run(action)?,
+        Command::Sound { action } => sound::sound(action)?,
+        Command::Captions { action } => sound::captions(action)?,
         Command::Skill { action } => skillcmd::run(action)?,
+        Command::Lint {
+            dir,
+            json,
+            fail_on,
+            presets,
+        } => doccmd::lint(&dir, json, fail_on, &presets)?,
+        Command::PackagePlugin { out, check } => doccmd::package_plugin(&out, check)?,
     }
     Ok(())
 }

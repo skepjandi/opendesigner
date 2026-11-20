@@ -103,6 +103,18 @@ impl Workspace {
         self.dir.as_deref()
     }
 
+    /// A throwaway workspace over `doc` that reads the same project folder (for `media/`). It has
+    /// its own empty history and annotations; saving it would overwrite the project, so callers
+    /// must not: it exists to render or export a variation without touching the real one.
+    pub fn scratch(&self, doc: crate::model::Document) -> Workspace {
+        Workspace {
+            session: Session::new(doc),
+            annotations: Annotations::default(),
+            selection: Vec::new(),
+            dir: self.dir.clone(),
+        }
+    }
+
     fn project_dir(&self) -> Result<&Path, ProjectError> {
         self.dir
             .as_deref()

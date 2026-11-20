@@ -110,6 +110,23 @@ pub enum TransitionKind {
     Dip,
     /// The new clip settles from 120% to full size while it fades in.
     ZoomIn,
+    /// The new clip is uncovered by an edge sweeping from the right to the left.
+    WipeLeft,
+    /// The new clip is uncovered by an edge sweeping from the left to the right.
+    WipeRight,
+    /// The new clip is uncovered by an edge sweeping from the bottom to the top.
+    WipeUp,
+    /// The new clip is uncovered by an edge sweeping from the top to the bottom.
+    WipeDown,
+    /// The new clip shows through a circle that opens from the middle.
+    Iris,
+    /// The old clip washes out to white, then the new one comes up from it.
+    Flash,
+    /// Both clips blur while the new one fades in over the old.
+    BlurDissolve,
+    /// The picture breaks into horizontal slices that slide sideways by seeded, repeatable
+    /// amounts while the new clip takes over.
+    GlitchSlice,
 }
 
 /// The transition into a clip. It overlaps the end of the previous clip, so a 500 ms fade makes
@@ -236,6 +253,24 @@ pub struct Clip {
     pub transition: Transition,
     #[serde(default)]
     pub motion: Motion,
+    /// How fast footage plays, 0.25 to 4 (1 is as recorded). `duration_ms` is the length on the
+    /// timeline, so the clip plays `duration_ms * speed` of its file (`crate::speed`).
+    #[serde(default = "one_f64", skip_serializing_if = "is_one_f64")]
+    pub speed: f64,
+    /// Instead of a constant speed: the rate at moments of clip time, eased between keys.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub speed_ramp: Vec<crate::speed::SpeedKey>,
+    /// Colour grading and effects over the clip's picture.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grade: Option<crate::grade::Grade>,
+}
+
+fn one_f64() -> f64 {
+    1.0
+}
+
+fn is_one_f64(v: &f64) -> bool {
+    *v == 1.0
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -253,6 +288,12 @@ pub struct Video {
     /// The sound under the picture (none for a silent video).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub audio: Option<AudioTrack>,
+    /// More sound tracks (music, voice, effects) mixed with `audio`; see `crate::audio`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tracks: Vec<crate::audio::SoundTrack>,
+    /// Timed captions burned into the picture; see `crate::captions`.
+    #[serde(default, skip_serializing_if = "crate::captions::Captions::is_empty")]
+    pub captions: crate::captions::Captions,
     /// Numbers of nodes keyframed over the video's time, sorted by node and property.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub animations: Vec<crate::animation::Animation>,
@@ -337,6 +378,8 @@ impl Video {
         if let Some(a) = &self.audio {
             check_audio(a)?;
         }
+        crate::audio::check_tracks(&self.tracks)?;
+        crate::captions::check_captions(&self.captions)?;
         for clip in &self.clips {
             check_source(&ClipSource {
                 frame: clip.frame.clone(),
@@ -345,6 +388,10 @@ impl Video {
             check_duration(clip.duration_ms)?;
             check_transition(&clip.transition, clip.duration_ms)?;
             check_motion(&clip.motion)?;
+            crate::speed::check_clip_speed(clip)?;
+            if let Some(g) = &clip.grade {
+                g.checked()?;
+            }
         }
         crate::animation::check_animations(self)?;
         if self.duration_ms() > MAX_VIDEO_MS {
@@ -495,6 +542,10 @@ pub enum VideoProperty {
     },
     /// The sound under the picture (`null` for a silent video).
     Audio(Option<AudioTrack>),
+    /// The sound tracks besides `audio` (`crate::audio`).
+    Tracks(Vec<crate::audio::SoundTrack>),
+    /// The captions: style and cues (`crate::captions`).
+    Captions(crate::captions::Captions),
     /// Pictures blended per frame for motion blur: 0 (off) or 2 to 16.
     MotionBlur(u32),
 }
@@ -507,6 +558,12 @@ pub enum ClipProperty {
     Source(ClipSource),
     Transition(Transition),
     Motion(Motion),
+    /// Footage speed, 0.25 to 4.
+    Speed(f64),
+    /// The speed ramp keys (empty for none).
+    SpeedRamp(Vec<crate::speed::SpeedKey>),
+    /// The colour grade (`null` for none).
+    Grade(Option<crate::grade::Grade>),
 }
 
 /// One settable property of an overlay.
@@ -620,6 +677,13 @@ pub(crate) fn apply(
     allow_internal: bool,
 ) -> Result<super::AppliedOp, OpError> {
     use super::Operation as O;
+    let snapped;
+    let op = if allow_internal {
+        op
+    } else {
+        snapped = crate::snap::video_op(doc, op);
+        &snapped
+    };
     match op {
         O::CreateVideo {
             name,
@@ -639,6 +703,8 @@ pub(crate) fn apply(
                 clips: Vec::new(),
                 overlays: Vec::new(),
                 audio: None,
+                tracks: Vec::new(),
+                captions: Default::default(),
                 animations: Vec::new(),
                 motion_blur: 0,
             };
@@ -719,6 +785,14 @@ pub(crate) fn apply(
                     let old = std::mem::replace(&mut video.audio, audio.clone());
                     (VideoProperty::Audio(old), prop.clone())
                 }
+                VideoProperty::Tracks(tracks) => {
+                    let old = std::mem::replace(&mut video.tracks, tracks.clone());
+                    (VideoProperty::Tracks(old), prop.clone())
+                }
+                VideoProperty::Captions(captions) => {
+                    let old = std::mem::replace(&mut video.captions, captions.clone());
+                    (VideoProperty::Captions(old), prop.clone())
+                }
                 VideoProperty::MotionBlur(samples) => {
                     let old = std::mem::replace(&mut video.motion_blur, *samples);
                     (VideoProperty::MotionBlur(old), prop.clone())
@@ -764,6 +838,9 @@ pub(crate) fn apply(
                 duration_ms: *duration_ms,
                 transition: transition.unwrap_or_default(),
                 motion: motion.unwrap_or_default(),
+                speed: 1.0,
+                speed_ramp: Vec::new(),
+                grade: None,
             };
             let target = &mut doc.videos[at];
             let index = index.unwrap_or(target.clips.len());
@@ -900,6 +977,19 @@ pub(crate) fn apply(
                 }
                 ClipProperty::Motion(m) => {
                     ClipProperty::Motion(std::mem::replace(&mut c.motion, *m))
+                }
+                ClipProperty::Speed(v) => {
+                    let v = crate::speed::check_speed(*v)?;
+                    ClipProperty::Speed(std::mem::replace(&mut c.speed, v))
+                }
+                ClipProperty::SpeedRamp(keys) => {
+                    let keys = crate::speed::check_ramp(keys)?;
+                    ClipProperty::SpeedRamp(std::mem::replace(&mut c.speed_ramp, keys))
+                }
+                ClipProperty::Grade(g) => {
+                    let g = g.as_ref().map(crate::grade::Grade::checked).transpose()?;
+                    let g = g.filter(|g| !g.is_neutral());
+                    ClipProperty::Grade(std::mem::replace(&mut c.grade, g))
                 }
             };
             if let Err(e) = target.check_fields() {

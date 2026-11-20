@@ -23,8 +23,8 @@ fn instructions() -> String {
         "OpenDesigner is a design and video editor. Call get_guidance first: it returns the \
          user's selection, the notes they pinned, the workspace's brief and the edits they made \
          after your last turn. Change the design only with apply_ops, look at the result with \
-         render_preview, resolve notes you acted on, and validate store exports with export or \
-         validate_export. Every change you make is attributed to you, checkpointed and reversible \
+         render_preview, resolve notes you acted on, validate store exports with export or \
+         validate_export, and call validate_document before you finish. Every change you make is attributed to you, checkpointed and reversible \
          by the user.\n\n{}",
         crate::playbook::QUALITY_BAR
     )

@@ -32,6 +32,8 @@ struct Manifest {
     tokens: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     locales: BTreeMap<String, BTreeMap<String, String>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    variables: Vec<crate::variables::Variable>,
 }
 
 fn io_err(path: &Path, source: std::io::Error) -> ProjectError {
@@ -146,6 +148,7 @@ pub fn save(dir: &Path, session: &Session) -> Result<(), ProjectError> {
                 (l.clone(), texts.collect())
             })
             .collect(),
+        variables: doc.variables.clone(),
     };
     let toml = toml::to_string(&manifest).map_err(|e| parse_err(&dir.join(MANIFEST), e))?;
     write_atomic(&dir.join(MANIFEST), toml.as_bytes())?;
@@ -243,6 +246,8 @@ pub fn load(dir: &Path) -> Result<Session, ProjectError> {
         locales,
         pages,
         videos,
+        variables: manifest.variables,
+        index: crate::index::NodeIndex::default(),
     };
 
     let history = dir.join(HISTORY_DIR);

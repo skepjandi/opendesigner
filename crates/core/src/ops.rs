@@ -53,6 +53,13 @@ pub enum Property {
     ScreenScroll(Option<f64>),
     /// A recording on a device3d's screen (`null` shows the node's `image` again).
     ScreenFootage(Option<Footage>),
+    /// The colour grade of an image node (`null` for none).
+    Grade(Option<crate::grade::Grade>),
+    /// One number of an image node's grade (what keyframes move).
+    GradeParam {
+        param: crate::grade::GradeParam,
+        value: f64,
+    },
 }
 
 impl Property {
@@ -87,6 +94,8 @@ impl Property {
             Property::Glare(_) => "glare",
             Property::ScreenScroll(_) => "screen_scroll",
             Property::ScreenFootage(_) => "screen_footage",
+            Property::Grade(_) => "grade",
+            Property::GradeParam { .. } => "grade_param",
         }
     }
 
@@ -109,6 +118,7 @@ impl Property {
             | Property::TextAlign(_)
             | Property::LineHeight(_) => kind == Text,
             Property::Image(_) | Property::ImageFit(_) => matches!(kind, Image | Device3d),
+            Property::Grade(_) | Property::GradeParam { .. } => kind == Image,
             Property::Model(_)
             | Property::RotateX(_)
             | Property::RotateY(_)
@@ -224,6 +234,18 @@ fn apply_property(
             Property::Image(replace(&mut node.image, v))
         }
         Property::ImageFit(v) => Property::ImageFit(replace(&mut node.image_fit, v)),
+        Property::Grade(v) => {
+            let v = v.as_ref().map(crate::grade::Grade::checked).transpose()?;
+            Property::Grade(replace(&mut node.grade, v.filter(|g| !g.is_neutral())))
+        }
+        Property::GradeParam { param, value } => {
+            let value = param.checked(value)?;
+            let mut grade = node.grade.unwrap_or_default();
+            let old = param.get(&grade);
+            param.set(&mut grade, value);
+            node.grade = Some(grade).filter(|g| !g.is_neutral());
+            Property::GradeParam { param, value: old }
+        }
         device_prop => apply_device_property(node, device_prop)?,
     })
 }
@@ -592,6 +614,31 @@ pub enum Operation {
         index: usize,
         node: Node,
     },
+    /// Declare a template variable: a typed slot bound to node properties (`Document.variables`).
+    /// Bound nodes take its default at once.
+    DeclareVariable {
+        variable: crate::variables::NewVariable,
+    },
+    /// Remove a variable; the bound nodes keep the values they show now.
+    RemoveVariable { id: NodeId },
+    /// Change one property of a variable (label, description, portrays, default, enum_values, binds).
+    SetVariable {
+        id: NodeId,
+        prop: crate::variables::VariableProperty,
+    },
+    /// Set a variable's value: every bound node property is rewritten through `set`.
+    SetVariableValue {
+        id: NodeId,
+        value: crate::variables::VarValue,
+    },
+    /// Put back a variable and the node values it had. Written by the history; front ends
+    /// cannot issue it.
+    RestoreVariable {
+        id: NodeId,
+        index: usize,
+        variable: Option<crate::variables::Variable>,
+        sets: Vec<crate::variables::Assignment>,
+    },
 }
 
 impl Operation {
@@ -619,6 +666,11 @@ impl Operation {
             Operation::RestoreVideo { .. } => "restore_video",
             Operation::RestoreClip { .. } => "restore_clip",
             Operation::Restore { .. } => "restore",
+            Operation::DeclareVariable { .. } => "declare_variable",
+            Operation::RemoveVariable { .. } => "remove_variable",
+            Operation::SetVariable { .. } => "set_variable",
+            Operation::SetVariableValue { .. } => "set_variable_value",
+            Operation::RestoreVariable { .. } => "restore_variable",
         }
     }
 }
@@ -692,6 +744,9 @@ fn insert(
     let index = index.unwrap_or(target.children.len());
     check_insert_index(parent, index, target.children.len())?;
     target.children.insert(index, node);
+    if let Some(inserted) = doc.node_at(&loc).and_then(|p| p.children.get(index)) {
+        doc.index.note_inserted(parent, index, inserted);
+    }
     Ok(index)
 }
 
@@ -822,7 +877,7 @@ pub fn apply(
             node,
             prop,
             keys,
-        } => crate::animation::apply(doc, video, node, *prop, keys),
+        } => crate::animation::apply(doc, video, node, *prop, keys, allow_internal),
         Operation::SetToken { name, value } => set_token(doc, name, value.as_deref()),
         Operation::SetLocalizedText { locale, id, text } => {
             let old = doc.set_locale_text(locale, id, text.as_deref())?;
@@ -836,6 +891,11 @@ pub fn apply(
                 touched: vec![id.clone()],
             })
         }
+        Operation::DeclareVariable { .. }
+        | Operation::RemoveVariable { .. }
+        | Operation::SetVariable { .. }
+        | Operation::SetVariableValue { .. }
+        | Operation::RestoreVariable { .. } => crate::variables::apply(doc, op, allow_internal),
         Operation::Reparent { id, parent, index } => reparent(doc, id, parent, *index),
         Operation::Delete { id } => {
             let loc = node_loc(doc, id)?;
@@ -871,6 +931,7 @@ pub fn apply(
                 .ok_or_else(|| OpError::Internal("parent vanished".to_string()))?;
             let parent_id = parent_node.id.clone();
             let removed = parent_node.children.remove(index);
+            doc.index.note_removed(&removed);
             let mut touched = Vec::new();
             removed.ids(&mut touched);
             Ok(AppliedOp {
@@ -938,6 +999,11 @@ fn current_value(node: &Node, prop: &Property) -> Property {
         Property::LineHeight(_) => Property::LineHeight(node.line_height),
         Property::Image(_) => Property::Image(node.image.clone()),
         Property::ImageFit(_) => Property::ImageFit(node.image_fit),
+        Property::Grade(_) => Property::Grade(node.grade),
+        Property::GradeParam { param, .. } => Property::GradeParam {
+            param: *param,
+            value: param.get(&node.grade.unwrap_or_default()),
+        },
         device_prop => {
             let d = node.device3d.clone().unwrap_or_default();
             match device_prop {

@@ -3,9 +3,13 @@
 
 pub mod acp;
 pub mod assets;
+pub mod audio_tools;
+pub mod batch;
+pub mod blocks;
 pub mod connect;
 pub mod device;
 pub mod direction;
+pub mod doctools;
 pub mod error;
 pub mod export;
 pub mod formats;
@@ -16,6 +20,11 @@ pub mod mcp_servers;
 pub mod memory;
 pub mod motion;
 pub mod playbook;
+pub mod plugin;
+pub mod preview_audio;
+pub mod preview_frames;
+mod preview_key;
+pub mod preview_tier;
 pub mod program;
 pub mod review;
 pub mod server;
