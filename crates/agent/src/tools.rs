@@ -58,7 +58,7 @@ impl Output {
         }
     }
 
-    fn json(v: &Value) -> Output {
+    pub(crate) fn json(v: &Value) -> Output {
         Output::text(v.to_string())
     }
 }
@@ -81,7 +81,13 @@ pub struct CallCtx<'a> {
     pub extra_servers: &'a [String],
 }
 
-fn tool(name: &str, description: &str, props: Value, required: &[&str], read_only: bool) -> Value {
+pub(crate) fn tool(
+    name: &str,
+    description: &str,
+    props: Value,
+    required: &[&str],
+    read_only: bool,
+) -> Value {
     tool_full(name, description, props, required, read_only, false)
 }
 
@@ -120,6 +126,7 @@ fn tool_full(
 /// The `tools/list` result.
 pub fn definitions() -> Vec<Value> {
     let mut all = core_definitions();
+    all.extend(crate::motion::definitions());
     all.extend(crate::assets::tools::definitions());
     all.extend(crate::assets::logo::definitions());
     all.extend(showcase_definitions());
@@ -147,10 +154,11 @@ fn core_definitions() -> Vec<Value> {
             "get_playbook",
             "Craft guidance for making work that is not mediocre. Topics: design (images), style \
              (named looks with rules), video (start with the inventory of media, footage, sounds and \
-             assets), motion (timings, easing, recipes), formats (sizes and \
+             assets), motion (timings, easing, recipes), 3d (devices in 3D, captures from a \
+             simulator, moves), formats (sizes and \
              safe zones), logo (identity design). Call it with no topic for the list; read the ones that apply before you \
              build, not after.",
-            json!({"topic": {"type": "string", "enum": ["design", "style", "video", "motion", "formats", "logo"]}}),
+            json!({"topic": {"type": "string", "enum": ["design", "style", "video", "motion", "3d", "formats", "logo"]}}),
             &[],
             true,
         ),
@@ -248,7 +256,7 @@ fn core_definitions() -> Vec<Value> {
             "Find nodes by name and kind.",
             json!({
                 "name_contains": {"type": "string"},
-                "kind": {"type": "string", "enum": ["frame", "group", "rect", "ellipse", "text", "image"]},
+                "kind": {"type": "string", "enum": ["frame", "group", "rect", "ellipse", "text", "image", "device3d"]},
                 "limit": {"type": "integer", "minimum": 1, "maximum": 200}
             }),
             &[],
@@ -266,22 +274,38 @@ fn core_definitions() -> Vec<Value> {
             "Change the design with a list of operations, applied together or not at all. \
              Operations: {op:'create', parent, index?, node:{kind, name?, x, y, width, height, fill?, stroke?, \
              corner_radius?, opacity?, visible?, text?, font_size?, font_family?, font_weight?, text_align?, \
-             line_height?, image?, image_fit?, children?}}, \
+             line_height?, image?, image_fit?, device3d?, children?}}, \
              {op:'set', id, prop:{name, value}} with name one of name, x, y, width, height, visible, opacity, \
              fill, stroke, corner_radius, text, font_size, font_family, font_weight, text_align, line_height, \
              image (a media/ path from list_media), image_fit (cover, contain or fill), {op:'move', id, x, y}, \
              {op:'reparent', id, parent, index?}, {op:'delete', id}, \
              {op:'set_token', name, value} (a named color '#rrggbb'; value null removes an unused token), \
-             {op:'set_localized_text', locale, id, text} (a translation of a text node; text null removes it), \
-             and for videos (see list_videos): {op:'create_video', name, fps, width, height} (even sizes), {op:'delete_video', id}, \
+             {op:'set_localized_text', locale, id, text} (a translation of a text node; text null removes it). \
+             3D devices: kind 'device3d' is a phone, tablet, laptop or monitor drawn in 3D inside its box \
+             (the box is the viewport; 1 zoom fits the device with a margin at any turn); its fill is the body \
+             finish, its image (with image_fit) is the capture on the screen; create it with \
+             device3d:{model: phone|phone_punch_hole|tablet|laptop|monitor, rotate_x?, rotate_y?, rotate_z?, zoom?, fov?, \
+             light_angle?, shadow?, glare?, screen_scroll?, screen_footage?:{file:'media/x.mov', in_ms}} and change it with \
+             set props model, rotate_x (tilt, + leans the top away), rotate_y (turn, + turns the right edge away), \
+             rotate_z (roll, + clockwise), zoom (0.05 to 10), fov (1 to 100 degrees, 30 natural, low is flat), \
+             light_angle (degrees, 0 from above, 90 from the right), shadow (0 to 1), glare (0 to 1, screen reflection), \
+             screen_scroll (0 top to 1 bottom of a long capture; null centres), screen_footage (value {file, in_ms}: a \
+             recording on the screen that plays while the frame is shown; null shows the image). \
+             Videos (see list_videos): {op:'create_video', name, fps, width, height} (even sizes), {op:'delete_video', id}, \
              {op:'set_video', id, prop:{name, value}} with name one of name, fps, size (value {width, height}), \
              audio (value {file:'media/x.mp3', start_ms?, gain? (0 to 2), fade_in_ms?, fade_out_ms?} for the sound under the picture; null takes it away), \
+             motion_blur (0 off, or 2 to 16 pictures blended while anything moves), \
              {op:'add_clip', video, frame | footage:{file:'media/x.mp4', in_ms}, duration_ms, index?, transition?, motion?} (a clip shows a design frame or plays footage from list_footage), \
              {op:'remove_clip', video, clip}, {op:'move_clip', video, clip, index}, \
              {op:'set_clip', video, clip, prop:{name, value}} with name one of duration_ms, frame, \
              source (value {frame} or {footage:{file,in_ms}}), transition (value {kind: cut|fade|slide_left|slide_right|slide_up|slide_down|dip|zoom_in, duration_ms, ease?}), motion (value {scale_from, scale_to, ease?}, 1 to 3), \
-             {op:'add_overlay', video, frame, start_ms, duration_ms, fade_ms?, enter?, exit?, ease?} (a design frame drawn over the whole video for a while: titles, lower thirds, call-outs; a frame with no fill is transparent; enter and exit are none, fade, slide_up, slide_down, slide_left, slide_right, pop or zoom, taking fade_ms each; ease is linear, ease_in, ease_out, ease_in_out or back (overshoots)), {op:'remove_overlay', video, overlay}, \
-             {op:'set_overlay', video, overlay, prop:{name, value}} with name one of frame, start_ms, duration_ms, fade_ms, enter, exit, ease. Colors are '#rrggbb', '#rrggbbaa' or \
+             {op:'add_overlay', video, frame, start_ms, duration_ms, fade_ms?, enter?, exit?, ease?} (a design frame drawn over the whole video for a while: titles, lower thirds, call-outs; a frame with no fill is transparent; enter and exit are none, fade, slide_up, slide_down, slide_left, slide_right, pop or zoom, taking fade_ms each), {op:'remove_overlay', video, overlay}, \
+             {op:'set_overlay', video, overlay, prop:{name, value}} with name one of frame, start_ms, duration_ms, fade_ms, enter, exit, ease, \
+             {op:'animate', video, node, prop, keys:[{at_ms, value, ease?}]} (keyframes one number of a node over the video's time, \
+             at_ms from the start of the video, strictly increasing; the value holds before the first key and after the last; \
+             prop one of x, y, width, height, opacity, corner_radius, rotate_x, rotate_y, rotate_z, zoom, fov, light_angle, shadow, glare, \
+             screen_scroll; keys:[] removes it; animate_preset writes these for you). Eases: linear, ease_in, ease_out, ease_in_out, \
+             back (overshoots) or spring (overshoots and settles). Colors are '#rrggbb', '#rrggbbaa' or \
              '{token.name}'. Ids are minted for you; the result lists the created ids. A checkpoint is taken \
              before your first change in a turn so the user can restore it.",
             json!({
@@ -416,11 +440,13 @@ fn core_definitions() -> Vec<Value> {
         tool(
             "list_videos",
             "The project's videos: each is a timeline of clips that show design frames, with the \
-             time every clip starts, its transition (which overlaps the clip before it) and its zoom. \
+             time every clip starts, its transition (which overlaps the clip before it) and its zoom, \
+             the overlays, the keyframe animations (node, property, keys) and motion blur. \
              A video may also have one sound track (the file, when it starts and its volume). \
              Start a video with list_media, list_footage, list_sounds and search_assets to see what \
-             you can use. Change them with apply_ops (create_video, add_clip, add_overlay, set_clip, ...); look at one moment \
-             with render_video_frame and write the MP4 with export_video.",
+             you can use. `story` says all of it in sentences. Change them with apply_ops (create_video, \
+             add_clip, add_overlay, set_clip, animate, ...) or animate_preset; look at one moment with \
+             render_video_frame, at the motion with video_contact_sheet, and write the MP4 with export_video.",
             json!({}),
             &[],
             true,
@@ -630,7 +656,7 @@ fn core_definitions() -> Vec<Value> {
     ]
 }
 
-fn parse<T: DeserializeOwned>(args: Value) -> Result<T, ToolError> {
+pub(crate) fn parse<T: DeserializeOwned>(args: Value) -> Result<T, ToolError> {
     let args = if args.is_null() { json!({}) } else { args };
     serde_json::from_value(args).map_err(|e| ToolError(format!("invalid arguments: {e}")))
 }
@@ -645,6 +671,7 @@ fn persist(ws: &Workspace) -> Result<(), ToolError> {
 pub fn call(ctx: &mut CallCtx, name: &str, args: Value) -> Result<Output, ToolError> {
     match name {
         "get_guidance" => get_guidance(ctx),
+        n if crate::motion::NAMES.contains(&n) => crate::motion::call(ctx, n, args),
         n if crate::assets::logo::NAMES.contains(&n) => {
             let dir = ctx.ws.dir().map(std::path::Path::to_path_buf);
             crate::assets::logo::call(dir.as_deref(), n, args)
@@ -737,7 +764,7 @@ fn list_media(ctx: &mut CallCtx) -> Result<Output, ToolError> {
     Ok(Output::json(&Value::Array(listed)))
 }
 
-fn node_id(s: &str) -> Result<NodeId, ToolError> {
+pub(crate) fn node_id(s: &str) -> Result<NodeId, ToolError> {
     Ok(NodeId::parse(s)?)
 }
 
@@ -928,12 +955,12 @@ fn find_nodes(ctx: &mut CallCtx, a: FindArgs) -> Result<Output, ToolError> {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct ApplyArgs {
-    ops: Vec<Operation>,
+pub(crate) struct ApplyArgs {
+    pub(crate) ops: Vec<Operation>,
     #[serde(default)]
-    turn: Option<String>,
+    pub(crate) turn: Option<String>,
     #[serde(default)]
-    summary: Option<String>,
+    pub(crate) summary: Option<String>,
 }
 
 fn brief_of(ctx: &CallCtx) -> crate::formats::Brief {
@@ -949,6 +976,7 @@ fn get_guidance(ctx: &mut CallCtx) -> Result<Output, ToolError> {
     v["brief"] = brief.to_json();
     v["before_you_build"] = json!(
         "Call get_playbook: design (images), style (pick a named look), video and motion (video), \
+         3d (devices in 3D with captures and moves), \
          formats (sizes). Review your work with review_frame and render_preview before you say it is done."
     );
     v["memory"] = memory_index(ctx);
@@ -1225,7 +1253,7 @@ fn check_brief(ctx: &CallCtx, ops: &[Operation]) -> Result<(), ToolError> {
     Ok(())
 }
 
-fn apply_ops(ctx: &mut CallCtx, a: ApplyArgs) -> Result<Output, ToolError> {
+pub(crate) fn apply_ops(ctx: &mut CallCtx, a: ApplyArgs) -> Result<Output, ToolError> {
     check_brief(ctx, &a.ops)?;
     let turn = match a.turn {
         Some(t) => t,
@@ -1343,7 +1371,7 @@ fn render_preview(ctx: &mut CallCtx, a: PreviewArgs) -> Result<Output, ToolError
             }
         }
     };
-    let rendered = od_render::render_frame(doc, &id, scale, ctx.ws.dir())?;
+    let rendered = crate::video_export::render_still(doc, &id, scale, ctx.ws.dir())?;
     let png = od_render::encode_png(&rendered.pixmap, false)?;
     let mut note = format!(
         "{}x{} preview of {} at scale {scale:.3}",

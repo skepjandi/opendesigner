@@ -37,6 +37,8 @@ pub enum Ease {
     EaseInOut,
     /// Overshoots the end a little and settles back: a pop or a bounce in.
     Back,
+    /// Springs past the end and settles with a few small, damped swings: a physical arrival.
+    Spring,
 }
 
 impl Ease {
@@ -58,6 +60,11 @@ impl Ease {
                 const C1: f64 = 1.70158;
                 const C3: f64 = C1 + 1.0;
                 1.0 + C3 * (t - 1.0).powi(3) + C1 * (t - 1.0).powi(2)
+            }
+            Ease::Spring => {
+                // a damped oscillation, nudged so it ends exactly at 1
+                let wave = |t: f64| 1.0 - (-6.0 * t).exp() * (t * 4.5 * std::f64::consts::PI).cos();
+                wave(t) + t * (1.0 - wave(1.0))
             }
         }
     }
@@ -246,6 +253,17 @@ pub struct Video {
     /// The sound under the picture (none for a silent video).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub audio: Option<AudioTrack>,
+    /// Numbers of nodes keyframed over the video's time, sorted by node and property.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub animations: Vec<crate::animation::Animation>,
+    /// Pictures blended into each frame while something moves (0 is off, 2 to 16 on): the
+    /// smear a real camera's shutter gives fast motion.
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub motion_blur: u32,
+}
+
+fn is_zero_u32(v: &u32) -> bool {
+    *v == 0
 }
 
 /// Where a clip sits on the timeline.
@@ -328,6 +346,7 @@ impl Video {
             check_transition(&clip.transition, clip.duration_ms)?;
             check_motion(&clip.motion)?;
         }
+        crate::animation::check_animations(self)?;
         if self.duration_ms() > MAX_VIDEO_MS {
             return Err(OpError::Limit(format!(
                 "a video is at most {} minutes long",
@@ -476,6 +495,8 @@ pub enum VideoProperty {
     },
     /// The sound under the picture (`null` for a silent video).
     Audio(Option<AudioTrack>),
+    /// Pictures blended per frame for motion blur: 0 (off) or 2 to 16.
+    MotionBlur(u32),
 }
 
 /// One settable property of a clip. Serialized as `{"name": "duration_ms", "value": 3000}`.
@@ -568,6 +589,7 @@ impl Document {
                 self.check_counter_of(&o.id)?;
                 self.check_frame(&o.frame)?;
             }
+            self.validate_animations(video)?;
         }
         Ok(())
     }
@@ -617,6 +639,8 @@ pub(crate) fn apply(
                 clips: Vec::new(),
                 overlays: Vec::new(),
                 audio: None,
+                animations: Vec::new(),
+                motion_blur: 0,
             };
             video.check_fields()?;
             let id = video.id.clone();
@@ -694,6 +718,10 @@ pub(crate) fn apply(
                     }
                     let old = std::mem::replace(&mut video.audio, audio.clone());
                     (VideoProperty::Audio(old), prop.clone())
+                }
+                VideoProperty::MotionBlur(samples) => {
+                    let old = std::mem::replace(&mut video.motion_blur, *samples);
+                    (VideoProperty::MotionBlur(old), prop.clone())
                 }
             };
             if let Err(e) = video.check_fields() {

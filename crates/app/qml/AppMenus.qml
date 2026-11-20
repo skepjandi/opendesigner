@@ -129,6 +129,23 @@ MenuBar {
                 onObjectRemoved: (i, o) => deviceMenu.removeItem(o)
             }
         }
+        Menu {
+            id: device3dMenu
+            title: "Add 3D Device"
+            enabled: bar.project
+            property var models: []
+            Component.onCompleted: models = JSON.parse(bar.editor.deviceModels())
+            Instantiator {
+                model: device3dMenu.models
+                delegate: MenuItem {
+                    required property var modelData
+                    text: modelData.label
+                    onTriggered: bar.editor.addDevice3d(modelData.id)
+                }
+                onObjectAdded: (i, o) => device3dMenu.insertItem(i, o)
+                onObjectRemoved: (i, o) => device3dMenu.removeItem(o)
+            }
+        }
         Cmd { label: "Import Image…"; ok: bar.project; onRun: bar.dialogs.image.open() }
         MenuSeparator {}
         Cmd { label: "Add Language…"; ok: bar.project; onRun: bar.dialogs.languages.open() }

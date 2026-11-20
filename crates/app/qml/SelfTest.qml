@@ -263,6 +263,18 @@ Item {
                    check(names.indexOf("Screen") >= 0 && names.indexOf("Body") >= 0, "the device should add a body and a screen")
         },
         function () {
+            // a 3D device: added, turned through the inspector's path, and orbited as one edit
+            const models = JSON.parse(editor.deviceModels())
+            const id = editor.addDevice3d("phone")
+            if (!check(models.length === 5 && id !== "" && insp().kind === "device3d", "the 3D phone was not added: " + editor.message)) return false
+            editor.setNodeProperty(id, "rotate_y", "25")
+            if (!check(insp().device3d.rotate_y === 25, "the inspector did not turn the device: " + editor.inspector)) return false
+            editor.orbitDevice(id, 10, 15)
+            if (!check(insp().device3d.rotate_x === 10 && insp().device3d.rotate_y === 40, "the orbit did not turn the device: " + editor.inspector)) return false
+            editor.undo()
+            return check(insp().device3d.rotate_y === 25 && insp().device3d.rotate_x === undefined, "one undo should take back the whole orbit: " + editor.inspector)
+        },
+        function () {
             // the video preview is asked for by the panel: it must answer, and it must say so
             // when there is nothing to show
             const empty = editor.previewStatus()

@@ -199,8 +199,12 @@ pub struct VideoRow {
     pub overlays: Vec<crate::video::Overlay>,
     /// The sound under the picture (none for a silent video).
     pub audio: Option<AudioRow>,
+    /// Numbers of nodes keyframed over the video's time.
+    pub animations: Vec<crate::animation::Animation>,
+    /// Pictures blended per frame for motion blur (0 is off).
+    pub motion_blur: u32,
     /// What happens, in order, in words: the clips with their motion and how each one arrives,
-    /// then the overlays by start time.
+    /// then the overlays by start time, then what is animated.
     pub story: Vec<String>,
 }
 
@@ -283,6 +287,15 @@ fn story_of(doc: &Document, v: &crate::video::Video) -> Vec<String> {
             secs(o.start_ms + u64::from(o.duration_ms))
         ));
     }
+    for a in &v.animations {
+        out.push(format!("motion: {}", crate::animation::describe(doc, a)));
+    }
+    if v.motion_blur > 0 {
+        out.push(format!(
+            "motion blur: {} pictures per frame while anything moves",
+            v.motion_blur
+        ));
+    }
     if let Some(a) = &v.audio {
         let fades = match (a.fade_in_ms, a.fade_out_ms) {
             (0, 0) => String::new(),
@@ -354,6 +367,8 @@ pub fn videos(doc: &Document) -> Vec<VideoRow> {
                     fade_in_ms: a.fade_in_ms,
                     fade_out_ms: a.fade_out_ms,
                 }),
+                animations: v.animations.clone(),
+                motion_blur: v.motion_blur,
                 story: story_of(doc, v),
             }
         })

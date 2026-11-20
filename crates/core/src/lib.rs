@@ -3,8 +3,10 @@
 //! This crate has no UI dependency. The Qt shell, the MCP server and the CLI are front ends over
 //! the operations defined here (`docs/wiki/architecture.md`).
 
+pub mod animation;
 pub mod annotations;
 pub mod arrange;
+pub mod device3d;
 pub mod error;
 pub mod geometry;
 pub mod history;
@@ -18,7 +20,9 @@ pub mod video;
 pub mod view;
 pub mod workspace;
 
+pub use animation::{AnimProp, Animation, Key, Preset, PresetRequest};
 pub use annotations::{Annotation, AnnotationStatus, AnnotationTarget, Annotations};
+pub use device3d::{Device3d, DeviceModel};
 pub use error::{OpError, ProjectError};
 pub use history::{Actor, Checkpoint, Session, Transaction, TransactionKind, TxReceipt};
 pub use model::{Document, ImageFit, Node, NodeId, NodeKind, Page, Stroke, TextAlign};

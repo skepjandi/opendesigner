@@ -14,6 +14,7 @@ pub mod http;
 pub mod mcp;
 pub mod mcp_servers;
 pub mod memory;
+pub mod motion;
 pub mod playbook;
 pub mod program;
 pub mod review;

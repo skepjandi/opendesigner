@@ -1,21 +1,26 @@
-//! CPU rasterizer for OpenDesigner documents: frames, groups, rectangles, ellipses, text and
-//! images to pixels, and PNG export. Anything it cannot draw (a missing or unreadable image) is
-//! reported as a warning so an export never silently drops content.
+//! CPU rasterizer for OpenDesigner documents: frames, groups, rectangles, ellipses, text, images
+//! and 3D devices to pixels, and PNG export. Anything it cannot draw (a missing or unreadable
+//! image) is reported as a warning so an export never silently drops content.
 
+mod device;
 mod images;
 mod text;
+pub mod three_d;
 pub mod video;
 
+pub use device::Media;
 pub use images::dimensions as image_dimensions;
 pub use tiny_skia::Pixmap;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::Path as FsPath;
+use std::sync::Arc;
 
 use od_core::{Document, Node, NodeId, NodeKind, OpError, limits};
 use thiserror::Error;
 use tiny_skia::{
-    Color, FillRule, Mask, Paint as SkPaint, Path, PathBuilder, Rect, Stroke as SkStroke, Transform,
+    Color, FillRule, FilterQuality, Mask, Paint as SkPaint, Path, PathBuilder, PixmapPaint, Rect,
+    Stroke as SkStroke, Transform,
 };
 
 /// Largest exported image, in pixels per side and in total (about 256 MB of RGBA).
@@ -92,6 +97,8 @@ struct Ctx<'a> {
     project_dir: Option<&'a FsPath>,
     warnings: Vec<Warning>,
     view: View,
+    /// The frame's 3D devices, drawn before the bands at the frame's scale.
+    devices: &'a HashMap<NodeId, Arc<Pixmap>>,
 }
 
 /// Text in `node` and below that wraps to more rows than its box is tall. A box with no width
@@ -131,15 +138,27 @@ pub fn render_frame(
     scale: f32,
     project_dir: Option<&FsPath>,
 ) -> Result<Rendered, RenderError> {
-    render_frame_in_bands(doc, frame, scale, project_dir, None)
+    render_frame_with(doc, frame, scale, project_dir, &mut Media::default())
 }
 
-/// [`render_frame`] with the number of bands chosen (`None`: by size and cores).
+/// [`render_frame`] with `media` for screens that play recordings.
+pub fn render_frame_with(
+    doc: &Document,
+    frame: &NodeId,
+    scale: f32,
+    project_dir: Option<&FsPath>,
+    media: &mut Media,
+) -> Result<Rendered, RenderError> {
+    render_frame_in_bands(doc, frame, scale, project_dir, media, None)
+}
+
+/// [`render_frame_with`] with the number of bands chosen (`None`: by size and cores).
 fn render_frame_in_bands(
     doc: &Document,
     frame: &NodeId,
     scale: f32,
     project_dir: Option<&FsPath>,
+    media: &mut Media,
     bands: Option<usize>,
 ) -> Result<Rendered, RenderError> {
     if !(0.01..=16.0).contains(&scale) || !scale.is_finite() {
@@ -164,7 +183,15 @@ fn render_frame_in_bands(
     }
     let (w, h) = (width as u32, height as u32);
     let bands = bands.unwrap_or_else(|| band_count(node, h));
-    render_bands(doc, node, scale, (w, h), project_dir, bands)
+    let mut warnings = Vec::new();
+    let devices = device::prepare(node, scale, &doc.tokens, project_dir, media, &mut warnings)?;
+    let mut rendered = render_bands(doc, node, scale, (w, h), project_dir, &devices, bands)?;
+    for warning in warnings {
+        if !rendered.warnings.contains(&warning) {
+            rendered.warnings.push(warning);
+        }
+    }
+    Ok(rendered)
 }
 
 /// Frames with at least this many nodes are drawn in horizontal bands on several threads.
@@ -207,6 +234,7 @@ fn render_bands(
     scale: f32,
     (w, h): (u32, u32),
     project_dir: Option<&FsPath>,
+    devices: &HashMap<NodeId, Arc<Pixmap>>,
     bands: usize,
 ) -> Result<Rendered, RenderError> {
     let too_large = || RenderError::TooLarge {
@@ -230,6 +258,7 @@ fn render_bands(
                 width: w as f32,
                 height: band_h as f32,
             },
+            devices,
         };
         let base = Transform::from_row(scale, 0.0, 0.0, scale, 0.0, -(first as f32));
         draw(&mut ctx, &mut pixmap, node, base, 1.0, None, true)?;
@@ -357,6 +386,12 @@ fn draw(
                 }
                 None
             }
+            NodeKind::Device3d => {
+                if let Some(drawn) = ctx.devices.get(&node.id) {
+                    draw_device(pixmap, mask, drawn, transform, opacity);
+                }
+                None
+            }
         }
     };
 
@@ -394,6 +429,28 @@ fn draw(
         draw(ctx, pixmap, child, transform, opacity, child_mask, false)?;
     }
     Ok(())
+}
+
+/// Places a device drawn at the frame's scale (one of its pixels per output pixel) at the node.
+fn draw_device(
+    pixmap: &mut Pixmap,
+    mask: Option<&Mask>,
+    drawn: &Pixmap,
+    transform: Transform,
+    opacity: f32,
+) {
+    let at = Transform::from_translate(transform.tx, transform.ty);
+    let aligned = transform.tx.fract() == 0.0 && transform.ty.fract() == 0.0;
+    let paint = PixmapPaint {
+        opacity,
+        quality: if aligned {
+            FilterQuality::Nearest
+        } else {
+            FilterQuality::Bilinear
+        },
+        ..PixmapPaint::default()
+    };
+    pixmap.draw_pixmap(0, 0, drawn.as_ref(), &paint, at, mask);
 }
 
 /// The decoded image an image node refers to, or why there is none.
@@ -465,6 +522,30 @@ fn rounded_rect(w: f32, h: f32, r: f32) -> Option<Path> {
     p.cubic_to(0.0, r - c, r - c, 0.0, r, 0.0);
     p.close();
     p.finish()
+}
+
+/// Pictures of one size laid out left to right, top to bottom, `cols` to a row, on a dark ground
+/// with a gap around each: a contact sheet. `None` when there are none or it is too large.
+pub fn grid(pictures: &[Pixmap], cols: u32) -> Option<Pixmap> {
+    const GAP: u32 = 6;
+    let first = pictures.first()?;
+    let (cw, ch) = (first.width(), first.height());
+    let cols = cols.clamp(1, pictures.len() as u32);
+    let rows = (pictures.len() as u32).div_ceil(cols);
+    let mut sheet = Pixmap::new(cols * cw + (cols + 1) * GAP, rows * ch + (rows + 1) * GAP)?;
+    sheet.fill(Color::from_rgba8(0x1b, 0x1b, 0x1f, 0xff));
+    for (n, picture) in pictures.iter().enumerate() {
+        let (col, row) = (n as u32 % cols, n as u32 / cols);
+        sheet.draw_pixmap(
+            (GAP + col * (cw + GAP)) as i32,
+            (GAP + row * (ch + GAP)) as i32,
+            picture.as_ref(),
+            &PixmapPaint::default(),
+            Transform::identity(),
+            None,
+        );
+    }
+    Some(sheet)
 }
 
 /// Cuts `pixmap` into `count` equal-width columns, left to right: the slices of a panorama.
@@ -1191,10 +1272,25 @@ mod tests {
     fn bands_draw_what_one_pass_draws() {
         let (s, frame) = busy_frame();
         for scale in [0.3_f32, 1.0, 1.7] {
-            let one = render_frame_in_bands(s.document(), &frame, scale, None, Some(1)).unwrap();
+            let one = render_frame_in_bands(
+                s.document(),
+                &frame,
+                scale,
+                None,
+                &mut Media::default(),
+                Some(1),
+            )
+            .unwrap();
             for bands in [2, 3, 8] {
-                let many =
-                    render_frame_in_bands(s.document(), &frame, scale, None, Some(bands)).unwrap();
+                let many = render_frame_in_bands(
+                    s.document(),
+                    &frame,
+                    scale,
+                    None,
+                    &mut Media::default(),
+                    Some(bands),
+                )
+                .unwrap();
                 assert_eq!(one.pixmap.width(), many.pixmap.width());
                 assert_eq!(one.pixmap.height(), many.pixmap.height());
                 // Float rounding of a shifted outline can move a few anti-aliased edge samples.

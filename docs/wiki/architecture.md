@@ -53,8 +53,8 @@ OpenCut's rewrite states it as a principle: business logic lives in Rust, and ea
 
 | Crate | Responsibility | Depends on Qt? | Status |
 |-------|----------------|----------------|--------|
-| `core` | Node model, validated operations, history/checkpoints, project I/O, annotations, workspace and guidance, geometry (bounds, hit tests), panel views ([Document Format](./document-format.md)) | no | built |
-| `render` | CPU rasterizer and PNG export: frames, groups, rectangles, ellipses, text (shaped, wrapped, aligned; one style per node) and images (PNG, JPEG, WebP from `media/`; cover, contain, fill; rounded corners; cached decode); an image it cannot read is reported, not dropped silently | no | partial |
+| `core` | Node model, validated operations, history/checkpoints, project I/O, annotations, workspace and guidance, geometry (bounds, hit tests), panel views, 3D devices and keyframe animations ([Document Format](./document-format.md)) | no | built |
+| `render` | CPU rasterizer and PNG export: frames, groups, rectangles, ellipses, text (shaped, wrapped, aligned; one style per node), images (PNG, JPEG, WebP from `media/`; cover, contain, fill; rounded corners; cached decode) and 3D devices (a generated phone, tablet, laptop or monitor drawn in perspective with a capture on its screen); an image it cannot read is reported, not dropped silently | no | partial |
 | `store` | Export presets and validation ([Store Assets](./store-assets.md)); device frames and panoramas are not built | no | partial |
 | `agent` | MCP server and tools, token, skill generator and installer ([Agent Integration](./agent-integration.md)); ACP client for the in-app chat | no | built (MCP, skill, chat) |
 | `cli` | Headless commands over the same operations | no | built |

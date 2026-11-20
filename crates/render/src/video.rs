@@ -1,15 +1,18 @@
-//! Pictures of a video at any moment: the clip being shown, a slow zoom over it, and the
-//! transition from the clip before (`docs/wiki/video-editing.md`).
+//! Pictures of a video at any moment: the clip being shown, a slow zoom over it, the transition
+//! from the clip before, the overlays, keyframed nodes (`od_core::animation`) and motion blur
+//! (`docs/wiki/video-editing.md`).
 //!
-//! Each clip shows a design frame, drawn by [`crate::render_frame`] once at the scale its output
-//! needs and reused for every moment of the clip.
+//! Each clip shows a design frame, drawn by [`crate::render_frame_with`] once at the scale its
+//! output needs and reused for every moment of the clip. A frame that holds animated nodes or a
+//! screen playing a recording is "live": it is drawn again whenever what it shows changes.
 
+use std::collections::{HashMap, HashSet};
 use std::path::Path as FsPath;
 
-use od_core::{Document, Entrance, NodeId, Overlay, TransitionKind, Video};
+use od_core::{Document, Entrance, Node, NodeId, NodeKind, Overlay, TransitionKind, Video};
 use tiny_skia::{FilterQuality, Pixmap, PixmapPaint, Transform};
 
-use crate::{RenderError, Warning, render_frame};
+use crate::{Media, RenderError, Warning, render_frame_with};
 
 /// Frames kept drawn: a transition shows two clips and a second transition may start under it.
 const KEPT: usize = 3;
@@ -27,7 +30,30 @@ pub trait FootageSource {
 struct Drawn {
     frame: NodeId,
     scale_bits: u32,
+    /// For a live frame: the animated values and recording times it was drawn with.
+    state: Vec<u64>,
     pixmap: Pixmap,
+}
+
+/// What changes a frame's picture over time.
+#[derive(Default)]
+struct Liveness {
+    /// Indices into `video.animations` of nodes inside the frame.
+    animations: Vec<usize>,
+    /// The frame holds a device whose screen plays a recording.
+    plays: bool,
+}
+
+/// One moment being drawn: the time that places clips and overlays, the time animations are
+/// read at (they differ only by fractions of a millisecond inside a motion-blur shutter), and
+/// the document as it looks then.
+struct Moment<'d> {
+    time: u64,
+    anim_ms: f64,
+    /// The time recordings are read at: the frame's own moment, not the blur sample's, so a
+    /// recording is decoded once per frame.
+    footage_time: u64,
+    doc: Option<&'d Document>,
 }
 
 /// Draws the moments of one video.
@@ -41,6 +67,7 @@ pub struct VideoRenderer<'a> {
     drawn: Vec<Drawn>,
     warnings: Vec<Warning>,
     footage: Option<&'a mut dyn FootageSource>,
+    live: HashMap<NodeId, Liveness>,
 }
 
 impl<'a> VideoRenderer<'a> {
@@ -58,10 +85,11 @@ impl<'a> VideoRenderer<'a> {
             drawn: Vec::new(),
             warnings: Vec::new(),
             footage: None,
+            live: live_frames(doc, video),
         }
     }
 
-    /// Lets clips of footage be drawn.
+    /// Lets clips of footage, and screens that play recordings, be drawn.
     pub fn with_footage(mut self, source: &'a mut dyn FootageSource) -> VideoRenderer<'a> {
         self.footage = Some(source);
         self
@@ -78,11 +106,35 @@ impl<'a> VideoRenderer<'a> {
         &self.warnings
     }
 
+    /// How long the motion-blur shutter stays open before each frame: half a frame (a 180
+    /// degree shutter), or nothing when motion blur is off.
+    fn shutter_ms(&self) -> f64 {
+        if self.video.motion_blur >= 2 {
+            500.0 / f64::from(self.video.fps.max(1))
+        } else {
+            0.0
+        }
+    }
+
     /// A value that is the same for two moments exactly when the picture is: while a clip of a
-    /// design frame holds still (no zoom, no transition, no fade) every frame is identical, and
-    /// an export can reuse the last one instead of drawing it again. `None` when the picture
-    /// changes all the time (footage).
+    /// design frame holds still (no zoom, no transition, no fade, nothing animated moving)
+    /// every frame is identical, and an export can reuse the last one instead of drawing it
+    /// again. `None` when the picture changes all the time (footage, a screen playing).
     pub fn signature(&self, time_ms: u64) -> Option<Vec<i64>> {
+        let mut sig = self.signature_at(time_ms, true)?;
+        let shutter = self.shutter_ms();
+        if shutter > 0.0 {
+            // a blurred picture also shows the moments just before it
+            let before = time_ms.saturating_sub(shutter.ceil() as u64);
+            sig.push(-1);
+            sig.extend(self.signature_at(before, true)?);
+        }
+        Some(sig)
+    }
+
+    /// The signature of the single moment `time_ms`; footage makes it `None` only when
+    /// `footage_moves`.
+    fn signature_at(&self, time_ms: u64, footage_moves: bool) -> Option<Vec<i64>> {
         let placed = self.video.placed();
         let Some(last) = placed.last() else {
             return Some(Vec::new());
@@ -95,7 +147,7 @@ impl<'a> VideoRenderer<'a> {
             .filter(|(_, p)| p.start_ms <= time && time < p.end_ms)
         {
             let clip = &self.video.clips[p.index];
-            if clip.footage.is_some() {
+            if clip.footage.is_some() && footage_moves {
                 return None;
             }
             sig.push(n as i64);
@@ -114,6 +166,9 @@ impl<'a> VideoRenderer<'a> {
             {
                 sig.push(time as i64);
             }
+            if let Some(frame) = &clip.frame {
+                self.live_signature(frame, time, footage_moves, &mut sig)?;
+            }
         }
         for (n, o) in self.video.overlays.iter().enumerate() {
             let end = o.start_ms + u64::from(o.duration_ms);
@@ -125,14 +180,127 @@ impl<'a> VideoRenderer<'a> {
                 if fading {
                     sig.push(time as i64);
                 }
+                self.live_signature(&o.frame, time, footage_moves, &mut sig)?;
             }
         }
         Some(sig)
     }
 
+    /// Adds what a live frame shows at `time` to a signature: the moment itself while one of its
+    /// animations moves. `None` while a screen in it plays (and `footage_moves`).
+    fn live_signature(
+        &self,
+        frame: &NodeId,
+        time: u64,
+        footage_moves: bool,
+        sig: &mut Vec<i64>,
+    ) -> Option<()> {
+        let Some(live) = self.live.get(frame) else {
+            return Some(());
+        };
+        if live.plays && footage_moves {
+            return None;
+        }
+        let moving = live
+            .animations
+            .iter()
+            .any(|&i| self.video.animations[i].moving_at(time as f64));
+        if moving {
+            sig.push(time as i64);
+        }
+        Some(())
+    }
+
+    /// Whether anything but recordings moves at `time_ms` or within the shutter before it.
+    fn in_motion(&self, time_ms: u64, shutter: f64) -> bool {
+        let before = time_ms.saturating_sub(shutter.ceil() as u64);
+        self.moving_at(time_ms) || self.moving_at(before)
+    }
+
+    /// Whether a transition, zoom, overlay fade or animation is under way at `time_ms`.
+    fn moving_at(&self, time_ms: u64) -> bool {
+        let placed = self.video.placed();
+        let Some(last) = placed.last() else {
+            return false;
+        };
+        let time = time_ms.min(last.end_ms.saturating_sub(1));
+        let animated = |frame: &NodeId| {
+            self.live.get(frame).is_some_and(|l| {
+                l.animations
+                    .iter()
+                    .any(|&i| self.video.animations[i].moving_at(time as f64))
+            })
+        };
+        let clips = placed
+            .iter()
+            .filter(|p| p.start_ms <= time && time < p.end_ms)
+            .any(|p| {
+                let clip = &self.video.clips[p.index];
+                time - p.start_ms < u64::from(p.overlap_ms)
+                    || (clip.motion.scale_to - clip.motion.scale_from).abs() > f64::EPSILON
+                    || clip.frame.as_ref().is_some_and(animated)
+            });
+        let overlays = self.video.overlays.iter().any(|o| {
+            let end = o.start_ms + u64::from(o.duration_ms);
+            o.start_ms <= time
+                && time < end
+                && ((o.fade_ms > 0
+                    && (time - o.start_ms < u64::from(o.fade_ms)
+                        || end - time <= u64::from(o.fade_ms)))
+                    || animated(&o.frame))
+        });
+        clips || overlays
+    }
+
+    /// The earliest moment a blurred picture at `time_ms` may show: never before a cut, which a
+    /// real shutter does not cross.
+    fn shutter_floor(&self, time_ms: u64) -> f64 {
+        self.video
+            .placed()
+            .iter()
+            .filter(|p| p.start_ms <= time_ms && p.overlap_ms == 0)
+            .map(|p| p.start_ms)
+            .max()
+            .unwrap_or(0) as f64
+    }
+
     /// The picture at `time_ms` from the start. Past the end it is the last picture; an empty
-    /// video is black.
+    /// video is black. With motion blur on, a moment in which something moves is the average of
+    /// several pictures across the shutter before it.
     pub fn frame_at(&mut self, time_ms: u64) -> Result<Pixmap, RenderError> {
+        let shutter = self.shutter_ms();
+        if shutter <= 0.0 || !self.in_motion(time_ms, shutter) {
+            return self.picture(time_ms as f64, time_ms);
+        }
+        let samples = self.video.motion_blur;
+        let floor = self.shutter_floor(time_ms);
+        let mut sum: Vec<u32> = Vec::new();
+        for i in 0..samples {
+            let back = shutter * f64::from(samples - 1 - i) / f64::from(samples - 1);
+            let at = (time_ms as f64 - back).max(floor);
+            let picture = self.picture(at, time_ms)?;
+            if sum.is_empty() {
+                sum = vec![0; picture.data().len()];
+            }
+            for (s, v) in sum.iter_mut().zip(picture.data()) {
+                *s += u32::from(*v);
+            }
+        }
+        let (w, h) = (self.width, self.height);
+        let mut out = Pixmap::new(w, h).ok_or(RenderError::TooLarge {
+            width: u64::from(w),
+            height: u64::from(h),
+        })?;
+        let half = samples / 2;
+        for (o, s) in out.data_mut().iter_mut().zip(&sum) {
+            *o = ((s + half) / samples) as u8;
+        }
+        Ok(out)
+    }
+
+    /// One unblurred picture: clips and overlays placed at `anim_ms` (rounded down), animated
+    /// nodes as they are at `anim_ms`, recordings at `footage_time`.
+    fn picture(&mut self, anim_ms: f64, footage_time: u64) -> Result<Pixmap, RenderError> {
         let (w, h) = (self.width, self.height);
         let mut canvas = Pixmap::new(w, h).ok_or(RenderError::TooLarge {
             width: u64::from(w),
@@ -143,7 +311,15 @@ impl<'a> VideoRenderer<'a> {
         let Some(last) = placed.last() else {
             return Ok(canvas);
         };
-        let time = time_ms.min(last.end_ms.saturating_sub(1));
+        let end = last.end_ms.saturating_sub(1);
+        let time = (anim_ms.floor() as u64).min(end);
+        let animated = self.doc.at_time(self.video, anim_ms.min(end as f64));
+        let moment = Moment {
+            time,
+            anim_ms,
+            footage_time: footage_time.min(end),
+            doc: animated.as_ref(),
+        };
         let active: Vec<_> = placed
             .iter()
             .filter(|p| p.start_ms <= time && time < p.end_ms)
@@ -192,7 +368,7 @@ impl<'a> VideoRenderer<'a> {
                 }
             }
             pose.opacity = pose.opacity.clamp(0.0, 1.0);
-            self.draw_clip(&mut canvas, p.index, time, pose)?;
+            self.draw_clip(&mut canvas, p.index, &moment, pose)?;
         }
         let overlays: Vec<Overlay> = self.video.overlays.clone();
         for o in overlays
@@ -213,7 +389,8 @@ impl<'a> VideoRenderer<'a> {
             pose.then(entrance_pose(o.enter, progress(into), width, height, true));
             pose.then(entrance_pose(o.exit, progress(left), width, height, false));
             pose.opacity = pose.opacity.clamp(0.0, 1.0);
-            self.draw_overlay(&mut canvas, &o.frame, pose)?;
+            let played = moment.footage_time.saturating_sub(o.start_ms);
+            self.draw_overlay(&mut canvas, &o.frame, &moment, played, pose)?;
         }
         Ok(canvas)
     }
@@ -223,6 +400,8 @@ impl<'a> VideoRenderer<'a> {
         &mut self,
         canvas: &mut Pixmap,
         frame: &NodeId,
+        moment: &Moment,
+        played_ms: u64,
         pose: Pose,
     ) -> Result<(), RenderError> {
         let (w, h) = (self.width as f32, self.height as f32);
@@ -231,7 +410,7 @@ impl<'a> VideoRenderer<'a> {
             .node(frame)
             .ok_or_else(|| RenderError::NoSuchNode(frame.to_string()))?;
         let cover = (w / node.width as f32).max(h / node.height as f32);
-        let drawn = self.drawn_frame(frame, cover)?;
+        let drawn = self.drawn_frame(frame, cover, moment, played_ms)?;
         let (pw, ph) = (drawn.width() as f32, drawn.height() as f32);
         let moved = pose.dx != 0.0 || pose.dy != 0.0 || (pose.scale - 1.0).abs() > 1e-4;
         let paint = PixmapPaint {
@@ -256,17 +435,18 @@ impl<'a> VideoRenderer<'a> {
         Ok(())
     }
 
-    /// Draws clip `index` as it looks at `time`, shifted `dx` pixels, onto `canvas`.
+    /// Draws clip `index` as it looks at the moment, posed, onto `canvas`.
     fn draw_clip(
         &mut self,
         canvas: &mut Pixmap,
         index: usize,
-        time: u64,
+        moment: &Moment,
         pose: Pose,
     ) -> Result<(), RenderError> {
         let placed = self.video.placed();
         let p = placed[index];
         let clip = self.video.clips[index].clone();
+        let time = moment.time;
         let t = (time.saturating_sub(p.start_ms)) as f32 / (p.end_ms - p.start_ms) as f32;
         let zoom = lerp(
             clip.motion.scale_from,
@@ -275,6 +455,7 @@ impl<'a> VideoRenderer<'a> {
         ) as f32;
         let (w, h) = (self.width as f32, self.height as f32);
         let widest = clip.motion.scale_from.max(clip.motion.scale_to) as f32;
+        let played = moment.footage_time.saturating_sub(p.start_ms);
         // The picture is made at `widest` times the size that covers the video; shrink it to this
         // moment's zoom.
         let drawn: std::borrow::Cow<'_, Pixmap> = match (&clip.frame, &clip.footage) {
@@ -284,10 +465,15 @@ impl<'a> VideoRenderer<'a> {
                     .node(frame)
                     .ok_or_else(|| RenderError::NoSuchNode(frame.to_string()))?;
                 let cover = (w / node.width as f32).max(h / node.height as f32);
-                std::borrow::Cow::Borrowed(self.drawn_frame(frame, cover * widest)?)
+                std::borrow::Cow::Borrowed(self.drawn_frame(
+                    frame,
+                    cover * widest,
+                    moment,
+                    played,
+                )?)
             }
             (None, Some(f)) => {
-                let at = f.in_ms + (time.saturating_sub(p.start_ms));
+                let at = f.in_ms + played;
                 let (pw, ph) = (
                     (w * widest).round().max(2.0) as u32,
                     (h * widest).round().max(2.0) as u32,
@@ -339,20 +525,63 @@ impl<'a> VideoRenderer<'a> {
         Ok(())
     }
 
-    /// The design frame drawn at `scale`, from the kept pictures or freshly.
-    fn drawn_frame(&mut self, frame: &NodeId, scale: f32) -> Result<&Pixmap, RenderError> {
+    /// What a live frame shows at the moment, as numbers: its animated values and, when a
+    /// screen in it plays, the recording's time. Empty for a frame that never changes.
+    fn state_of(&self, frame: &NodeId, moment: &Moment, played_ms: u64) -> Vec<u64> {
+        let Some(live) = self.live.get(frame) else {
+            return Vec::new();
+        };
+        let mut state: Vec<u64> = live
+            .animations
+            .iter()
+            .filter_map(|&i| self.video.animations[i].value_at(moment.anim_ms))
+            .map(f64::to_bits)
+            .collect();
+        if live.plays {
+            state.push(u64::MAX);
+            state.push(played_ms);
+        }
+        state
+    }
+
+    /// The design frame drawn at `scale` as it looks at the moment, from the kept pictures or
+    /// freshly.
+    fn drawn_frame(
+        &mut self,
+        frame: &NodeId,
+        scale: f32,
+        moment: &Moment,
+        played_ms: u64,
+    ) -> Result<&Pixmap, RenderError> {
         let bits = scale.to_bits();
+        let state = self.state_of(frame, moment, played_ms);
         if let Some(at) = self
             .drawn
             .iter()
-            .position(|d| &d.frame == frame && d.scale_bits == bits)
+            .position(|d| &d.frame == frame && d.scale_bits == bits && d.state == state)
         {
             // most recently used last
             let d = self.drawn.remove(at);
             self.drawn.push(d);
         } else {
-            let rendered =
-                render_frame(self.doc, frame, scale.clamp(0.01, 16.0), self.project_dir)?;
+            let doc = match moment.doc {
+                Some(animated) if self.live.contains_key(frame) => animated,
+                _ => self.doc,
+            };
+            let mut media = Media {
+                footage: self
+                    .footage
+                    .as_deref_mut()
+                    .map(|f| f as &mut dyn FootageSource),
+                played_ms,
+            };
+            let rendered = render_frame_with(
+                doc,
+                frame,
+                scale.clamp(0.01, 16.0),
+                self.project_dir,
+                &mut media,
+            )?;
             for warning in rendered.warnings {
                 if !self.warnings.contains(&warning) {
                     self.warnings.push(warning);
@@ -364,6 +593,7 @@ impl<'a> VideoRenderer<'a> {
             self.drawn.push(Drawn {
                 frame: frame.clone(),
                 scale_bits: bits,
+                state,
                 pixmap: rendered.pixmap,
             });
         }
@@ -372,6 +602,60 @@ impl<'a> VideoRenderer<'a> {
             .map(|d| &d.pixmap)
             .ok_or_else(|| RenderError::NoSuchNode(frame.to_string()))
     }
+}
+
+/// The frames a video shows whose picture changes over time, and what changes them.
+fn live_frames(doc: &Document, video: &Video) -> HashMap<NodeId, Liveness> {
+    let shown: HashSet<&NodeId> = video
+        .clips
+        .iter()
+        .filter_map(|c| c.frame.as_ref())
+        .chain(video.overlays.iter().map(|o| &o.frame))
+        .collect();
+    let mut out = HashMap::new();
+    for frame in shown {
+        let Some(node) = doc.node(frame) else {
+            continue;
+        };
+        let mut ids = Vec::new();
+        node.ids(&mut ids);
+        let ids: HashSet<NodeId> = ids.into_iter().collect();
+        let live = Liveness {
+            animations: video
+                .animations
+                .iter()
+                .enumerate()
+                .filter(|(_, a)| ids.contains(&a.node))
+                .map(|(i, _)| i)
+                .collect(),
+            plays: plays_recording(node),
+        };
+        if live.plays || !live.animations.is_empty() {
+            out.insert(frame.clone(), live);
+        }
+    }
+    out
+}
+
+/// Whether a visible device under `node` (or `node` itself) shows a recording on its screen.
+pub fn plays_recording(node: &Node) -> bool {
+    (node.kind == NodeKind::Device3d
+        && node.visible
+        && node.device3d.as_ref().is_some_and(|d| d.footage.is_some()))
+        || node.children.iter().any(plays_recording)
+}
+
+/// Whether drawing `video` needs recordings decoded: footage clips, or screens that play one in
+/// a frame the video shows.
+pub fn needs_footage(doc: &Document, video: &Video) -> bool {
+    video.clips.iter().any(|c| c.footage.is_some())
+        || video
+            .clips
+            .iter()
+            .filter_map(|c| c.frame.as_ref())
+            .chain(video.overlays.iter().map(|o| &o.frame))
+            .filter_map(|f| doc.node(f))
+            .any(plays_recording)
 }
 
 fn lerp(from: f64, to: f64, t: f32) -> f64 {
@@ -1023,6 +1307,123 @@ mod tests {
         assert!(
             late[2] > 100 && late[0] == 0,
             "the new clip fading in: {late:?}"
+        );
+    }
+
+    /// A 100x100 black frame with a white 20x20 square at x 0 whose x is keyed from 0 to 80
+    /// over the first second of a 2 s clip at 10 fps.
+    fn sliding_square(blur: u32) -> (Session, NodeId) {
+        let mut s = Session::new(Document::new("v"));
+        let page = s.add_page("p").unwrap();
+        let root = s.document().page(&page).unwrap().root.id.clone();
+        let frame = solid(&mut s, &root, "#000000", 100.0, 100.0);
+        let mut sq = NewNode::new(NodeKind::Rect);
+        (sq.y, sq.width, sq.height) = (40.0, 20.0, 20.0);
+        sq.fill = Paint::parse("#ffffff").ok();
+        let square = s
+            .apply(
+                Actor::User,
+                None,
+                &[Operation::Create {
+                    parent: frame.clone(),
+                    index: None,
+                    node: sq,
+                }],
+            )
+            .unwrap()
+            .created[0]
+            .clone();
+        let v = s
+            .apply(
+                Actor::User,
+                None,
+                &[Operation::CreateVideo {
+                    name: "a".into(),
+                    fps: 10,
+                    width: 100,
+                    height: 100,
+                }],
+            )
+            .unwrap()
+            .created[0]
+            .clone();
+        let key = |at_ms, value| od_core::Key {
+            at_ms,
+            value,
+            ease: od_core::Ease::Linear,
+        };
+        s.apply(
+            Actor::User,
+            None,
+            &[
+                Operation::AddClip {
+                    video: v.clone(),
+                    frame: Some(frame),
+                    footage: None,
+                    duration_ms: 2000,
+                    index: None,
+                    transition: None,
+                    motion: None,
+                },
+                Operation::Animate {
+                    video: v.clone(),
+                    node: square,
+                    prop: od_core::AnimProp::X,
+                    keys: vec![key(0, 0.0), key(1000, 80.0)],
+                },
+                Operation::SetVideo {
+                    id: v.clone(),
+                    prop: od_core::VideoProperty::MotionBlur(blur),
+                },
+            ],
+        )
+        .unwrap();
+        (s, v)
+    }
+
+    /// Pixels on the square's row that are neither black nor white: the smear of motion blur.
+    fn smeared(p: &Pixmap) -> usize {
+        (0..100)
+            .filter(|&x| {
+                let r = px(p, x, 50)[0];
+                (20..=235).contains(&r)
+            })
+            .count()
+    }
+
+    #[test]
+    fn a_keyframed_node_moves_with_the_video_and_holds_after_its_last_key() {
+        let (s, v) = sliding_square(0);
+        assert_eq!(px(&at(&s, &v, 0), 10, 50), [255, 255, 255]);
+        assert_eq!(px(&at(&s, &v, 0), 90, 50), [0, 0, 0]);
+        assert_eq!(px(&at(&s, &v, 500), 50, 50), [255, 255, 255], "halfway");
+        assert_eq!(
+            px(&at(&s, &v, 1500), 90, 50),
+            [255, 255, 255],
+            "held at the end"
+        );
+        let doc = s.document();
+        let r = VideoRenderer::new(doc, doc.video(&v).unwrap(), None);
+        assert_ne!(r.signature(400), r.signature(500), "moving moments differ");
+        assert_eq!(
+            r.signature(1200),
+            r.signature(1800),
+            "after the last key it holds still"
+        );
+    }
+
+    #[test]
+    fn motion_blur_smears_only_what_moves() {
+        let (sharp, v1) = sliding_square(0);
+        let (blurred, v2) = sliding_square(8);
+        assert_eq!(smeared(&at(&sharp, &v1, 500)), 0);
+        let smear = smeared(&at(&blurred, &v2, 500));
+        // 80 px a second, half a 10 fps frame of shutter: about 4 px of smear on each edge
+        assert!((4..=12).contains(&smear), "smear of {smear} px");
+        assert_eq!(
+            at(&blurred, &v2, 1500).data(),
+            at(&sharp, &v1, 1500).data(),
+            "a still moment is not blurred"
         );
     }
 }

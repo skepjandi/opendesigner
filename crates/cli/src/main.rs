@@ -150,6 +150,49 @@ enum Command {
         #[arg(long)]
         image: Option<String>,
     },
+    /// Print a device in 3D as a `create` node for `apply`: phone, phone-punch-hole, tablet,
+    /// laptop or monitor, drawn in perspective inside its box.
+    Device3d {
+        model: String,
+        /// Width of the viewport in document units.
+        #[arg(long, default_value_t = 400.0)]
+        screen_width: f64,
+        /// A media/ path to show on the screen.
+        #[arg(long)]
+        image: Option<String>,
+        /// Turn in degrees: positive turns the right edge away.
+        #[arg(long, default_value_t = -18.0)]
+        rotate_y: f64,
+        /// Tilt in degrees: positive leans the top away.
+        #[arg(long, default_value_t = 8.0)]
+        rotate_x: f64,
+    },
+    /// Animate a node with a named move (spin, turntable, hero_reveal, float, ...) as keyframes.
+    Animate {
+        dir: PathBuf,
+        /// A video id from `videos`.
+        #[arg(long)]
+        video: String,
+        /// The node to move.
+        #[arg(long)]
+        node: String,
+        /// The move: spin, turntable, swing, flip_in, hero_reveal, rise_in, drop_in, float,
+        /// push_in, pull_back, orbit, scroll_screen, fade_in, fade_out, slide_in_left,
+        /// slide_in_right.
+        #[arg(long)]
+        preset: String,
+        /// When the move starts, from the start of the video.
+        #[arg(long, default_value_t = 0)]
+        start_ms: u64,
+        /// How long the move lasts.
+        #[arg(long, default_value_t = 1200)]
+        duration_ms: u64,
+        /// How far the move goes; 1 is as designed.
+        #[arg(long, default_value_t = 1.0)]
+        strength: f64,
+        #[arg(long)]
+        agent: Option<String>,
+    },
     /// Validate PNG files as one set against a store preset.
     Validate {
         #[arg(long)]
@@ -270,6 +313,37 @@ fn actor(agent: Option<String>) -> Result<Actor, CliError> {
         Some(name) => Ok(Actor::agent(&name)?),
         None => Ok(Actor::User),
     }
+}
+
+/// The 3D model named on the command line.
+fn parse_model(name: &str) -> Result<od_core::DeviceModel, CliError> {
+    od_core::DeviceModel::ALL
+        .into_iter()
+        .find(|m| m.as_str() == name)
+        .ok_or_else(|| {
+            let ids: Vec<&str> = od_core::DeviceModel::ALL
+                .iter()
+                .map(|m| m.as_str())
+                .collect();
+            CliError::Invalid(format!(
+                "unknown 3D model {name:?}; use one of {}",
+                ids.join(", ")
+            ))
+        })
+}
+
+/// The named move on the command line.
+fn parse_preset(name: &str) -> Result<od_core::Preset, CliError> {
+    od_core::Preset::ALL
+        .into_iter()
+        .find(|p| p.as_str() == name)
+        .ok_or_else(|| {
+            let ids: Vec<&str> = od_core::Preset::ALL.iter().map(|p| p.as_str()).collect();
+            CliError::Invalid(format!(
+                "unknown move {name:?}; use one of {}",
+                ids.join(", ")
+            ))
+        })
 }
 
 fn read_capped(path: &Path, limit: u64) -> Result<Vec<u8>, CliError> {
@@ -429,6 +503,22 @@ fn run(cli: Cli) -> Result<(), CliError> {
                         c.motion.scale_to
                     );
                 }
+                for a in &v.animations {
+                    let keys: Vec<String> = a
+                        .keys
+                        .iter()
+                        .map(|k| format!("{} at {} ms", k.value, k.at_ms))
+                        .collect();
+                    println!(
+                        "  animation\t{} {}\t{}",
+                        a.node,
+                        a.prop.as_str(),
+                        keys.join(", then ")
+                    );
+                }
+                if v.motion_blur > 0 {
+                    println!("  motion blur\t{} pictures per frame", v.motion_blur);
+                }
             }
         }
         Command::VideoPresets => {
@@ -562,6 +652,85 @@ fn run(cli: Cli) -> Result<(), CliError> {
                 "{}",
                 serde_json::to_string_pretty(&node)
                     .map_err(|e| CliError::Invalid(e.to_string()))?
+            );
+        }
+        Command::Device3d {
+            model,
+            screen_width,
+            image,
+            rotate_y,
+            rotate_x,
+        } => {
+            let model = parse_model(&model)?;
+            if !(screen_width.is_finite() && (50.0..=8192.0).contains(&screen_width)) {
+                return Err(CliError::Invalid(
+                    "--screen-width must be 50 to 8192".into(),
+                ));
+            }
+            let aspect = model.screen_aspect();
+            let (w, h) = if aspect < 1.0 {
+                (screen_width, screen_width / aspect)
+            } else {
+                (screen_width * aspect, screen_width)
+            };
+            let device = od_core::Device3d {
+                model,
+                rotate_x,
+                rotate_y,
+                ..od_core::Device3d::default()
+            };
+            let mut node = od_core::NewNode::new(od_core::NodeKind::Device3d);
+            node.name = Some(format!("{} 3D", model.as_str()));
+            node.width = w;
+            node.height = h;
+            node.image = image;
+            node.device3d = Some(device);
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&node)
+                    .map_err(|e| CliError::Invalid(e.to_string()))?
+            );
+        }
+        Command::Animate {
+            dir,
+            video,
+            node,
+            preset,
+            start_ms,
+            duration_ms,
+            strength,
+            agent,
+        } => {
+            let preset = parse_preset(&preset)?;
+            let mut session = project::load(&dir)?;
+            let video_id = od_core::NodeId::parse(&video)?;
+            let node_id = od_core::NodeId::parse(&node)?;
+            let ops = od_core::animation::preset_ops(
+                session.document(),
+                &video_id,
+                &node_id,
+                od_core::PresetRequest {
+                    preset,
+                    start_ms,
+                    duration_ms,
+                    strength,
+                    ease: None,
+                },
+            )?;
+            if ops.is_empty() {
+                return Err(CliError::Invalid(format!(
+                    "{} would not move {node} from where it is",
+                    preset.as_str()
+                )));
+            }
+            let receipt = session.apply(actor(agent)?, None, &ops)?;
+            project::save(&dir, &session)?;
+            println!(
+                "{}",
+                serde_json::json!({
+                    "transaction": receipt.id,
+                    "touched": receipt.touched,
+                })
             );
         }
         Command::Validate {
@@ -743,7 +912,7 @@ fn export(
         }
         None => session.document(),
     };
-    let rendered = od_render::render_frame(doc, &frame_id, scale, Some(dir))?;
+    let rendered = od_agent::video_export::render_still(doc, &frame_id, scale, Some(dir))?;
     for warning in &rendered.warnings {
         eprintln!("warning: {warning}");
     }

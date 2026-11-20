@@ -11,7 +11,10 @@
 
 use std::time::{Duration, Instant};
 
-use od_core::{Actor, Document, NewNode, NodeKind, Operation, Paint, Session};
+use od_core::{
+    Actor, Device3d, DeviceModel, Document, NewNode, NodeKind, Operation, Paint, Rgba, Session,
+};
+use od_render::three_d::{Scene, render_device, screen_texture_size};
 
 fn build(nodes: usize) -> (Session, od_core::NodeId) {
     let mut s = Session::new(Document::new("bench"));
@@ -111,6 +114,50 @@ fn apply_timing(nodes: usize) -> Duration {
     median(runs)
 }
 
+/// A 3D device: a phone turned a little, with a capture on its screen.
+fn device_timing(model: DeviceModel, w: u32, h: u32) -> Duration {
+    let mut device = Device3d {
+        model,
+        rotate_x: 8.0,
+        rotate_y: -22.0,
+        ..Device3d::default()
+    };
+    device.shadow = 0.35;
+    let (tw, th) = screen_texture_size(&device, w, h);
+    let mut screen = tiny_skia::Pixmap::new(tw, th).expect("screen picture");
+    {
+        let data = screen.data_mut();
+        for (i, px) in data.chunks_exact_mut(4).enumerate() {
+            let x = i as u32 % tw;
+            let y = i as u32 / tw;
+            px[0] = (x * 255 / tw.max(1)) as u8;
+            px[1] = (y * 255 / th.max(1)) as u8;
+            px[2] = 128;
+            px[3] = 255;
+        }
+    }
+    let scene = Scene {
+        device: &device,
+        body: Rgba {
+            r: 58,
+            g: 61,
+            b: 68,
+            a: 255,
+        },
+        screen: Some(&screen),
+        width: w,
+        height: h,
+    };
+    let mut runs = Vec::new();
+    for _ in 0..7 {
+        let t = Instant::now();
+        let pix = render_device(&scene).expect("device picture");
+        runs.push(t.elapsed());
+        std::hint::black_box(pix.data().len());
+    }
+    median(runs)
+}
+
 fn main() {
     println!("render timings, median of 7 runs (milliseconds)");
     println!("nodes   scale   render   png    total");
@@ -140,6 +187,27 @@ fn main() {
         println!(
             "{nodes:>6}  100-operation transaction + checkpoint: {:.2} ms",
             ms(apply_timing(nodes))
+        );
+    }
+
+    println!();
+    println!("3D device timings, median of 7 runs (milliseconds)");
+    println!("model          size         render   budget");
+    for (model, w, h, budget) in [
+        (DeviceModel::Phone, 1206u32, 2622u32, 250.0),
+        (DeviceModel::Phone, 360, 640, 15.0),
+        (DeviceModel::Tablet, 1206, 1608, 250.0),
+        (DeviceModel::Laptop, 1920, 1200, 250.0),
+        (DeviceModel::Monitor, 1920, 1080, 250.0),
+    ] {
+        let t = device_timing(model, w, h);
+        println!(
+            "{:<13}  {:>4}x{:<4}  {:>7.1}  {:>6.0}",
+            model.as_str(),
+            w,
+            h,
+            ms(t),
+            budget
         );
     }
 }

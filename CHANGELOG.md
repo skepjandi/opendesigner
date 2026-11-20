@@ -22,6 +22,18 @@ All notable changes to OpenDesigner are documented here.
 
 **Verified:** unit and integration tests in every crate, clippy `-D warnings`, the offscreen window session; the menu bar's items read back from macOS System Events. **Not verified:** how it looks or feels by eye (canvas gestures, timeline interaction, panels), text-field copy/paste with the menu shortcuts, Windows and Linux.
 
+### feat(render): devices in 3D, keyframes over a video's time, and motion blur
+
+**Area:** `feat(core)`, `feat(render)`, `feat(mcp)`, `feat(cli)`, `feat(app)`, `feat(skill)`
+
+**Why:** the user asked for 3D animations the agent can drive: a 3D iPhone with an image or a video from the iOS simulator on its screen, a monitor with a web page, an Android phone, and the agent moving those things in a video.
+
+**Change:** a new node kind `device3d` (`crates/core/src/device3d.rs`) is a phone, tablet, laptop or monitor drawn in perspective inside its own box, with a capture or a recording on its screen, turned (`rotate_x`, `rotate_y`, `rotate_z`), lit (`light_angle`, `shadow`, `glare`) and lensed (`fov`, `zoom`); the models are generated from parameters, so none is a manufacturer's artwork. `render` draws them with a deterministic CPU rasterizer (`od_render::three_d`: depth buffer, supersampled anti-aliasing, a studio environment for the reflections, a soft shadow), so the canvas and the export are the same picture. A video may now **keyframe** any number of a node over its own time (`Video.animations`, the operation `animate`, `Ease::Spring`, `Video.motion_blur` blending the moments across a half-frame shutter); the named moves (`spin`, `turntable`, `swing`, `flip_in`, `hero_reveal`, `rise_in`, `drop_in`, `float`, `push_in`, `pull_back`, `orbit`, `scroll_screen`, `fade_in`, `fade_out`, `slide_in_left`, `slide_in_right`) are written as ordinary keyframes by the MCP tool `animate_preset` and the CLI `animate`, so a move is data the user can edit. New tools `animate_preset` and `video_contact_sheet` (several moments in one image, the way to judge a move); `list_videos` now carries the animations, the motion blur and a sentence for each move. The project format is version 2 (only new optional fields; version 1 projects load unchanged). A new `3d` playbook teaches the capture commands (`xcrun simctl`, `adb`, a headless browser), the pose that reads as a product shot and the moves.
+
+**Verified:** unit tests for the model, the bounds, the interpolation and the overshoot, the operations (undo, redo, refusal to delete an animated node), the round trip through a project folder and a version 1 project; renderer tests for a keyframed node and for motion blur (a smear only while something moves, a still moment untouched); MCP tests that make a 3D phone, animate it, read the story back and draw a contact sheet; a CLI test that prints a device, applies it and animates it. **Not verified:** how the devices look (no one looked at the pictures); the renderer's speed on the reference machine; the app's new inspector fields and the video lanes by eye.
+
+**PR:** n/a
+
 ## 2026-11-19
 
 ### feat(app): every Direction section has "Let the agent decide"

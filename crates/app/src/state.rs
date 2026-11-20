@@ -18,7 +18,10 @@ use od_agent::{RunningServer, token};
 use od_core::annotations::AnnotationTarget;
 use od_core::geometry::{self, Rect};
 use od_core::view;
-use od_core::{Actor, NewNode, Node, NodeId, NodeKind, Operation, Paint, Property, Workspace};
+use od_core::{
+    Actor, Device3d, DeviceModel, Footage, NewNode, Node, NodeId, NodeKind, Operation, Paint,
+    Property, Workspace,
+};
 use od_store::devices::{self, Device};
 use serde_json::{Value, json};
 
@@ -131,6 +134,19 @@ fn rect_json(r: Option<Rect>) -> Value {
         Some(r) => json!({"x": r.x, "y": r.y, "width": r.width, "height": r.height}),
         None => Value::Null,
     }
+}
+
+/// Whether the file is a video the editor can play (mp4, mov or m4v).
+pub fn is_footage(src: &std::path::Path) -> bool {
+    use std::io::Read;
+    let mut head = [0u8; 12];
+    let Ok(mut f) = std::fs::File::open(src) else {
+        return false;
+    };
+    let Ok(n) = f.read(&mut head) else {
+        return false;
+    };
+    od_core::media::sniff_footage(&head[..n])
 }
 
 fn parse_id(s: &str) -> Res<NodeId> {
@@ -664,7 +680,7 @@ impl EditorState {
                 node.font_size = Some(48.0);
                 node.fill = Some(paint("#fcf1d9")?);
             }
-            NodeKind::Group | NodeKind::Image => {}
+            NodeKind::Group | NodeKind::Image | NodeKind::Device3d => {}
         }
         let parent = match (kind, &self.active_frame) {
             (NodeKind::Frame, _) | (_, None) => self.with_ws(|ws| {
@@ -816,10 +832,7 @@ impl EditorState {
     /// For a video file the user chose: the project folder to copy it into, so the copy (it can
     /// be gigabytes) can run on another thread. `None` for anything that is not a video.
     pub fn footage_import_target(&self, src: &std::path::Path) -> Option<PathBuf> {
-        use std::io::Read;
-        let mut head = [0u8; 12];
-        let n = std::fs::File::open(src).ok()?.read(&mut head).ok()?;
-        if !od_core::media::sniff_footage(&head[..n]) {
+        if !is_footage(src) {
             return None;
         }
         self.with_ws(|ws| ws.dir().map(Path::to_path_buf).ok_or_else(String::new))
@@ -1048,18 +1061,47 @@ impl EditorState {
 
     /// The active frame as a PNG data URL at `scale`, limited to 4096 px on a side.
     pub fn render_canvas(&self, scale: f64) -> Res<String> {
+        self.render_canvas_of(scale, None)
+    }
+
+    /// Draws the open frame with the 3D device `id` turned by `rotate_x` and `rotate_y` degrees
+    /// more than it is, without touching the document: the ghost shown while an orbit drag runs.
+    pub fn render_orbit(&self, scale: f64, id: &str, rotate_x: f64, rotate_y: f64) -> Res<String> {
+        self.render_canvas_of(scale, Some((parse_id(id)?, rotate_x, rotate_y)))
+    }
+
+    fn render_canvas_of(&self, scale: f64, orbit: Option<(NodeId, f64, f64)>) -> Res<String> {
         let frame = self.active_frame.as_ref().ok_or("no frame is open")?;
         self.with_ws(|ws| {
             let localized = self
                 .language
                 .as_deref()
                 .and_then(|l| ws.session.document().localized(l));
-            let doc = localized.as_ref().unwrap_or_else(|| ws.session.document());
+            let turned = orbit
+                .as_ref()
+                .map(|(id, x, y)| {
+                    turned_copy(
+                        localized.as_ref().unwrap_or_else(|| ws.session.document()),
+                        id,
+                        *x,
+                        *y,
+                    )
+                })
+                .transpose()?;
+            let doc = turned
+                .as_ref()
+                .or(localized.as_ref())
+                .unwrap_or_else(|| ws.session.document());
             let node = doc.node(frame).ok_or("the frame no longer exists")?;
             let longest = node.width.max(node.height).max(1.0);
             let scale = scale.clamp(0.01, MAX_CANVAS_SIDE / longest).min(16.0);
-            let rendered = od_render::render_frame(doc, frame, scale as f32, ws.dir())
-                .map_err(|e| e.to_string())?;
+            // the orbit ghost must stay quick: it never decodes a recording
+            let rendered = if turned.is_some() {
+                od_render::render_frame(doc, frame, scale as f32, ws.dir())
+            } else {
+                od_agent::video_export::render_still(doc, frame, scale as f32, ws.dir())
+            }
+            .map_err(|e| e.to_string())?;
             // keep the alpha: a frame with no background is transparent, and the canvas shows
             // that as a checkerboard instead of a white screen
             let png = od_render::encode_png(&rendered.pixmap, true).map_err(|e| e.to_string())?;
@@ -1183,30 +1225,160 @@ impl EditorState {
         Ok(id.to_string())
     }
 
-    /// Puts a new image into the node `id` (an image node, for example a device's screen),
-    /// keeping its position and size.
+    /// The 3D device models the editor can add.
+    pub fn device3d_models() -> Value {
+        Value::Array(
+            DeviceModel::ALL
+                .iter()
+                .map(|m| json!({"id": m.as_str(), "label": device_model_label(*m)}))
+                .collect(),
+        )
+    }
+
+    /// Adds a 3D device to the open frame, centered, its viewport covering 90% of the frame, as
+    /// one undoable edit. Selects it.
+    pub fn add_device3d(&mut self, model: &str) -> Res<String> {
+        let model: DeviceModel = serde_json::from_value(json!(model)).map_err(|_| {
+            format!(
+                "unknown 3D model {model:?}; use phone, phone_punch_hole, tablet, laptop or monitor"
+            )
+        })?;
+        let frame = self
+            .active_frame
+            .clone()
+            .ok_or("open or create a frame first")?;
+        let (fw, fh) = self.with_ws(|ws| {
+            ws.session
+                .document()
+                .node(&frame)
+                .map(|n| (n.width, n.height))
+                .ok_or_else(|| "the frame no longer exists".to_string())
+        })?;
+        let (w, h) = ((fw * 0.9).round().max(1.0), (fh * 0.9).round().max(1.0));
+        let mut node = NewNode::new(NodeKind::Device3d);
+        node.name = Some(format!("{} 3D", device_model_label(model)));
+        node.x = ((fw - w) / 2.0).round();
+        node.y = ((fh - h) / 2.0).round();
+        node.width = w;
+        node.height = h;
+        node.device3d = Some(Device3d {
+            model,
+            ..Device3d::default()
+        });
+        let created = self.apply_user(&[Operation::Create {
+            parent: frame,
+            index: None,
+            node,
+        }])?;
+        let id = created.first().ok_or("nothing was created")?.clone();
+        self.select(Some(id.as_str()))?;
+        Ok(id.to_string())
+    }
+
+    /// Shows the recording `file` (`media/<name>.mp4`, from the start) on a 3D device's screen;
+    /// an empty `file` goes back to its picture.
+    pub fn set_screen_footage(&mut self, id: &str, file: &str) -> Res<()> {
+        let footage = (!file.is_empty()).then(|| Footage {
+            file: file.to_string(),
+            in_ms: 0,
+        });
+        self.apply_user(&[Operation::Set {
+            id: parse_id(id)?,
+            prop: Property::ScreenFootage(footage),
+        }])
+        .map(|_| ())
+    }
+
+    /// Turns a 3D device by `rotate_x` and `rotate_y` degrees (added to the angles it already
+    /// has) as one undoable edit: the commit of an orbit drag.
+    pub fn orbit_device3d(&mut self, id: &str, rotate_x: f64, rotate_y: f64) -> Res<()> {
+        let id = parse_id(id)?;
+        let (rotate_x, rotate_y) = self.with_ws(|ws| {
+            let device = ws
+                .session
+                .document()
+                .node(&id)
+                .and_then(|n| n.device3d.clone())
+                .ok_or_else(|| format!("{id} is not a 3D device"))?;
+            Ok((device.rotate_x + rotate_x, device.rotate_y + rotate_y))
+        })?;
+        let set = |prop| Operation::Set {
+            id: id.clone(),
+            prop,
+        };
+        self.apply_user(&[
+            set(Property::RotateX(rotate_x)),
+            set(Property::RotateY(rotate_y)),
+        ])
+        .map(|_| ())
+    }
+
+    /// A file dropped on a 3D device: an image becomes its screen picture, a video (mp4, mov,
+    /// m4v) is imported as footage and becomes its recording. One undoable edit for the screen.
+    pub fn drop_on_device3d(&mut self, src: &std::path::Path, id: &str) -> Res<String> {
+        if is_footage(src) {
+            let reference = self.import_to_memory(src)?;
+            self.set_screen_footage(id, &reference)?;
+            self.select(Some(id))?;
+            return Ok(id.to_string());
+        }
+        self.replace_image(src, id)
+    }
+
+    /// The 3D device under `(x, y)` in the open frame, if any.
+    pub fn device3d_at(&self, x: f64, y: f64) -> Option<String> {
+        let id = parse_id(&self.hit_test(x, y)?).ok()?;
+        self.with_ws(|ws| {
+            Ok(ws
+                .session
+                .document()
+                .node(&id)
+                .is_some_and(|n| n.kind == NodeKind::Device3d))
+        })
+        .ok()?
+        .then(|| id.to_string())
+    }
+
+    /// Sets how many pictures a video blends per frame for motion blur (0 is off, else 2 to 16).
+    pub fn set_motion_blur(&mut self, video: &str, samples: i32) -> Res<()> {
+        let samples = u32::try_from(samples).map_err(|_| "motion blur cannot be negative")?;
+        self.apply_user(&[Operation::SetVideo {
+            id: parse_id(video)?,
+            prop: od_core::VideoProperty::MotionBlur(samples),
+        }])
+        .map(|_| ())
+    }
+
+    /// Puts a new image into the node `id` (an image node, for example a device's screen, or the
+    /// screen of a 3D device, which stops showing a recording), keeping its position and size.
     pub fn replace_image(&mut self, src: &std::path::Path, id: &str) -> Res<String> {
         let id = parse_id(id)?;
-        let reference = self.with_ws(|ws| {
+        let (reference, recording) = self.with_ws(|ws| {
             let node = ws
                 .session
                 .document()
                 .node(&id)
                 .ok_or_else(|| format!("{id} does not exist"))?;
-            if node.kind != NodeKind::Image {
+            if !matches!(node.kind, NodeKind::Image | NodeKind::Device3d) {
                 return Err(format!("{id} is a {}, not an image", node.kind.as_str()));
             }
+            let recording = node.device3d.as_ref().is_some_and(|d| d.footage.is_some());
             let reference = ws.import_media(src).map_err(|e| e.to_string())?;
             let path = ws.media_path(&reference).map_err(|e| e.to_string())?;
             od_render::image_dimensions(&path).inspect_err(|_| {
                 let _ = std::fs::remove_file(&path);
             })?;
-            Ok(reference)
+            Ok((reference, recording))
         })?;
-        self.apply_user(&[Operation::Set {
+        let set = |prop| Operation::Set {
             id: id.clone(),
-            prop: Property::Image(Some(reference)),
-        }])?;
+            prop,
+        };
+        let mut ops = vec![set(Property::Image(Some(reference)))];
+        if recording {
+            ops.push(set(Property::ScreenFootage(None)));
+        }
+        self.apply_user(&ops)?;
         self.select(Some(id.as_str()))?;
         Ok(id.to_string())
     }
@@ -1275,7 +1447,9 @@ impl EditorState {
                 .map(|(kind, is_screen)| (id, kind, is_screen))
             });
         match under {
-            Some((id, NodeKind::Image, _)) => self.replace_image(src, id.as_str()),
+            Some((id, NodeKind::Image | NodeKind::Device3d, _)) => {
+                self.replace_image(src, id.as_str())
+            }
             Some((id, NodeKind::Rect, true)) => self.fill_screen(src, &id),
             _ => self.import_image(src, Some((x, y))),
         }
@@ -1909,7 +2083,7 @@ impl EditorState {
                     .unwrap_or_default(),
             ),
             memory: memory_of(&ws).to_string(),
-            videos: to_string(&view::videos(doc)),
+            videos: videos_json(doc),
             jobs: self.jobs_json(),
             workspaces: workspaces_of(&ws),
             brief: brief_of(&ws),
@@ -1977,6 +2151,58 @@ fn workspaces_of(ws: &Workspace) -> String {
     .to_string()
 }
 
+/// A copy of `doc` with the 3D device `id` turned; the real document is untouched.
+fn turned_copy(
+    doc: &od_core::Document,
+    id: &NodeId,
+    rotate_x: f64,
+    rotate_y: f64,
+) -> Res<od_core::Document> {
+    let mut copy = doc.clone();
+    let location = copy
+        .locate(id)
+        .ok_or_else(|| format!("{id} does not exist"))?;
+    let device = copy
+        .node_at_mut(&location)
+        .and_then(|n| n.device3d.as_mut())
+        .ok_or_else(|| format!("{id} is not a 3D device"))?;
+    let limit = od_core::device3d::MAX_ROTATION;
+    device.rotate_x = (device.rotate_x + rotate_x).clamp(-limit, limit);
+    device.rotate_y = (device.rotate_y + rotate_y).clamp(-limit, limit);
+    Ok(copy)
+}
+
+fn device_model_label(model: DeviceModel) -> &'static str {
+    match model {
+        DeviceModel::Phone => "Phone",
+        DeviceModel::PhonePunchHole => "Phone (punch-hole camera)",
+        DeviceModel::Tablet => "Tablet",
+        DeviceModel::Laptop => "Laptop",
+        DeviceModel::Monitor => "Monitor",
+    }
+}
+
+/// The videos the panel shows: each animation also carries its node's name, for its lane.
+fn videos_json(doc: &od_core::Document) -> String {
+    let mut videos = serde_json::to_value(view::videos(doc)).unwrap_or(Value::Null);
+    let rows = videos.as_array_mut().into_iter().flatten();
+    for animation in rows
+        .filter_map(|v| v.get_mut("animations")?.as_array_mut())
+        .flatten()
+    {
+        let name = animation
+            .get("node")
+            .and_then(Value::as_str)
+            .and_then(|id| NodeId::parse(id).ok())
+            .and_then(|id| doc.node(&id))
+            .map(|n| n.name.clone());
+        if let Value::Object(m) = animation {
+            m.insert("node_name".into(), json!(name.unwrap_or_default()));
+        }
+    }
+    videos.to_string()
+}
+
 fn memory_of(ws: &Workspace) -> Value {
     let files = ws.media().unwrap_or_default();
     let videos = ws.footage().unwrap_or_default();
@@ -1989,7 +2215,7 @@ fn memory_of(ws: &Workspace) -> Value {
             "file": Value::Null,
             "used": ws.session.document().videos.iter().any(|v| {
                 v.clips.iter().any(|c| c.footage.as_ref().is_some_and(|x| x.file == f.path))
-            }),
+            }) || ws.session.document().pages.iter().any(|p| shows_footage(&p.root, &f.path)),
         })
     });
     Value::Array(
@@ -2013,6 +2239,14 @@ fn memory_of(ws: &Workspace) -> Value {
 fn uses_image(node: &Node, reference: &str) -> bool {
     node.image.as_deref() == Some(reference)
         || node.children.iter().any(|c| uses_image(c, reference))
+}
+
+fn shows_footage(node: &Node, file: &str) -> bool {
+    node.device3d
+        .as_ref()
+        .and_then(|d| d.footage.as_ref())
+        .is_some_and(|f| f.file == file)
+        || node.children.iter().any(|c| shows_footage(c, file))
 }
 
 fn collect_overflows(doc: &od_core::Document, frame: &NodeId) -> Vec<Value> {
@@ -2651,6 +2885,260 @@ mod tests {
         assert_eq!(s.preview_status(), "{}");
         let missing = s.preview_start("v_999").unwrap();
         assert!(missing.contains("does not exist"), "{missing}");
+    }
+
+    fn device(s: &EditorState) -> Value {
+        insp(s)["device3d"].clone()
+    }
+
+    #[test]
+    fn a_3d_device_is_added_centered_in_one_undoable_step() {
+        let (mut s, _t) = state();
+        assert!(s.add_device3d("watch").is_err());
+        let id = s.add_device3d("tablet").unwrap();
+        assert_eq!(s.selected().map(|i| i.to_string()), Some(id.clone()));
+        let node = insp(&s);
+        assert_eq!(node["kind"], "device3d");
+        assert_eq!(device(&s)["model"], "tablet");
+        let (w, h) = (
+            node["width"].as_f64().unwrap(),
+            node["height"].as_f64().unwrap(),
+        );
+        assert!(
+            (w - 360.0).abs() < 1.0 && (h - 270.0).abs() < 1.0,
+            "{w}x{h}"
+        );
+        assert_eq!(node["x"].as_f64().unwrap() + w / 2.0, 200.0);
+        assert_eq!(node["y"].as_f64().unwrap() + h / 2.0, 150.0);
+        assert_eq!(
+            s.device3d_at(200.0, 150.0).as_deref(),
+            Some(id.as_str()),
+            "the device is what the canvas hits at its centre"
+        );
+
+        s.undo().unwrap();
+        assert!(s.selected().is_none() || insp(&s)["kind"] != "device3d");
+        assert_eq!(s.device3d_at(200.0, 150.0), None, "one undo removes it");
+        let layers: Value = serde_json::from_str(&s.snapshot().layers).unwrap();
+        assert_eq!(layers.as_array().unwrap().len(), 2, "page and frame only");
+        let models = EditorState::device3d_models();
+        assert_eq!(models.as_array().unwrap().len(), 5);
+    }
+
+    #[test]
+    fn the_inspector_sets_3d_device_fields_validates_them_and_undoes() {
+        let (mut s, _t) = state();
+        let id = s.add_device3d("phone").unwrap();
+        s.set_property(&id, "model", "\"laptop\"").unwrap();
+        s.set_property(&id, "rotate_x", "12.5").unwrap();
+        s.set_property(&id, "rotate_y", "-40").unwrap();
+        s.set_property(&id, "rotate_z", "3").unwrap();
+        s.set_property(&id, "zoom", "1.5").unwrap();
+        s.set_property(&id, "fov", "45").unwrap();
+        s.set_property(&id, "light_angle", "90").unwrap();
+        s.set_property(&id, "shadow", "0.8").unwrap();
+        s.set_property(&id, "glare", "0").unwrap();
+        s.set_property(&id, "screen_scroll", "0.75").unwrap();
+        s.set_property(&id, "fill", "\"#202020\"").unwrap();
+        let d = device(&s);
+        assert_eq!(d["model"], "laptop");
+        assert_eq!(d["rotate_x"], 12.5);
+        assert_eq!(d["rotate_y"], -40.0);
+        assert_eq!(d["zoom"], 1.5);
+        assert_eq!(d["fov"], 45.0);
+        assert_eq!(d["light_angle"], 90.0);
+        assert_eq!(d["shadow"], 0.8);
+        assert_eq!(d["screen_scroll"], 0.75);
+        assert_eq!(insp(&s)["fill"], "#202020");
+
+        for (name, bad) in [
+            ("rotate_x", "9000"),
+            ("zoom", "0"),
+            ("zoom", "11"),
+            ("fov", "0.5"),
+            ("fov", "101"),
+            ("shadow", "1.5"),
+            ("glare", "-0.1"),
+            ("screen_scroll", "2"),
+            ("model", "\"watch\""),
+        ] {
+            assert!(s.set_property(&id, name, bad).is_err(), "{name}={bad}");
+        }
+        assert_eq!(device(&s)["zoom"], 1.5, "a refused value changes nothing");
+
+        s.set_property(&id, "screen_scroll", "null").unwrap();
+        assert!(
+            device(&s).get("screen_scroll").is_none(),
+            "cleared back to centred"
+        );
+        s.undo().unwrap();
+        assert_eq!(
+            device(&s)["screen_scroll"],
+            0.75,
+            "each change is one undo step"
+        );
+        s.undo().unwrap();
+        s.undo().unwrap();
+        let d = device(&s);
+        assert!(d.get("screen_scroll").is_none());
+        assert_eq!(
+            (d["shadow"].as_f64(), d["glare"].as_f64()),
+            (Some(0.8), Some(0.0))
+        );
+        s.undo().unwrap();
+        assert!(
+            device(&s).get("glare").is_none(),
+            "back to the default glare"
+        );
+        assert!(s.set_property(&id, "corner_radius", "4").is_err());
+    }
+
+    #[test]
+    fn dropping_a_picture_or_a_video_on_a_3d_device_sets_its_screen() {
+        let (mut s, t) = state();
+        let id = s.add_device3d("phone").unwrap();
+        let capture = t.path().join("capture.png");
+        write_png(&capture, 90, 195);
+        assert_eq!(s.device3d_at(200.0, 150.0).as_deref(), Some(id.as_str()));
+        assert_eq!(s.drop_image(&capture, 200.0, 150.0).unwrap(), id);
+        let node = insp(&s);
+        assert_eq!(node["kind"], "device3d");
+        assert_eq!(node["image"], "media/capture.png");
+        s.undo().unwrap();
+        assert!(
+            insp(&s).get("image").is_none_or(Value::is_null),
+            "one undo takes the drop back"
+        );
+
+        let clip = t.path().join("take.mov");
+        std::fs::write(&clip, b"\0\0\0\x14ftypqt  0000").unwrap();
+        assert_eq!(s.drop_on_device3d(&clip, &id).unwrap(), id);
+        assert_eq!(device(&s)["screen_footage"]["file"], "media/take.mov");
+        let used = s
+            .memory_list()
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|m| m["id"] == "media/take.mov")
+            .map(|m| m["used"].clone());
+        assert_eq!(used, Some(json!(true)), "the recording counts as used");
+
+        // a picture dropped later shows instead of the recording, in the same edit
+        let screen = t.path().join("screen.png");
+        write_png(&screen, 120, 260);
+        s.drop_on_device3d(&screen, &id).unwrap();
+        assert!(device(&s).get("screen_footage").is_none());
+        assert_eq!(insp(&s)["image"], "media/screen.png");
+        s.undo().unwrap();
+        assert_eq!(device(&s)["screen_footage"]["file"], "media/take.mov");
+
+        s.set_screen_footage(&id, "").unwrap();
+        assert!(device(&s).get("screen_footage").is_none());
+        assert!(s.set_screen_footage(&id, "../x.mov").is_err());
+        let wrong = s.create_node("rect", 0.0, 0.0, 10.0, 10.0).unwrap();
+        assert!(s.set_screen_footage(&wrong, "media/take.mov").is_err());
+    }
+
+    #[test]
+    fn an_orbit_commit_is_one_transaction_and_the_ghost_leaves_the_document_alone() {
+        let (mut s, _t) = state();
+        let id = s.add_device3d("phone").unwrap();
+        let ghost = s.render_orbit(0.5, &id, 20.0, 35.0).unwrap();
+        assert!(ghost.starts_with("data:image/png;base64,"));
+        assert!(
+            device(&s).get("rotate_y").is_none(),
+            "a ghost is not an edit"
+        );
+        assert!(s.render_orbit(0.5, "n_999", 1.0, 1.0).is_err());
+
+        s.orbit_device3d(&id, 20.0, 35.0).unwrap();
+        let d = device(&s);
+        assert_eq!(
+            (d["rotate_x"].as_f64(), d["rotate_y"].as_f64()),
+            (Some(20.0), Some(35.0))
+        );
+        s.undo().unwrap();
+        let d = device(&s);
+        assert!(
+            d.get("rotate_x").is_none() && d.get("rotate_y").is_none(),
+            "{d}"
+        );
+        assert!(s.orbit_device3d(&id, 5000.0, 0.0).is_err());
+        assert!(
+            device(&s).get("rotate_x").is_none(),
+            "a refused orbit changes nothing"
+        );
+        let rect = s.create_node("rect", 0.0, 0.0, 10.0, 10.0).unwrap();
+        assert!(s.orbit_device3d(&rect, 1.0, 1.0).is_err());
+        assert!(s.render_orbit(0.5, &rect, 1.0, 1.0).is_err());
+    }
+
+    #[test]
+    fn motion_blur_is_off_or_two_to_sixteen_pictures_and_undoes() {
+        let (mut s, _t) = state();
+        let ids = s
+            .apply_user(&[Operation::CreateVideo {
+                name: "V".into(),
+                fps: 10,
+                width: 100,
+                height: 200,
+            }])
+            .unwrap();
+        let video = ids[0].to_string();
+        let blur = |s: &EditorState| {
+            let videos: Vec<Value> = serde_json::from_str(&s.snapshot().videos).unwrap();
+            videos[0]["motion_blur"].as_u64().unwrap()
+        };
+        assert_eq!(blur(&s), 0);
+        s.set_motion_blur(&video, 8).unwrap();
+        assert_eq!(blur(&s), 8);
+        for bad in [1, 17, -3] {
+            assert!(s.set_motion_blur(&video, bad).is_err(), "{bad}");
+        }
+        assert_eq!(blur(&s), 8, "a refused value changes nothing");
+        s.set_motion_blur(&video, 0).unwrap();
+        assert_eq!(blur(&s), 0);
+        s.undo().unwrap();
+        assert_eq!(blur(&s), 8);
+        assert!(s.set_motion_blur("v_999", 4).is_err());
+    }
+
+    #[test]
+    fn the_videos_the_panel_reads_name_the_node_of_each_animation() {
+        let (mut s, _t) = state();
+        let id = s.add_device3d("phone").unwrap();
+        let ids = s
+            .apply_user(&[Operation::CreateVideo {
+                name: "V".into(),
+                fps: 10,
+                width: 100,
+                height: 200,
+            }])
+            .unwrap();
+        s.apply_user(&[Operation::Animate {
+            video: ids[0].clone(),
+            node: parse_id(&id).unwrap(),
+            prop: od_core::animation::AnimProp::RotateY,
+            keys: vec![
+                od_core::animation::Key {
+                    at_ms: 0,
+                    value: 0.0,
+                    ease: od_core::Ease::Linear,
+                },
+                od_core::animation::Key {
+                    at_ms: 1500,
+                    value: 90.0,
+                    ease: od_core::Ease::Linear,
+                },
+            ],
+        }])
+        .unwrap();
+        let videos: Vec<Value> = serde_json::from_str(&s.snapshot().videos).unwrap();
+        let lane = &videos[0]["animations"][0];
+        assert_eq!(lane["node"], id.as_str());
+        assert_eq!(lane["node_name"], "Phone 3D");
+        assert_eq!(lane["prop"], "rotate_y");
+        assert_eq!(lane["keys"][1]["at_ms"], 1500);
     }
 
     #[test]

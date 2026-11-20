@@ -85,8 +85,101 @@ impl FootageSource for Decoder {
     }
 }
 
-pub(crate) fn has_footage(v: &od_core::Video) -> bool {
-    v.clips.iter().any(|c| c.footage.is_some())
+/// Whether drawing `v` needs ffmpeg to decode recordings: footage clips, or device screens that
+/// play one.
+pub(crate) fn has_footage(doc: &Document, v: &od_core::Video) -> bool {
+    od_render::video::needs_footage(doc, v)
+}
+
+/// A still of `frame`. A device screen that plays a recording shows the picture at its in point
+/// when ffmpeg can be found; otherwise the renderer warns and shows the node's image.
+pub fn render_still(
+    doc: &Document,
+    frame: &NodeId,
+    scale: f32,
+    dir: Option<&std::path::Path>,
+) -> Result<od_render::Rendered, od_render::RenderError> {
+    let plays = doc
+        .node(frame)
+        .is_some_and(od_render::video::plays_recording);
+    let mut decoder = match (plays, dir) {
+        (true, Some(dir)) => Ffmpeg::locate()
+            .ok()
+            .map(|ffmpeg| Decoder(FootageDecoder::new(ffmpeg, dir.to_path_buf(), 30))),
+        _ => None,
+    };
+    let mut media = od_render::Media {
+        footage: decoder.as_mut().map(|d| d as &mut dyn FootageSource),
+        played_ms: 0,
+    };
+    od_render::render_frame_with(doc, frame, scale, dir, &mut media)
+}
+
+/// A contact sheet: the PNG, its width and height, the grid's columns, and what could not be
+/// drawn.
+pub struct ContactSheet {
+    pub png: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
+    pub columns: u32,
+    pub warnings: Vec<String>,
+}
+
+/// The pictures of `video` at `times`, left to right and top to bottom in a grid as close to
+/// square as the count allows, each at most `cell_side` on its longest side.
+pub fn contact_sheet_png(
+    ws: &Source,
+    video: &NodeId,
+    times: &[u64],
+    cell_side: u32,
+    locale: Option<&str>,
+) -> Result<ContactSheet, ToolError> {
+    let doc = document_in(ws, locale)?;
+    let v = doc
+        .video(video)
+        .ok_or_else(|| ToolError(format!("video {video} does not exist")))?;
+    let shrink = (f64::from(cell_side.max(16)) / f64::from(v.width.max(v.height))).min(1.0);
+    let (cw, ch) = (
+        ((f64::from(v.width) * shrink).round() as u32).max(1),
+        ((f64::from(v.height) * shrink).round() as u32).max(1),
+    );
+    let mut source = if has_footage(&doc, v) {
+        let dir = ws
+            .dir()
+            .ok_or_else(|| ToolError("the project has no folder, so no footage".into()))?;
+        let ffmpeg = Ffmpeg::locate().map_err(|e| ToolError(e.to_string()))?;
+        Some(Decoder(FootageDecoder::new(
+            ffmpeg,
+            dir.to_path_buf(),
+            v.fps,
+        )))
+    } else {
+        None
+    };
+    let mut renderer = VideoRenderer::new(&doc, v, ws.dir()).with_size(cw, ch);
+    if let Some(s) = source.as_mut() {
+        renderer = renderer.with_footage(s);
+    }
+    let pictures = times
+        .iter()
+        .map(|&t| renderer.frame_at(t))
+        .collect::<Result<Vec<_>, _>>()?;
+    let cols = f64::from(pictures.len().max(1) as u32).sqrt().ceil() as u32;
+    let sheet = od_render::grid(&pictures, cols)
+        .ok_or_else(|| ToolError("the contact sheet is too large to draw".into()))?;
+    let png = od_render::encode_png(&sheet, false)?;
+    let warnings = renderer
+        .warnings()
+        .iter()
+        .map(ToString::to_string)
+        .collect();
+    Ok(ContactSheet {
+        png,
+        width: sheet.width(),
+        height: sheet.height(),
+        columns: cols,
+        warnings,
+    })
 }
 
 /// The picture at `time_ms`, as a PNG, with anything that could not be drawn.
@@ -106,7 +199,7 @@ pub fn video_frame_png(
         (f64::from(v.width) * shrink).round() as u32,
         (f64::from(v.height) * shrink).round() as u32,
     );
-    let mut source = if has_footage(v) {
+    let mut source = if has_footage(&doc, v) {
         let dir = ws
             .dir()
             .ok_or_else(|| ToolError("the project has no folder, so no footage".into()))?;
@@ -306,7 +399,7 @@ pub fn export_video(
         output: picture_path.clone(),
     };
     let mut source = match &project {
-        Some(p) if has_footage(v) => Some(Decoder(FootageDecoder::new(
+        Some(p) if has_footage(&doc, v) => Some(Decoder(FootageDecoder::new(
             ffmpeg.clone(),
             p.clone(),
             v.fps,
