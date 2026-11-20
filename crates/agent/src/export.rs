@@ -145,7 +145,7 @@ pub fn export_assets(
         }
         None => ws.session.document(),
     };
-    let render = |frame: &NodeId| od_render::render_frame(doc, frame, scale, ws.dir());
+    let render = |frame: &NodeId| crate::video_export::render_still(doc, frame, scale, ws.dir());
 
     let mut warnings = Vec::new();
     // a frame with no background is transparent; an export that flattens it is white there

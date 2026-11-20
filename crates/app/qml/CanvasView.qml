@@ -32,6 +32,10 @@ Item {
     readonly property color guideColor: "#ff4d94"
     readonly property var defaultSizes: ({ rect: [160, 120], ellipse: [160, 160], text: [240, 60], frame: [400, 300] })
 
+    // the orbit gesture on a 3D device: its angles while dragging (a ghost until released)
+    property var orbit: null
+    readonly property real degreesPerPixel: 0.4
+
     signal requestPin(string nodeId, real x, real y, real w, real h)
     signal noteClicked(int noteId)
     signal toolFinished()
@@ -73,6 +77,33 @@ Item {
         rectsModel.sync(selRects)
     }
     readonly property real renderScale: zoom * Screen.devicePixelRatio
+
+    // The angles are counted from where the drag started: the ghost and the commit are the same
+    // turn, so what the user sees while dragging is what the device keeps.
+    function orbitStart(id, vx, vy) {
+        orbit = { id: id, vx: vx, vy: vy, rx: 0, ry: 0, moved: false }
+    }
+    function orbitMove(vx, vy) {
+        if (!orbit) return
+        const limit = 3600
+        const ry = Math.max(-limit, Math.min(limit, (vx - orbit.vx) * degreesPerPixel))
+        const rx = Math.max(-limit, Math.min(limit, -(vy - orbit.vy) * degreesPerPixel))
+        orbit = Object.assign({}, orbit, { rx: rx, ry: ry, moved: true })
+        if (!orbitTimer.running) orbitTimer.start()
+    }
+    function orbitEnd() {
+        const o = orbit
+        orbit = null
+        orbitTimer.stop()
+        if (o && o.moved) editor.orbitDevice(o.id, o.rx, o.ry)
+        renderTimer.restart()
+    }
+    // the ghost: the canvas redrawn at half scale with the device turned, at most every 40 ms
+    Timer {
+        id: orbitTimer
+        interval: 40
+        onTriggered: if (root.orbit) root.editor.renderOrbit(root.renderScale / 2, root.orbit.id, root.orbit.rx, root.orbit.ry)
+    }
 
     function toFrame(vx, vy) { return Qt.point((vx - panX) / zoom, (vy - panY) / zoom) }
     function clampZoom(z) { return Math.max(minZoom, Math.min(maxZoom, z)) }
@@ -487,6 +518,33 @@ Item {
         Handle { sx: 0.5; sy: 1 }
         Handle { sx: 0; sy: 1 }
         Handle { sx: 0; sy: 0.5 }
+        // turns a 3D device: drag it (or Alt-drag the device); horizontal turns, vertical tilts
+        Rectangle {
+            id: rotateHandle
+            visible: !!root.node && root.node.kind === "device3d"
+            width: 24
+            height: 24
+            radius: 12
+            x: parent.width / 2 - width / 2
+            y: -height - 10
+            color: rotateArea.pressed ? Theme.accentStrong : Theme.accent
+            Accessible.name: "Turn the device"
+            Accessible.role: Accessible.Button
+            Icon { anchors.centerIn: parent; name: "rotate-3d"; size: 16; color: Theme.textOnAccent }
+            MouseArea {
+                id: rotateArea
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.SizeAllCursor
+                onPressed: m => { const p = mapToItem(root, m.x, m.y); root.orbitStart(root.node.id, p.x, p.y) }
+                onPositionChanged: m => { if (pressed) { const p = mapToItem(root, m.x, m.y); root.orbitMove(p.x, p.y) } }
+                onReleased: root.orbitEnd()
+                onCanceled: root.orbitEnd()
+                ToolTip.visible: containsMouse && !pressed
+                ToolTip.delay: 600
+                ToolTip.text: "Turn the device: drag sideways to turn, up or down to tilt (or Alt-drag it)"
+            }
+        }
     }
 
     // snapping guides
@@ -631,6 +689,19 @@ Item {
                 return
             }
             if (root.tool === "select") {
+                if (m.modifiers & Qt.AltModifier) {
+                    // a drag with the modifier turns a 3D device: the one under the pointer, or
+                    // the one that is selected
+                    const under = root.editor.deviceAt(startFrame.x, startFrame.y)
+                    const selected = root.node && root.node.kind === "device3d" ? root.node.id : ""
+                    const device = under !== "" ? under : selected
+                    if (device !== "") {
+                        if (device !== selected) root.editor.select(device)
+                        root.orbitStart(device, m.x, m.y)
+                        mode = "orbit"
+                        return
+                    }
+                }
                 const id = root.editor.hitTest(startFrame.x, startFrame.y)
                 if (id === "" || id === root.editor.activeFrame) {
                     mode = "marquee"
@@ -643,6 +714,7 @@ Item {
         onPositionChanged: m => {
             root.pointer = root.toFrame(m.x, m.y)
             if (!pressed) return
+            if (mode === "orbit") { root.orbitMove(m.x, m.y); return }
             if (mode === "pan") {
                 root.panX = panStart.x + (m.x - startView.x)
                 root.panY = panStart.y + (m.y - startView.y)
@@ -657,7 +729,8 @@ Item {
         onReleased: m => {
             band.visible = false
             const end = root.toFrame(m.x, m.y)
-            if (mode === "move") finishMove()
+            if (mode === "orbit") root.orbitEnd()
+            else if (mode === "move") finishMove()
             else if (mode === "marquee") finishMarquee(end)
             else if (mode === "pin") finishPin(end)
             else if (mode === "draw") root.drawShape(root.tool, startFrame, end, m.modifiers, moved)
@@ -701,7 +774,15 @@ Item {
     // folder) for it to use when it needs them.
     DropArea {
         anchors.fill: parent
-        onDropped: drop => { for (const url of drop.urls) root.editor.importToMemory(url.toString()) }
+        // a picture or a video dropped on a 3D device becomes its screen; the rest goes to memory
+        onDropped: drop => {
+            const at = root.toFrame(drop.x, drop.y)
+            let device = root.editor.deviceAt(at.x, at.y)
+            for (const url of drop.urls) {
+                if (device !== "") { root.editor.dropOnDevice(url.toString(), device); device = "" }
+                else root.editor.importToMemory(url.toString())
+            }
+        }
     }
 
     // rulers along the top and left edges, in document pixels, with the pointer and the selection

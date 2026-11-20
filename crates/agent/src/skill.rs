@@ -126,6 +126,10 @@ pub fn generate() -> Vec<SkillFile> {
             contents: playbook::topic("motion").unwrap_or_default().to_string(),
         },
         SkillFile {
+            path: "references/three-d-devices.md",
+            contents: playbook::topic("3d").unwrap_or_default().to_string(),
+        },
+        SkillFile {
             path: "references/logo-design.md",
             contents: playbook::topic("logo").unwrap_or_default().to_string(),
         },
@@ -158,7 +162,8 @@ const BODY: &str = "# OpenDesigner
 
 Read the playbooks before you build, through the `get_playbook` tool or the files next to this one:
 `references/design-direction.md` (images), `references/style-directions.md` (pick a named look),
-`references/video-direction.md` and `references/motion-playbook.md` (video), `references/formats.md`
+`references/video-direction.md` and `references/motion-playbook.md` (video),
+`references/three-d-devices.md` (3D devices, captures and moves), `references/formats.md`
 (sizes and safe zones).
 
 OpenDesigner is a design editor the user has open next to you. They guide you by **pointing**:

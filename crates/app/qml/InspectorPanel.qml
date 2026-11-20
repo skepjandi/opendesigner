@@ -48,6 +48,11 @@ Rectangle {
     }
     function has(kind, kinds) { return kinds.indexOf(kind) >= 0 }
 
+    readonly property var d3: node && node.device3d ? node.device3d : null
+    readonly property var models: JSON.parse(editor.deviceModels())
+    readonly property var recordings: (editor.memory ? JSON.parse(editor.memory) : []).filter(m => m.kind === "video")
+    function d3num(name, fallback) { return d3 && d3[name] !== undefined ? d3[name] : fallback }
+
     component Row2: RowLayout {
         property alias label: lab.text
         default property alias content: slot.data
@@ -158,8 +163,8 @@ Rectangle {
                 }
             }
             Row2 {
-                visible: root.node && root.has(root.node.kind, ["frame", "rect", "ellipse", "text"])
-                label: root.node && root.node.kind === "text" ? "Color" : "Fill"
+                visible: root.node && root.has(root.node.kind, ["frame", "rect", "ellipse", "text", "device3d"])
+                label: root.node && root.node.kind === "text" ? "Color" : (root.node && root.node.kind === "device3d" ? "Body" : "Fill")
                 Rectangle {
                     width: 22
                     height: 22
@@ -255,7 +260,7 @@ Rectangle {
                 }
             }
             Row2 {
-                visible: root.node && root.node.kind === "image"
+                visible: root.node && root.has(root.node.kind, ["image", "device3d"])
                 label: "Fit"
                 Repeater {
                     model: ["cover", "contain", "fill"]
@@ -268,8 +273,8 @@ Rectangle {
                 }
             }
             Row2 {
-                visible: root.node && root.node.kind === "image"
-                label: "File"
+                visible: root.node && root.has(root.node.kind, ["image", "device3d"])
+                label: root.node && root.node.kind === "device3d" ? "Screen" : "File"
                 Label {
                     Layout.fillWidth: true
                     text: root.node && root.node.image ? root.node.image : "none"
@@ -304,6 +309,130 @@ Rectangle {
                     text: root.node && root.node.text ? root.node.text : ""
                     background: Rectangle { radius: 4; color: Theme.field; border.width: 1; border.color: parent.activeFocus ? Theme.accent : Theme.border }
                     onEditingFinished: { if (root.node && text !== root.node.text) editor.setNodeProperty(root.node.id, "text", JSON.stringify(text)) }
+                }
+            }
+            ColumnLayout {
+                id: deviceSection
+                visible: !!root.d3
+                Layout.fillWidth: true
+                spacing: 8
+                Row2 {
+                    label: "Model"
+                    ComboBox {
+                        Layout.fillWidth: true
+                        model: root.models.map(m => m.label)
+                        currentIndex: Math.max(0, root.models.findIndex(m => m.id === root.d3num("model", "phone")))
+                        onActivated: i => root.editor.setNodeProperty(root.node.id, "model", JSON.stringify(root.models[i].id))
+                        Accessible.name: "3D model"
+                    }
+                }
+                // a number of the device: a slider that commits when released, and a field
+                Repeater {
+                    model: [
+                        { label: "Tilt", prop: "rotate_x", low: -180, high: 180, fallback: 0, decimals: 1 },
+                        { label: "Turn", prop: "rotate_y", low: -180, high: 180, fallback: 0, decimals: 1 },
+                        { label: "Roll", prop: "rotate_z", low: -180, high: 180, fallback: 0, decimals: 1 },
+                        { label: "Zoom", prop: "zoom", low: 0.05, high: 10, fallback: 1, decimals: 2 },
+                        { label: "Lens", prop: "fov", low: 1, high: 100, fallback: 30, decimals: 1 },
+                        { label: "Light", prop: "light_angle", low: -360, high: 360, fallback: -35, decimals: 0 },
+                        { label: "Shadow", prop: "shadow", low: 0, high: 1, fallback: 0.35, decimals: 2 },
+                        { label: "Glare", prop: "glare", low: 0, high: 1, fallback: 0.2, decimals: 2 }
+                    ]
+                    delegate: RowLayout {
+                        required property var modelData
+                        Layout.fillWidth: true
+                        spacing: 8
+                        Label {
+                            text: modelData.label
+                            color: Theme.muted
+                            font.pixelSize: 12
+                            Layout.preferredWidth: 64
+                        }
+                        Slider {
+                            id: slide
+                            Layout.fillWidth: true
+                            from: modelData.low
+                            to: modelData.high
+                            // the value the user dragged to; the binding puts it back when the
+                            // document answers, so the drag is read from here
+                            property real dragged: value
+                            onMoved: dragged = value
+                            onPressedChanged: {
+                                if (pressed || !root.node) return
+                                const now = root.d3num(modelData.prop, modelData.fallback)
+                                if (Math.abs(dragged - now) > 1e-9)
+                                    root.editor.setNodeProperty(root.node.id, modelData.prop, JSON.stringify(dragged))
+                            }
+                            Binding {
+                                target: slide
+                                property: "value"
+                                value: root.d3num(modelData.prop, modelData.fallback)
+                                when: !slide.pressed
+                            }
+                            Accessible.name: modelData.label
+                        }
+                        Field {
+                            Layout.preferredWidth: 60
+                            text: {
+                                const now = root.d3num(modelData.prop, modelData.fallback)
+                                const p = Math.pow(10, modelData.decimals)
+                                return (Math.round(now * p) / p).toString()
+                            }
+                            onCommitted: v => {
+                                const n = parseFloat(v)
+                                if (!isNaN(n) && root.node)
+                                    root.editor.setNodeProperty(root.node.id, modelData.prop, JSON.stringify(n))
+                            }
+                            Accessible.name: modelData.label + " value"
+                        }
+                    }
+                }
+                Row2 {
+                    label: "Scroll"
+                    Slider {
+                        id: scrollSlide
+                        Layout.fillWidth: true
+                        from: 0
+                        to: 1
+                        property real dragged: value
+                        onMoved: dragged = value
+                        onPressedChanged: {
+                            if (pressed || !root.node) return
+                            const now = root.d3num("screen_scroll", 0.5)
+                            if (Math.abs(dragged - now) > 1e-9)
+                                root.editor.setNodeProperty(root.node.id, "screen_scroll", JSON.stringify(dragged))
+                        }
+                        Binding { target: scrollSlide; property: "value"; value: root.d3num("screen_scroll", 0.5); when: !scrollSlide.pressed }
+                        Accessible.name: "Screen scroll"
+                    }
+                    Btn {
+                        text: root.d3 && root.d3.screen_scroll !== undefined ? "Centre" : "Set"
+                        tip: root.d3 && root.d3.screen_scroll !== undefined
+                             ? "Go back to the centred picture (a capture taller than the screen shows its middle)"
+                             : "Scroll a capture taller than the screen: start at its middle"
+                        onClicked: root.editor.setNodeProperty(root.node.id, "screen_scroll", root.d3 && root.d3.screen_scroll !== undefined ? "null" : "0.5")
+                    }
+                }
+                Row2 {
+                    label: "Recording"
+                    ComboBox {
+                        id: recordingBox
+                        Layout.fillWidth: true
+                        readonly property string currentFile: root.d3 && root.d3.screen_footage ? root.d3.screen_footage.file : ""
+                        readonly property var files: [""].concat(root.recordings.map(r => r.id))
+                        model: files.map(f => f === "" ? "None (show the picture)" : f.replace("media/", ""))
+                        currentIndex: Math.max(0, files.indexOf(currentFile))
+                        onActivated: i => root.editor.setScreenRecording(root.node.id, files[i])
+                        Accessible.name: "Screen recording"
+                    }
+                }
+                Label {
+                    Layout.fillWidth: true
+                    visible: root.recordings.length === 0
+                    wrapMode: Text.WordWrap
+                    color: Theme.muted
+                    font.pixelSize: 11
+                    text: "Drop a video (mp4, mov, m4v) on the device to put a recording on its screen, or a picture to show a capture. Alt-drag the device to turn it."
                 }
             }
             Row2 {

@@ -12,8 +12,14 @@ whole video process; this page is about movement.
 - **Overlays**: any design frame laid over the whole video for a time, with an **enter** and **exit**
   (fade, slide_up/down/left/right, pop, zoom, none), a duration for each (`fade_ms`) and an **ease**.
   A frame without a fill is transparent, so an overlay can be one headline, one badge, one arrow.
-- **Eases**: `linear`, `ease_in`, `ease_out`, `ease_in_out`, `back` (overshoots, like a pop).
-- No per-frame keyframes. Sound: footage keeps its own, and a video can carry one extra sound track
+- **Eases**: `linear`, `ease_in`, `ease_out`, `ease_in_out`, `back` (overshoots, like a pop),
+  `spring` (overshoots and settles, for an arrival with weight).
+- **Keyframes**: any number of a node (`x`, `y`, `opacity`, `width`, `height`, `corner_radius`, and
+  on a 3D device its turn, tilt, roll, zoom, lens, light, shadow, glare and screen scroll) can be
+  keyframed over the video's time with `animate` in `apply_ops`, or with a named move through
+  `animate_preset`. A video can also blur what moves (`motion_blur`, 2 to 16 pictures). See the
+  `3d` playbook for devices in 3D.
+- Sound: footage keeps its own, and a video can carry one extra sound track
   (see Sound below). `make_sound` synthesizes effects and simple loops, not music: for a music bed
   use `search_sounds` or ask the user for a track rather than promising one.
 

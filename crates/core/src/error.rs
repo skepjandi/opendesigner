@@ -62,6 +62,14 @@ pub enum OpError {
     },
     #[error("cannot arrange: {0}")]
     Arrange(String),
+    #[error(
+        "node {node} (or a node inside it) has its {prop} animated in video {video}; remove that animation first (animate with no keys)"
+    )]
+    NodeAnimated {
+        node: String,
+        prop: &'static str,
+        video: String,
+    },
     #[error("internal error: {0}")]
     Internal(String),
 }

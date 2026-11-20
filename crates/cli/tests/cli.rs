@@ -378,3 +378,77 @@ fn videos_are_built_with_operations_listed_and_exported_to_an_mp4() {
 fn od_media_available() -> bool {
     od_media::Ffmpeg::locate().is_ok_and(|f| f.h264_encoder().is_ok())
 }
+
+/// A 3D device and a named move: the CLI's way to make a product shot and animate it.
+#[test]
+fn a_3d_device_is_printed_and_animated_from_the_command_line() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("shot.od");
+    let dir_s = s(&dir);
+    ok(&["new", dir_s, "--name", "Shot"]);
+
+    let page = fs::read_to_string(dir.join("pages/p_1.json")).unwrap();
+    let root: serde_json::Value = serde_json::from_str(&page).unwrap();
+    let root_id = root["root"]["id"].as_str().unwrap().to_string();
+
+    let device = ok(&["device3d", "phone", "--screen-width", "400"]);
+    let node: serde_json::Value = serde_json::from_str(&device).unwrap();
+    assert_eq!(node["kind"], "device3d");
+    assert_eq!(node["device3d"]["model"], "phone");
+    assert_eq!(node["device3d"]["rotate_y"], -18.0);
+    assert!(
+        node["height"].as_f64().unwrap() > node["width"].as_f64().unwrap(),
+        "a phone's viewport is portrait"
+    );
+
+    // the printed node goes into the project as any other create
+    let mut node = node;
+    node["name"] = serde_json::json!("Phone");
+    let ops = tmp.path().join("ops.json");
+    fs::write(
+        &ops,
+        serde_json::json!([{"op": "create", "parent": root_id, "node": node}]).to_string(),
+    )
+    .unwrap();
+    let receipt: serde_json::Value = serde_json::from_str(&ok(&["apply", dir_s, s(&ops)])).unwrap();
+    let device_id = receipt["created"][0].as_str().unwrap().to_string();
+
+    // a video that shows the frame
+    let ops = tmp.path().join("video.json");
+    fs::write(
+        &ops,
+        serde_json::json!([{"op": "create_video", "name": "Promo", "fps": 30,
+                            "width": 600, "height": 1000}])
+        .to_string(),
+    )
+    .unwrap();
+    let receipt: serde_json::Value = serde_json::from_str(&ok(&["apply", dir_s, s(&ops)])).unwrap();
+    let video = receipt["created"][0].as_str().unwrap().to_string();
+
+    let out = ok(&[
+        "animate",
+        dir_s,
+        "--video",
+        &video,
+        "--node",
+        &device_id,
+        "--preset",
+        "spin",
+        "--duration-ms",
+        "1000",
+    ]);
+    assert!(out.contains("touched"), "{out}");
+
+    let listing = ok(&["videos", dir_s]);
+    assert!(listing.contains("rotate_y"), "{listing}");
+
+    // a move that cannot work is refused with a reason
+    let out = Command::new(env!("CARGO_BIN_EXE_opendesigner"))
+        .args([
+            "animate", dir_s, "--video", &video, "--node", &device_id, "--preset", "nonsense",
+        ])
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("unknown move"));
+}

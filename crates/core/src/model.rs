@@ -7,8 +7,9 @@ use crate::error::OpError;
 use crate::limits::{self, finite_in, text_within};
 use crate::paint::{Paint, valid_token_name};
 
-/// Version of the on-disk project format. A loader refuses a newer one.
-pub const FORMAT_VERSION: u32 = 1;
+/// Version of the on-disk project format. A loader refuses a newer one. Version 2 added 3D
+/// devices and keyframe animations; every version 1 project is a valid version 2 project.
+pub const FORMAT_VERSION: u32 = 2;
 
 /// Stable identifier of a node or page. Never reused within a document.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
@@ -73,6 +74,8 @@ pub enum NodeKind {
     Text,
     /// A raster image from the project's `media/` folder.
     Image,
+    /// A device in 3D (phone, tablet, laptop, monitor) drawn in the node's box.
+    Device3d,
 }
 
 impl NodeKind {
@@ -84,6 +87,7 @@ impl NodeKind {
             NodeKind::Ellipse => "ellipse",
             NodeKind::Text => "text",
             NodeKind::Image => "image",
+            NodeKind::Device3d => "device3d",
         }
     }
 
@@ -160,6 +164,9 @@ pub struct Node {
     /// Unset means cover.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image_fit: Option<ImageFit>,
+    /// The 3D device a `device3d` node draws (present exactly on those nodes).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device3d: Option<crate::device3d::Device3d>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub children: Vec<Node>,
 }
@@ -203,6 +210,7 @@ impl Node {
             line_height: None,
             image: None,
             image_fit: None,
+            device3d: (kind == NodeKind::Device3d).then(crate::device3d::Device3d::default),
             children: Vec::new(),
         }
     }
@@ -601,6 +609,22 @@ pub(crate) fn validate_node_fields(
     if let Some(stroke) = &node.stroke {
         stroke.paint.resolve(tokens)?;
         finite_in("stroke width", stroke.width, 0.0, limits::MAX_STROKE_WIDTH)?;
+    }
+    match (&node.device3d, node.kind) {
+        (Some(d), NodeKind::Device3d) => d.check()?,
+        (None, NodeKind::Device3d) => {
+            return Err(OpError::OutOfBounds {
+                what: "device3d",
+                detail: format!("node {} is a device3d without its device", node.id),
+            });
+        }
+        (Some(_), kind) => {
+            return Err(OpError::NotApplicable {
+                property: "device3d",
+                kind: kind.as_str(),
+            });
+        }
+        (None, _) => {}
     }
     Ok(())
 }

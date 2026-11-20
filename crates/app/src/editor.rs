@@ -254,6 +254,36 @@ pub mod qobject {
         #[cxx_name = "addDevice"]
         fn add_device(self: Pin<&mut Self>, kind: &QString) -> QString;
         #[qinvokable]
+        #[cxx_name = "deviceModels"]
+        fn device_models(self: &Self) -> QString;
+        #[qinvokable]
+        #[cxx_name = "addDevice3d"]
+        fn add_device3d(self: Pin<&mut Self>, model: &QString) -> QString;
+        #[qinvokable]
+        #[cxx_name = "setScreenRecording"]
+        fn set_screen_recording(self: Pin<&mut Self>, id: &QString, file: &QString);
+        #[qinvokable]
+        #[cxx_name = "orbitDevice"]
+        fn orbit_device(self: Pin<&mut Self>, id: &QString, rotate_x: f64, rotate_y: f64);
+        #[qinvokable]
+        #[cxx_name = "renderOrbit"]
+        fn render_orbit(
+            self: Pin<&mut Self>,
+            scale: f64,
+            id: &QString,
+            rotate_x: f64,
+            rotate_y: f64,
+        );
+        #[qinvokable]
+        #[cxx_name = "deviceAt"]
+        fn device_at(self: &Self, x: f64, y: f64) -> QString;
+        #[qinvokable]
+        #[cxx_name = "dropOnDevice"]
+        fn drop_on_device(self: Pin<&mut Self>, url: &QString, id: &QString);
+        #[qinvokable]
+        #[cxx_name = "setMotionBlur"]
+        fn set_motion_blur(self: Pin<&mut Self>, video: &QString, samples: i32);
+        #[qinvokable]
         #[cxx_name = "deleteSelected"]
         fn delete_selected(self: Pin<&mut Self>);
         #[qinvokable]
@@ -1171,6 +1201,103 @@ impl qobject::Editor {
             .as_mut()
             .act(|s| s.add_device(&kind, None))
             .unwrap_or_default())
+    }
+
+    pub fn device_models(&self) -> QString {
+        q(&EditorState::device3d_models().to_string())
+    }
+
+    pub fn add_device3d(mut self: Pin<&mut Self>, model: &QString) -> QString {
+        let model = model.to_string();
+        q(&self
+            .as_mut()
+            .act(|s| s.add_device3d(&model))
+            .unwrap_or_default())
+    }
+
+    pub fn set_screen_recording(mut self: Pin<&mut Self>, id: &QString, file: &QString) {
+        let (id, file) = (id.to_string(), file.to_string());
+        self.as_mut().act(|s| s.set_screen_footage(&id, &file));
+    }
+
+    pub fn orbit_device(mut self: Pin<&mut Self>, id: &QString, rotate_x: f64, rotate_y: f64) {
+        let id = id.to_string();
+        self.as_mut()
+            .act(|s| s.orbit_device3d(&id, rotate_x, rotate_y));
+    }
+
+    /// The orbit drag's ghost: draws the canvas with the device turned, without an edit.
+    pub fn render_orbit(
+        mut self: Pin<&mut Self>,
+        scale: f64,
+        id: &QString,
+        rotate_x: f64,
+        rotate_y: f64,
+    ) {
+        if let Ok(url) = self
+            .state
+            .render_orbit(scale, &id.to_string(), rotate_x, rotate_y)
+        {
+            self.as_mut().set_canvas(q(&url));
+        }
+    }
+
+    pub fn device_at(&self, x: f64, y: f64) -> QString {
+        q(&self.state.device3d_at(x, y).unwrap_or_default())
+    }
+
+    /// An image or a video dropped on the 3D device `id`: its screen picture or recording. A
+    /// video can be gigabytes, so it is copied on another thread.
+    pub fn drop_on_device(mut self: Pin<&mut Self>, url: &QString, id: &QString) {
+        let (path, id) = (path_from_url(&url.to_string()), id.to_string());
+        if !crate::state::is_footage(std::path::Path::new(&path)) {
+            self.as_mut()
+                .act(|s| s.drop_on_device3d(std::path::Path::new(&path), &id));
+            return;
+        }
+        let Some(project) = self
+            .state
+            .footage_import_target(std::path::Path::new(&path))
+        else {
+            self.as_mut()
+                .show("the project has no folder to copy the video into", true);
+            return;
+        };
+        let name = std::path::Path::new(&path)
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let job = self
+            .as_mut()
+            .rust_mut()
+            .state
+            .begin_local_job(&format!("Adding {name} to the device's screen"));
+        let jobs = q(&self.state.jobs_json());
+        self.as_mut().set_jobs(jobs);
+        let qt = self.qt_thread();
+        std::thread::spawn(move || {
+            let result = od_core::media::import_footage(&project, std::path::Path::new(&path))
+                .map_err(|e| e.to_string());
+            let _ = qt.queue(move |mut editor| {
+                editor.as_mut().rust_mut().state.end_local_job(job);
+                match result {
+                    Ok(reference) => {
+                        editor
+                            .as_mut()
+                            .act(|s| s.set_screen_footage(&id, &reference));
+                    }
+                    Err(e) => {
+                        editor.as_mut().show(&e, true);
+                        editor.refresh();
+                    }
+                }
+            });
+        });
+    }
+
+    pub fn set_motion_blur(mut self: Pin<&mut Self>, video: &QString, samples: i32) {
+        let video = video.to_string();
+        self.as_mut().act(|s| s.set_motion_blur(&video, samples));
     }
 
     pub fn delete_selected(mut self: Pin<&mut Self>) {

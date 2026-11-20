@@ -62,6 +62,11 @@ pub const TOPICS: &[(&str, &str, &str)] = &[
         include_str!("../skill/motion-playbook.md"),
     ),
     (
+        "3d",
+        "3D devices: the models, the pose, captures from a simulator, emulator or browser, and the moves",
+        include_str!("../skill/three-d-devices.md"),
+    ),
+    (
         "logo",
         "logos and marks: brief, concepts, SVG construction, tests, icon sets",
         include_str!("../skill/logo-design.md"),

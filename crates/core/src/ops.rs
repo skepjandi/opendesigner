@@ -6,6 +6,8 @@ use std::mem::replace;
 
 use serde::{Deserialize, Serialize};
 
+use crate::animation::{AnimProp, Key};
+use crate::device3d::{self, Device3d, DeviceModel};
 use crate::error::OpError;
 use crate::limits::{self, finite_in, text_within};
 use crate::model::{
@@ -13,7 +15,7 @@ use crate::model::{
 };
 use crate::paint::Paint;
 use crate::video::{
-    Clip, ClipProperty, Motion, Overlay, OverlayProperty, Transition, Video, VideoProperty,
+    Clip, ClipProperty, Footage, Motion, Overlay, OverlayProperty, Transition, Video, VideoProperty,
 };
 
 /// One settable property with its new value. Serialized as `{"name": "x", "value": 10}`.
@@ -38,6 +40,19 @@ pub enum Property {
     LineHeight(Option<f64>),
     Image(Option<String>),
     ImageFit(Option<ImageFit>),
+    /// Which generated 3D model a device3d node draws.
+    Model(DeviceModel),
+    RotateX(f64),
+    RotateY(f64),
+    RotateZ(f64),
+    Zoom(f64),
+    Fov(f64),
+    LightAngle(f64),
+    Shadow(f64),
+    Glare(f64),
+    ScreenScroll(Option<f64>),
+    /// A recording on a device3d's screen (`null` shows the node's `image` again).
+    ScreenFootage(Option<Footage>),
 }
 
 impl Property {
@@ -61,6 +76,17 @@ impl Property {
             Property::LineHeight(_) => "line_height",
             Property::Image(_) => "image",
             Property::ImageFit(_) => "image_fit",
+            Property::Model(_) => "model",
+            Property::RotateX(_) => "rotate_x",
+            Property::RotateY(_) => "rotate_y",
+            Property::RotateZ(_) => "rotate_z",
+            Property::Zoom(_) => "zoom",
+            Property::Fov(_) => "fov",
+            Property::LightAngle(_) => "light_angle",
+            Property::Shadow(_) => "shadow",
+            Property::Glare(_) => "glare",
+            Property::ScreenScroll(_) => "screen_scroll",
+            Property::ScreenFootage(_) => "screen_footage",
         }
     }
 
@@ -73,7 +99,7 @@ impl Property {
             | Property::Visible(_)
             | Property::Opacity(_) => true,
             Property::Width(_) | Property::Height(_) => kind != Group,
-            Property::Fill(_) => matches!(kind, Frame | Rect | Ellipse | Text),
+            Property::Fill(_) => matches!(kind, Frame | Rect | Ellipse | Text | Device3d),
             Property::Stroke(_) => matches!(kind, Frame | Rect | Ellipse),
             Property::CornerRadius(_) => matches!(kind, Frame | Rect | Image),
             Property::Text(_)
@@ -82,7 +108,18 @@ impl Property {
             | Property::FontWeight(_)
             | Property::TextAlign(_)
             | Property::LineHeight(_) => kind == Text,
-            Property::Image(_) | Property::ImageFit(_) => kind == Image,
+            Property::Image(_) | Property::ImageFit(_) => matches!(kind, Image | Device3d),
+            Property::Model(_)
+            | Property::RotateX(_)
+            | Property::RotateY(_)
+            | Property::RotateZ(_)
+            | Property::Zoom(_)
+            | Property::Fov(_)
+            | Property::LightAngle(_)
+            | Property::Shadow(_)
+            | Property::Glare(_)
+            | Property::ScreenScroll(_)
+            | Property::ScreenFootage(_) => kind == Device3d,
         }
     }
 }
@@ -187,6 +224,51 @@ fn apply_property(
             Property::Image(replace(&mut node.image, v))
         }
         Property::ImageFit(v) => Property::ImageFit(replace(&mut node.image_fit, v)),
+        device_prop => apply_device_property(node, device_prop)?,
+    })
+}
+
+/// Sets one of a device3d node's own properties; `apply_property` has checked the kind.
+fn apply_device_property(node: &mut Node, prop: Property) -> Result<Property, OpError> {
+    let d = node
+        .device3d
+        .get_or_insert_with(crate::device3d::Device3d::default);
+    Ok(match prop {
+        Property::Model(v) => Property::Model(replace(&mut d.model, v)),
+        Property::RotateX(v) => {
+            Property::RotateX(replace(&mut d.rotate_x, device3d::rotation("rotate_x", v)?))
+        }
+        Property::RotateY(v) => {
+            Property::RotateY(replace(&mut d.rotate_y, device3d::rotation("rotate_y", v)?))
+        }
+        Property::RotateZ(v) => {
+            Property::RotateZ(replace(&mut d.rotate_z, device3d::rotation("rotate_z", v)?))
+        }
+        Property::Zoom(v) => Property::Zoom(replace(&mut d.zoom, device3d::zoom(v)?)),
+        Property::Fov(v) => Property::Fov(replace(&mut d.fov, device3d::fov(v)?)),
+        Property::LightAngle(v) => {
+            Property::LightAngle(replace(&mut d.light_angle, device3d::light_angle(v)?))
+        }
+        Property::Shadow(v) => {
+            Property::Shadow(replace(&mut d.shadow, device3d::unit("shadow", v)?))
+        }
+        Property::Glare(v) => Property::Glare(replace(&mut d.glare, device3d::unit("glare", v)?)),
+        Property::ScreenScroll(v) => {
+            let v = v.map(|s| device3d::unit("screen_scroll", s)).transpose()?;
+            Property::ScreenScroll(replace(&mut d.screen_scroll, v))
+        }
+        Property::ScreenFootage(v) => {
+            if let Some(f) = &v {
+                device3d::check_footage(f)?;
+            }
+            Property::ScreenFootage(replace(&mut d.footage, v))
+        }
+        other => {
+            return Err(OpError::Internal(format!(
+                "{} is not a device property",
+                other.name()
+            )));
+        }
     })
 }
 
@@ -231,6 +313,9 @@ pub struct NewNode {
     pub image: Option<String>,
     #[serde(default)]
     pub image_fit: Option<ImageFit>,
+    /// For a `device3d` node: the model and how it is turned and lit (defaults when omitted).
+    #[serde(default)]
+    pub device3d: Option<Device3d>,
     #[serde(default)]
     pub children: Vec<NewNode>,
 }
@@ -257,6 +342,7 @@ impl NewNode {
             line_height: None,
             image: None,
             image_fit: None,
+            device3d: None,
             children: Vec::new(),
         }
     }
@@ -338,11 +424,33 @@ impl NewNode {
         if self.image_fit.is_some() {
             set(Property::ImageFit(self.image_fit))?;
         }
+        if let Some(d) = &self.device3d {
+            for prop in device_properties(d) {
+                set(prop)?;
+            }
+        }
         for child in &self.children {
             node.children.push(child.build(next, tokens, depth + 1)?);
         }
         Ok(node)
     }
+}
+
+/// The properties that make a fresh device3d look like `d`, each validated as it is set.
+fn device_properties(d: &Device3d) -> [Property; 11] {
+    [
+        Property::Model(d.model),
+        Property::RotateX(d.rotate_x),
+        Property::RotateY(d.rotate_y),
+        Property::RotateZ(d.rotate_z),
+        Property::Zoom(d.zoom),
+        Property::Fov(d.fov),
+        Property::LightAngle(d.light_angle),
+        Property::Shadow(d.shadow),
+        Property::Glare(d.glare),
+        Property::ScreenScroll(d.screen_scroll),
+        Property::ScreenFootage(d.footage.clone()),
+    ]
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -454,6 +562,15 @@ pub enum Operation {
         overlay: NodeId,
         prop: OverlayProperty,
     },
+    /// Keyframe one number of a node over a video's time: `keys` at `at_ms` from the start of
+    /// the video, each reached with its `ease`. The value holds before the first key and after
+    /// the last. Empty `keys` removes the animation.
+    Animate {
+        video: NodeId,
+        node: NodeId,
+        prop: AnimProp,
+        keys: Vec<Key>,
+    },
     /// Put back an overlay. Written by the history; front ends cannot issue it.
     RestoreOverlay {
         video: NodeId,
@@ -497,6 +614,7 @@ impl Operation {
             Operation::AddOverlay { .. } => "add_overlay",
             Operation::RemoveOverlay { .. } => "remove_overlay",
             Operation::SetOverlay { .. } => "set_overlay",
+            Operation::Animate { .. } => "animate",
             Operation::RestoreOverlay { .. } => "restore_overlay",
             Operation::RestoreVideo { .. } => "restore_video",
             Operation::RestoreClip { .. } => "restore_clip",
@@ -699,6 +817,12 @@ pub fn apply(
         | Operation::RemoveOverlay { .. }
         | Operation::SetOverlay { .. }
         | Operation::RestoreOverlay { .. } => crate::video::apply(doc, op, allow_internal),
+        Operation::Animate {
+            video,
+            node,
+            prop,
+            keys,
+        } => crate::animation::apply(doc, video, node, *prop, keys),
         Operation::SetToken { name, value } => set_token(doc, name, value.as_deref()),
         Operation::SetLocalizedText { locale, id, text } => {
             let old = doc.set_locale_text(locale, id, text.as_deref())?;
@@ -724,6 +848,13 @@ pub fn apply(
                         frame: frame.map(|f| f.to_string()).unwrap_or_default(),
                         clip: clip.to_string(),
                         video: video.id.to_string(),
+                    });
+                }
+                if let Some((video, node, prop)) = doc.animation_of(&ids) {
+                    return Err(OpError::NodeAnimated {
+                        node: node.to_string(),
+                        prop,
+                        video: video.to_string(),
                     });
                 }
             }
@@ -807,7 +938,33 @@ fn current_value(node: &Node, prop: &Property) -> Property {
         Property::LineHeight(_) => Property::LineHeight(node.line_height),
         Property::Image(_) => Property::Image(node.image.clone()),
         Property::ImageFit(_) => Property::ImageFit(node.image_fit),
+        device_prop => {
+            let d = node.device3d.clone().unwrap_or_default();
+            match device_prop {
+                Property::Model(_) => Property::Model(d.model),
+                Property::RotateX(_) => Property::RotateX(d.rotate_x),
+                Property::RotateY(_) => Property::RotateY(d.rotate_y),
+                Property::RotateZ(_) => Property::RotateZ(d.rotate_z),
+                Property::Zoom(_) => Property::Zoom(d.zoom),
+                Property::Fov(_) => Property::Fov(d.fov),
+                Property::LightAngle(_) => Property::LightAngle(d.light_angle),
+                Property::Shadow(_) => Property::Shadow(d.shadow),
+                Property::Glare(_) => Property::Glare(d.glare),
+                Property::ScreenScroll(_) => Property::ScreenScroll(d.screen_scroll),
+                Property::ScreenFootage(_) => Property::ScreenFootage(d.footage),
+                other => other.clone(),
+            }
+        }
     }
+}
+
+/// Sets `prop` on `node` as `Set` would, for the animation module (validated the same way).
+pub(crate) fn set_property(
+    node: &mut Node,
+    prop: Property,
+    tokens: &BTreeMap<String, String>,
+) -> Result<(), OpError> {
+    apply_property(node, prop, tokens).map(|_| ())
 }
 
 fn validate_subtree(node: &Node, tokens: &BTreeMap<String, String>) -> Result<(), OpError> {

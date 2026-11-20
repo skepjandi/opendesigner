@@ -11,7 +11,8 @@ use std::time::SystemTime;
 use image::{ImageReader, Limits};
 use od_core::{ImageFit, Node};
 use tiny_skia::{
-    FillRule, FilterQuality, Mask, Paint as SkPaint, Pattern, Pixmap, Rect, SpreadMode, Transform,
+    FillRule, FilterQuality, Mask, Paint as SkPaint, Pattern, Pixmap, PixmapPaint, Rect,
+    SpreadMode, Transform,
 };
 
 /// Largest image accepted, in pixels per side and in total.
@@ -199,6 +200,61 @@ pub(crate) fn draw_image(
     if let Some(path) = path {
         pixmap.fill_path(&path, &paint, FillRule::Winding, transform, mask);
     }
+}
+
+/// `image` fitted into a new `w` x `h` picture (a device's screen): `fit` as an image node does,
+/// on black where a contained picture leaves bars. `scroll` (0 top, 1 bottom) places a covered
+/// picture taller than the screen instead of centring it.
+pub(crate) fn fit_into(
+    image: &Arc<Pixmap>,
+    fit: ImageFit,
+    scroll: Option<f64>,
+    w: u32,
+    h: u32,
+) -> Option<Pixmap> {
+    let mut out = Pixmap::new(w, h)?;
+    out.fill(tiny_skia::Color::BLACK);
+    let (fw, fh) = (w as f32, h as f32);
+    let (iw, ih) = (image.width() as f32, image.height() as f32);
+    let (sx, sy) = match fit {
+        ImageFit::Cover => {
+            let s = (fw / iw).max(fh / ih);
+            (s, s)
+        }
+        ImageFit::Contain => {
+            let s = (fw / iw).min(fh / ih);
+            (s, s)
+        }
+        ImageFit::Fill => (fw / iw, fh / ih),
+    };
+    let (dw, dh) = (iw * sx, ih * sy);
+    let ox = (fw - dw) / 2.0;
+    let oy = match (fit, scroll) {
+        (ImageFit::Cover, Some(s)) => (fh - dh) * s.clamp(0.0, 1.0) as f32,
+        _ => (fh - dh) / 2.0,
+    };
+    let mut source = Arc::clone(image);
+    let mut shrink = 1.0;
+    while sx.max(sy) * shrink <= 0.5 && source.width() > 1 && source.height() > 1 {
+        match halve(&source) {
+            Some(smaller) => source = Arc::new(smaller),
+            None => break,
+        }
+        shrink *= 2.0;
+    }
+    let paint = PixmapPaint {
+        quality: FilterQuality::Bicubic,
+        ..PixmapPaint::default()
+    };
+    out.draw_pixmap(
+        0,
+        0,
+        source.as_ref().as_ref(),
+        &paint,
+        Transform::from_row(sx * shrink, 0.0, 0.0, sy * shrink, ox, oy),
+        None,
+    );
+    Some(out)
 }
 
 /// The size of an image file in pixels, read from its header.

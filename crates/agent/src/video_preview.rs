@@ -205,7 +205,7 @@ fn fill(
         .video(id)
         .ok_or_else(|| format!("video {id} does not exist"))?;
     // The decoder reads at the preview's rate, so it streams instead of seeking for each picture.
-    let mut decoder = if has_footage(v) {
+    let mut decoder = if has_footage(&src.doc, v) {
         let dir = src
             .dir()
             .ok_or("the project has no folder, so no footage")?;

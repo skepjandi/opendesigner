@@ -1,6 +1,6 @@
 # Document Format
 
-> **Status: Partially implemented.** The `core` crate (`crates/core`) implements the node model for frames, groups, rectangles, ellipses, text and image nodes, the operation set below, history with checkpoints, and project I/O at format version `1`. Sections marked *(intended)* are not built. Deviations from the original design are listed under [Implemented](#implemented-cratescore) and in the [roadmap decision log](./roadmap.md#decision-log).
+> **Status: Partially implemented.** The `core` crate (`crates/core`) implements the node model for frames, groups, rectangles, ellipses, text, image and 3D device nodes, the operation set below, keyframe animations, history with checkpoints, and project I/O at format version `2` (version 1 projects still load). Sections marked *(intended)* are not built. Deviations from the original design are listed under [Implemented](#implemented-cratescore) and in the [roadmap decision log](./roadmap.md#decision-log).
 
 ## Implemented (`crates/core`)
 
@@ -16,6 +16,8 @@
 | Workspace and guidance | `workspace.rs` | `Workspace` holds the session, annotations, the (ephemeral) selection and the project folder. `guidance()` returns what an agent reads first: pages, the selected nodes with their data, open notes (flagged `target_exists: false` when the node was deleted) and the user's edits since the agent's last turn |
 | Videos | `video.rs` | `Video` and `Clip` (a clip shows a design frame for `duration_ms`, with a transition into it and a zoom, both eased; overlays with `enter`/`exit`/`ease`; one sound track `audio {file, start_ms, gain, fade_in_ms, fade_out_ms}`), stored in `videos/<id>.json` and listed in `od.toml` (`videos = [...]`); operations `create_video`, `delete_video`, `set_video`, `add_clip`, `remove_clip`, `move_clip`, `set_clip`; limits in `video.rs` (100 videos, 500 clips, 10 minutes). A video file without `audio` still loads: the field is optional and missing means a silent video. See [Video Editing](./video-editing.md#built-video-v1) |
 | Media | `media.rs` | `media/<plain name>` references (png, jpg, jpeg, webp), import by the user with magic-byte sniffing and unique names, listing and resolving without following symlinks. `Workspace::import_media`, `media`, `media_path` |
+| 3D devices | `device3d.rs` | `Device3d`: the model (`phone`, `phone_punch_hole`, `tablet`, `laptop`, `monitor`), the turn (`rotate_x`, `rotate_y`, `rotate_z`), `zoom`, the lens (`fov`), `light_angle`, `shadow`, `glare`, `screen_scroll` and `screen_footage`. Stored on a `device3d` node as `device3d`; the node's box is the viewport, its `fill` the body's finish and its `image` the capture on the screen. Set with `set` props `model`, `rotate_x`, `rotate_y`, `rotate_z`, `zoom`, `fov`, `light_angle`, `shadow`, `glare`, `screen_scroll`, `screen_footage` |
+| Animations | `animation.rs` | `Video.animations`: keyframes of any number of a node over the video's time (`AnimProp`, `Key`), the operation `animate` (empty keys removes an animation), `Ease::Spring`, `Video.motion_blur` (2 to 16 pictures blended while something moves), `Document::at_time` (the document as it looks at a moment) and the named moves (`Preset`, `preset_ops`) that write ordinary keyframes |
 
 Operation JSON as agents send it (the `opendesigner apply` command and the future MCP `apply_ops` tool take this array):
 
@@ -78,6 +80,7 @@ A page is a tree. Every node has `id`, `kind`, `name`, a transform and size, and
 | `text` | Runs with font, size, weight, tracking, line height; shaped at render time. Built: one run per node with family, size, weight, alignment and line height; shaped by `cosmic-text` in `render` |
 | `image` | Reference into `media/` plus fit and corner radius (built); crop (not built) |
 | `device` | A device frame (iPhone, iPad, Pixel, Mac window) with a screen slot for an `image` |
+| `device3d` | A device drawn in 3D inside its own box (built): a phone, tablet, laptop or monitor with a capture or a recording on its screen, turned and lit. See [3D devices](#3d-devices) |
 | `instance` | An instance of a component, with overrides |
 | `clip`, `track` | Video composition members ([Video Editing](./video-editing.md)) |
 
@@ -110,6 +113,37 @@ The editor's arrange commands add no operation type: `core::arrange` reads the d
 ### Validation
 
 `core` rejects an operation, with a reason an agent can read, when: an id does not exist or is a descendant of its own new parent; a value is outside bounds (size, coordinates, text length, count of nodes per call); a path escapes the project (`media/` references are resolved inside the project root only); a font or token is unknown; the operation would make a frame larger than the export limit.
+
+## 3D devices
+
+A `device3d` node is a device drawn in perspective inside its own box. The box is the viewport: the device is fitted into it with a margin at any turn, so a spin never runs out of the frame. The node carries:
+
+| Field | Meaning |
+|-------|---------|
+| `model` | `phone`, `phone_punch_hole`, `tablet`, `laptop` or `monitor`. Generated shapes with typical proportions; none is a manufacturer's artwork (see the [decision log](./roadmap.md#decision-log)) |
+| `rotate_x`, `rotate_y`, `rotate_z` | Tilt (positive leans the top away), turn (positive turns the right edge away) and roll (positive clockwise), in degrees, up to 3,600 either way |
+| `zoom` | How large the device is in its box (0.05 to 10); 1 fits it whatever its turn |
+| `fov` | The lens in degrees (1 to 100): 30 is a natural product shot, a small value is nearly flat |
+| `light_angle` | Where the key light comes from, in degrees around the device (0 above, 90 from the right) |
+| `shadow`, `glare` | The strength of the shadow under the device and of the reflection on the glass (0 to 1) |
+| `screen_scroll` | Where a capture taller than the screen is shown: 0 its top, 1 its bottom; unset centres it. Keyframed, it scrolls a long page |
+| `screen_footage` | A recording from `media/` to play on the screen instead of the node's `image` |
+
+The screen takes the node's `image` with its `image_fit` (cover by default); a recording plays from its `in_ms` while the frame is on screen, and a still shows the picture at `in_ms`. `render` draws the device with a CPU rasterizer (`od_render::three_d`): depth buffer, supersampled anti-aliasing, a studio environment for the reflections and a soft shadow; the picture is the same in the canvas and in an export because both are `render`'s output.
+
+## Keyframes
+
+A video may animate any number of a node over its own time. `Video.animations` holds one entry per node and property, sorted, each with keys `{at_ms, value, ease}`:
+
+```json
+{"op": "animate", "video": "v_1", "node": "n_7", "prop": "rotate_y",
+ "keys": [{"at_ms": 0, "value": -20, "ease": "ease_in_out"},
+          {"at_ms": 1200, "value": 20}]}
+```
+
+The value holds before the first key and after the last, and eases in between. The animatable properties are `x`, `y`, `width`, `height`, `opacity`, `corner_radius` and, on a 3D device, `rotate_x`, `rotate_y`, `rotate_z`, `zoom`, `fov`, `light_angle`, `shadow`, `glare` and `screen_scroll`. Keys with no animation (an empty list) remove it; a node with an animation cannot be deleted until the animation is removed. `Video.motion_blur` (2 to 16 pictures) blends the moments across a half-frame shutter while something moves.
+
+The named moves (`spin`, `turntable`, `swing`, `flip_in`, `hero_reveal`, `rise_in`, `drop_in`, `float`, `push_in`, `pull_back`, `orbit`, `scroll_screen`, `fade_in`, `fade_out`, `slide_in_left`, `slide_in_right`) are not a separate format: they are written as ordinary keyframes, measured from the node's designed pose.
 
 ## History and checkpoints
 

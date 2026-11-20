@@ -233,8 +233,10 @@ pub fn load(dir: &Path) -> Result<Session, ProjectError> {
         }
         locales.insert(locale, parsed);
     }
+    // Version 1 to 2 only added optional fields and node kinds, so an older project is already a
+    // valid current one; the next save writes it as the current format.
     let doc = Document {
-        format: manifest.format,
+        format: FORMAT_VERSION,
         name: manifest.name,
         next_id: manifest.next_id,
         tokens: manifest.tokens,
