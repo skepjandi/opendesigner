@@ -19,7 +19,7 @@ whole video process; this page is about movement.
   keyframed over the video's time with `animate` in `apply_ops`, or with a named move through
   `animate_preset`. A video can also blur what moves (`motion_blur`, 2 to 16 pictures). See the
   `3d` playbook for devices in 3D.
-- Sound: footage keeps its own, and a video can carry one extra sound track
+- Sound: footage keeps its own, and a video can carry up to eight sound tracks
   (see Sound below). `make_sound` synthesizes effects and simple loops, not music: for a music bed
   use `search_sounds` or ask the user for a track rather than promising one.
 
@@ -89,8 +89,8 @@ silence (an App Store preview autoplays muted, but still gets a track for when s
 - **Hits on cuts.** Put accents where the picture changes: a `hit` or `pop` on a hard cut or an
   impact, a `whoosh` or `swoosh_up/down` across a slide or zoom transition, a `riser` into a
   reveal, a `chime` on a success state, a `click` or `tick` on a tap. One accent per event, not per
-  word. Only one track plays at a time: pick the one that carries the video, or make one longer
-  sound (`beat`, `drone`) and let the picture carry the accents.
+  word. Tracks mix: put a hit or whoosh on its own `sfx` track at the cut's time (`add_sound_track`
+  with `start_ms`), or let one longer sound (`beat`, `drone`) carry the video.
 - **Silence is a tool.** A short gap before the reveal makes the hit land. Do not fill every moment.
 - **Where sound comes from.** `make_sound` (kind, duration_ms, seed, pitch_hz): synthesized in the
   project, no licence. `search_sounds` then `import_sound` for music and real recordings (needs
@@ -99,4 +99,14 @@ silence (an App Store preview autoplays muted, but still gets a track for when s
   as minimax-mcp, if `get_guidance` lists one: write the script short, ask before spending credits
   on long text, then import the file it makes. `list_sounds` shows what is in `media/`.
 - **Setting it.** `{"op": "set_video", "video": ..., "prop": {"name": "audio", "value": {"file":
-  "media/x.wav", "start_ms": 0, "gain": 0.25, "fade_in_ms": 500, "fade_out_ms": 600}}}`.
+  "media/x.wav", "start_ms": 0, "gain": 0.25, "fade_in_ms": 500, "fade_out_ms": 600}}}` sets the
+  one older track. For several, `add_sound_track {video, file, role, start_ms, in_ms, out_ms, gain,
+  fade_in_ms, fade_out_ms, pan}` (role `music`, `voice` or `sfx`; up to 8), then `set_sound_track`
+  and `remove_sound_track`.
+- **Ducking.** A `music` track with `duck: {depth: 0.7}` lowers itself while any `voice` track
+  speaks and comes back after (`attack_ms` 40 and `release_ms` 500 by default; the mix is one ffmpeg
+  pass). Prefer ducking to a very low fixed gain: the bed can be 0.4 to 0.6 between lines.
+- **Pauses and waveforms.** `detect_pauses {file}` lists the quiet stretches of audio or footage,
+  `remove_pauses {video, clip}` cuts them out of a footage clip as one undoable step (the clip
+  becomes several; overlays, captions and tracks keep their times, so move them after), and
+  `get_waveform {file}` gives peaks to find where a hit should land. They need ffmpeg.

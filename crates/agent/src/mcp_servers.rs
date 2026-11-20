@@ -219,7 +219,7 @@ fn is_env_name(name: &str) -> bool {
 }
 
 /// What the agent is told about sounds: where they come from and how they get under a video.
-pub const SOUND_NOTE: &str = "Sounds: make_sound synthesizes clicks, whooshes, risers, hits, chimes, a drone, a tick, a beat and a stinger (no licence). search_sounds and import_sound bring in Freesound sounds (needs the user's Freesound token; if there is none, say so and use make_sound or ask the user). import_file with an audio file brings in the user's own sound or music. list_sounds shows what is in media/. Put one under a video with set_video audio {file, start_ms, gain, fade_in_ms, fade_out_ms}; never leave a video silent unless asked.";
+pub const SOUND_NOTE: &str = "Sounds: make_sound synthesizes clicks, whooshes, risers, hits, chimes, a drone, a tick, a beat and a stinger (no licence). search_sounds and import_sound bring in Freesound sounds (needs the user's Freesound token; if there is none, say so and use make_sound or ask the user). import_file with an audio file brings in the user's own sound or music. list_sounds shows what is in media/. Put one under a video with set_video audio {file, start_ms, gain, fade_in_ms, fade_out_ms}, or with add_sound_track for several (role music, voice or sfx; music can duck under the voice); never leave a video silent unless asked. Captions are data: bring a transcript from the user's own speech server with import_captions (srt, vtt or words_json; OpenDesigner does no speech recognition), or estimate from a script with captions_from_script; set_caption_style gives the look.";
 
 /// What a server is for, when its name says (the user may name it anything).
 pub fn hint(name: &str) -> Option<&'static str> {

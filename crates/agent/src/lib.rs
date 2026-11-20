@@ -3,6 +3,7 @@
 
 pub mod acp;
 pub mod assets;
+pub mod audio_tools;
 pub mod connect;
 pub mod device;
 pub mod direction;

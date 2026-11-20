@@ -127,6 +127,7 @@ fn tool_full(
 pub fn definitions() -> Vec<Value> {
     let mut all = core_definitions();
     all.extend(crate::motion::definitions());
+    all.extend(crate::audio_tools::definitions());
     all.extend(crate::assets::tools::definitions());
     all.extend(crate::assets::logo::definitions());
     all.extend(showcase_definitions());
@@ -672,6 +673,7 @@ pub fn call(ctx: &mut CallCtx, name: &str, args: Value) -> Result<Output, ToolEr
     match name {
         "get_guidance" => get_guidance(ctx),
         n if crate::motion::NAMES.contains(&n) => crate::motion::call(ctx, n, args),
+        n if crate::audio_tools::NAMES.contains(&n) => crate::audio_tools::call(ctx, n, args),
         n if crate::assets::logo::NAMES.contains(&n) => {
             let dir = ctx.ws.dir().map(std::path::Path::to_path_buf);
             crate::assets::logo::call(dir.as_deref(), n, args)

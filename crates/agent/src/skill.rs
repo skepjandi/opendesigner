@@ -400,7 +400,12 @@ never makes the video longer: it is cut at the end. To find music or sound effec
 hit, chime, drone, beat, stinger; no licence, but no music), `search_sounds` (Freesound; it needs
 the user's token, and the answer says so if there is none), `import_sound` to bring one into
 `media/`, or `import_file` with a sound file of the user's (`find_files` kind audio); `list_sounds`
-shows them all. Then set the track. A Freesound sound keeps its
+shows them all. Then set the track. For more than one (music, a voice-over, effects), use
+`add_sound_track` (role `music`, `voice` or `sfx`, up to 8; start, trim, gain, fades, pan; music can
+`duck` under the voice), `set_sound_track` and `remove_sound_track`. Captions are data: bring a
+transcript from the user's own speech server with `import_captions` (`srt`, `vtt`, `words_json`;
+OpenDesigner does no speech recognition), or estimate from a script with `captions_from_script`,
+then `set_caption_style`. `detect_pauses`, `remove_pauses` and `get_waveform` need ffmpeg. A Freesound sound keeps its
 author's license: show the attribution the tool gives you (title, author, license, link) wherever
 the sound is used, and prefer CC0.
 "##;

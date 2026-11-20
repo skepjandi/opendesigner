@@ -37,7 +37,7 @@ inside a design frame, and the frame is a clip or an overlay.
 | background, pattern, aurora, grain, blob (`make_asset`, the video's width and height, token colors, a seed) | `create` an `image` node that fills a scene frame (`image_fit` cover) under the text; one `make_asset` per scene or one for the whole video; grain over footage as an overlay with `opacity` 0.1 to 0.3 |
 | picture or screenshot (`list_media`) | an `image` node in a scene frame, or inside a `device_template` screen; give it `motion` on the clip |
 | footage (`list_footage`) | `add_clip` with `footage:{file, in_ms}`, then overlays above it |
-| sound (`make_sound`, `import_asset`, `import_sound`, `import_file`) | `set_video` prop `audio`: a video has one sound track, so choose the file that carries the video |
+| sound (`make_sound`, `import_asset`, `import_sound`, `import_file`) | `add_sound_track` (role music, voice or sfx; up to 8, each with start, trim, gain, fades, pan; music can `duck` under the voice) or the older single `set_video` prop `audio` |
 
 The frames must be the video's shape. Credit lines that `import_asset` returned are shown in your
 closing message.
@@ -97,8 +97,22 @@ whooshes, risers, hits, chimes, a drone, a beat, a stinger: synthesized, no lice
 and `import_sound` (Freesound; needs the user's token, show the attribution), `import_file` with
 kind audio (the user's own music or recording), a voice-over from a speech MCP server such as
 minimax-mcp when `get_guidance` lists it (ask before spending credits on long text). Set it with
-`set_video` prop audio {file, start_ms, gain, fade_in_ms, fade_out_ms}; `list_sounds` shows what
-`media/` holds. The `motion` playbook has the details.
+`add_sound_track` {file, role, start_ms, gain, fade_in_ms, fade_out_ms, duck} (or `set_video` prop
+audio for the one older track); `list_sounds` shows what `media/` holds. A voice-over is a `voice`
+track and the bed a `music` track with `duck`, so the bed lowers while the voice speaks. The `motion`
+playbook has the details.
+
+## Captions
+
+Captions are data on the video (`captions`: a style and timed cues), drawn in the preview and burned
+into `export_video`. OpenDesigner has no speech-to-text: a transcript comes from the user's own
+speech MCP server (or the user), and you bring it in with `import_captions` (`srt`, `vtt` or
+`words_json`, the last giving a highlighted active word). With no transcript, `captions_from_script`
+spreads the script over a time range by word length: an estimate, so say it is one and prefer real
+timings when they exist. `add_caption_cue`, `remove_caption_cue` and `clear_captions` edit cues;
+`set_caption_style` takes a preset (`clean`, `bold_pop`, `karaoke`, `boxed`) and overrides (size is a
+percent of the video's height, colours are hex). Keep a cue to two lines, check it with
+`render_video_frame` inside a cue and in a word of another, and keep captions off the platform's UI zones.
 
 ## Quality gate
 
