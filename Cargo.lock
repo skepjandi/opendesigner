@@ -1066,6 +1066,7 @@ dependencies = [
  "cxx-qt-lib",
  "opendesigner-agent",
  "opendesigner-core",
+ "opendesigner-media",
  "opendesigner-render",
  "opendesigner-store",
  "png",

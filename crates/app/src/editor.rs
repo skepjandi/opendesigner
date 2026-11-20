@@ -229,6 +229,16 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "previewFrame"]
         fn preview_frame(self: &Self, index: i32) -> QString;
+
+        #[qinvokable]
+        #[cxx_name = "previewThumb"]
+        fn preview_thumb(self: &Self, index: i32) -> QString;
+        #[qinvokable]
+        #[cxx_name = "previewThumbsClear"]
+        fn preview_thumbs_clear(self: &Self);
+        #[qinvokable]
+        #[cxx_name = "playbackStep"]
+        fn playback_step(self: &Self, playhead_ms: f64, dt_ms: f64, sound_ms: f64) -> QString;
         #[qinvokable]
         #[cxx_name = "previewStop"]
         fn preview_stop(self: Pin<&mut Self>);
@@ -560,6 +570,9 @@ pub struct EditorRust {
     message_seq: i32,
     revision: i32,
 }
+
+/// The longest side of a timeline thumbnail, in pixels.
+const THUMBNAIL_SIDE: u32 = 128;
 
 /// The checkerboard pattern as a data URL, for the canvas to tile behind a transparent frame.
 fn checkerboard_data_url() -> String {
@@ -1110,12 +1123,48 @@ impl qobject::Editor {
         q(&self.state.preview_status())
     }
 
+    /// Picture `index` of the preview as an `image://pictures/` address, or an empty string when
+    /// it is not drawn yet.
     pub fn preview_frame(&self, index: i32) -> QString {
-        q(&self.state.preview_frame(u64::try_from(index).unwrap_or(0)))
+        let mut url = None;
+        self.state
+            .preview_frame_into(u64::try_from(index).unwrap_or(0), None, &mut |w, h, px| {
+                url = crate::frame_bridge::publish("stage-", w, h, px);
+            });
+        q(&url.unwrap_or_default())
+    }
+
+    /// A small copy of picture `index` for the timeline's thumbnails; it stays published until
+    /// `previewThumbsClear`.
+    pub fn preview_thumb(&self, index: i32) -> QString {
+        let mut url = None;
+        self.state.preview_frame_into(
+            u64::try_from(index).unwrap_or(0),
+            Some(THUMBNAIL_SIDE),
+            &mut |w, h, px| url = crate::frame_bridge::publish_pinned("thumb-", w, h, px),
+        );
+        q(&url.unwrap_or_default())
+    }
+
+    pub fn preview_thumbs_clear(&self) {
+        crate::frame_bridge::forget_all("thumb-");
+    }
+
+    /// One tick of playback with the sound: where the playhead goes and whether the sound player
+    /// must jump, as JSON `{"playhead": ms, "seek": ms | null}`. `sound_ms` is negative while no
+    /// sound plays.
+    pub fn playback_step(&self, playhead_ms: f64, dt_ms: f64, sound_ms: f64) -> QString {
+        let step = crate::preview::step(playhead_ms, dt_ms, (sound_ms >= 0.0).then_some(sound_ms));
+        q(
+            &serde_json::json!({"playhead": step.playhead_ms, "seek": step.seek_sound_ms})
+                .to_string(),
+        )
     }
 
     pub fn preview_stop(mut self: Pin<&mut Self>) {
         self.as_mut().rust_mut().state.preview_stop();
+        crate::frame_bridge::forget_all("stage-");
+        crate::frame_bridge::forget_all("thumb-");
     }
 
     pub fn memory_notes(&self) -> QString {
@@ -1497,10 +1546,20 @@ impl qobject::Editor {
         });
     }
 
-    /// Renders the active frame and publishes it as `canvas` (a PNG data URL).
+    /// Draws the active frame, hands the pixels to the `image://pictures/` provider and publishes
+    /// the new picture's address as `canvas`.
     pub fn render_canvas(mut self: Pin<&mut Self>, scale: f64) {
-        match self.state.render_canvas(scale) {
-            Ok(url) => self.as_mut().set_canvas(q(&url)),
+        let mut url = None;
+        let drawn = self.state.render_canvas_into(scale, &mut |w, h, pixels| {
+            url = crate::frame_bridge::publish("canvas-", w, h, pixels);
+        });
+        match drawn {
+            Ok(_) => match url {
+                Some(url) => self.as_mut().set_canvas(q(&url)),
+                None => self
+                    .as_mut()
+                    .show("the canvas picture is too large for Qt", true),
+            },
             Err(e) => {
                 self.as_mut().set_canvas(QString::default());
                 if self.state.snapshot().has_project

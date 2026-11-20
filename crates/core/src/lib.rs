@@ -14,6 +14,7 @@ pub mod error;
 pub mod geometry;
 pub mod grade;
 pub mod history;
+mod index;
 pub mod limits;
 pub mod lint;
 pub mod media;

@@ -2,9 +2,12 @@
 //! [`run`]; the code lives in this library so the tests link the generated Qt glue.
 
 pub mod asset_packs;
+pub mod canvas;
 pub mod chat;
 pub mod editor;
+mod frame_bridge;
 pub mod layout;
+pub mod preview;
 pub mod servers;
 pub mod showcase;
 pub mod sound_rows;
@@ -34,6 +37,7 @@ pub fn run() -> i32 {
                 std::process::exit(3);
             })
             .release();
+        frame_bridge::install(engine.as_mut());
         engine.as_mut().load(&QUrl::from(MAIN_QML));
     }
     match app.as_mut() {

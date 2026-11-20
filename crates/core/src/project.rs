@@ -247,6 +247,7 @@ pub fn load(dir: &Path) -> Result<Session, ProjectError> {
         pages,
         videos,
         variables: manifest.variables,
+        index: crate::index::NodeIndex::default(),
     };
 
     let history = dir.join(HISTORY_DIR);

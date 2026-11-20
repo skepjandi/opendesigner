@@ -303,6 +303,18 @@ impl Session {
             .collect()
     }
 
+    /// Every node id the transactions at or after `position` touched, deleted nodes included:
+    /// what a cache of the drawing must redraw to catch up with the document.
+    pub fn touched_since(&self, position: u64) -> Vec<NodeId> {
+        let mut set = BTreeSet::new();
+        for tx in self.log.iter().skip(position as usize) {
+            for op in &tx.ops {
+                set.extend(op.touched.iter().cloned());
+            }
+        }
+        set.into_iter().collect()
+    }
+
     fn inverse_of(&self, range: std::ops::RangeInclusive<usize>) -> Vec<Operation> {
         self.log[range]
             .iter()

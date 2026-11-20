@@ -29,6 +29,11 @@ impl Source {
     pub fn dir(&self) -> Option<&std::path::Path> {
         self.dir.as_deref()
     }
+
+    /// A source with no project folder, for a document that exists only in memory.
+    pub fn of_document(doc: Document) -> Source {
+        Source { doc, dir: None }
+    }
 }
 
 fn exports_dir(src: &Source) -> Result<std::path::PathBuf, ToolError> {

@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtMultimedia
 
 // A video the agent built, as the user needs to read it: a preview you can play and scrub, a
 // timeline that shows what comes after what (clips in order, how each one arrives, what is laid
@@ -44,6 +45,11 @@ Rectangle {
         return buffering ? "buffering" : "ready"
     }
     readonly property bool narrow: width < 420
+    // the sound mixed for the preview (a WAV the core made), played by the sound player below
+    readonly property string soundUrl: pv.audio && pv.audio.state === "ready" ? pv.audio.url : ""
+    readonly property bool mixing: !!pv.audio && pv.audio.state === "mixing"
+    readonly property bool wantSound: playing && !buffering && soundUrl !== ""
+    onWantSoundChanged: { if (wantSound) startSound(); else sound.pause() }
 
     onVideoChanged: {
         clearThumbs()
@@ -85,13 +91,20 @@ Rectangle {
     }
     function refresh() { setStatus(JSON.parse(editor.previewStatus())) }
     function indexAt(ms) { return Math.min(Math.floor(ms * pv.fps / 1000), pv.total - 1) }
-    function clearThumbs() { for (const k in thumbCache) delete thumbCache[k] }
+    function clearThumbs() { for (const k in thumbCache) delete thumbCache[k]; editor.previewThumbsClear() }
+    // the sound starts where the playhead is
+    function startSound() {
+        if (soundUrl === "" || sound.mediaStatus === MediaPlayer.NoMedia) return
+        sound.position = Math.round(playhead)
+        sound.play()
+    }
+    function placeSound() { if (soundUrl !== "") sound.position = Math.round(playhead) }
     // the cached picture at a moment, for the timeline's thumbnails; "" until it is drawn
     function thumbAt(ms) {
         if (!cacheOk) return ""
         const i = indexAt(ms)
         if (i < 0 || i >= pv.ready) return ""
-        if (thumbCache[i] === undefined) thumbCache[i] = editor.previewFrame(i)
+        if (thumbCache[i] === undefined) thumbCache[i] = editor.previewThumb(i)
         return thumbCache[i]
     }
     // the cached picture of the playhead, when it is drawn
@@ -109,14 +122,14 @@ Rectangle {
         shownIdx = -1
         picture = video ? editor.videoPreview(video.id, playhead, 480) : ""
     }
-    function seek(ms) { playing = false; playhead = Math.max(0, Math.min(ms, video ? video.duration_ms : 0)) }
+    function seek(ms) { playing = false; playhead = Math.max(0, Math.min(ms, video ? video.duration_ms : 0)); placeSound() }
     function stepFrames(n) {
         if (!video) return
         const fps = Math.max(1, video.fps)
         seek((Math.round(playhead * fps / 1000) + n) * 1000 / fps)
     }
     function endOfPlay() {
-        if (loop) { playhead = 0; return }
+        if (loop) { playhead = 0; if (wantSound) startSound(); return }
         playing = false
         playhead = video.duration_ms
     }
@@ -133,7 +146,12 @@ Rectangle {
             if (pv.ready >= Math.min(pv.total, pv.fps) || pv.done) buffering = false
             else return
         }
-        const next = playhead + dt
+        // the sound player's position is the reference; the playhead leans toward it, and the
+        // player is moved when the two are far apart (the policy lives in the core)
+        const soundPlaying = sound.playbackState === MediaPlayer.PlayingState
+        const step = JSON.parse(editor.playbackStep(playhead, dt, soundPlaying ? sound.position : -1))
+        if (step.seek !== null) sound.position = Math.round(step.seek)
+        const next = step.playhead
         if (next >= video.duration_ms || (pv.done && indexAt(next) >= pv.ready)) { endOfPlay(); return }
         if (indexAt(next) >= pv.ready && !pv.done) { buffering = true; return }
         playhead = next
@@ -209,6 +227,12 @@ Rectangle {
     }
     readonly property bool soundPicked: selKind === "audio" && !!video && !!video.audio
 
+    MediaPlayer {
+        id: sound
+        source: root.soundUrl
+        audioOutput: AudioOutput {}
+        onMediaStatusChanged: if (mediaStatus === MediaPlayer.LoadedMedia && root.wantSound) root.startSound()
+    }
     Timer { id: previewTimer; interval: 120; onTriggered: root.show() }
     Timer { id: ensureTimer; interval: 500; onTriggered: root.ensure() }
     // playback at the preview's rate, by the clock
@@ -220,7 +244,7 @@ Rectangle {
     // follows the worker while it draws, so the first picture and the progress show
     Timer {
         interval: 150; repeat: true
-        running: !!root.video && !root.playing && !!root.pv.video && !root.pv.done
+        running: !!root.video && !root.playing && !!root.pv.video && (!root.pv.done || root.mixing)
         onTriggered: {
             root.refresh()
             if (root.pv.stale) { root.clearThumbs(); root.ensure() }
@@ -372,7 +396,9 @@ Rectangle {
                 anchors.right: parent.right
                 anchors.bottom: parent.bottom
                 anchors.margins: 8
-                text: "Draft preview, silent. Export is full size with sound."
+                text: root.soundUrl !== "" ? "Draft preview with sound. Export is full size."
+                    : root.mixing ? "Draft preview, mixing the sound..."
+                    : "Draft preview, silent. Export is full size with sound."
                 color: Theme.muted
                 font.pixelSize: 10
             }
