@@ -1667,9 +1667,10 @@ impl EditorState {
                 .map(Path::to_path_buf)
                 .ok_or_else(|| "the project has no folder".to_string())
         })?;
-        // The agent works in the folder the user chose (a repository, so it can run the app and
-        // take screenshots); the project is a folder inside it.
-        let cwd = self.repo.clone().unwrap_or(project_dir);
+        // The agent works in the workspace's own folder, so whatever it keeps per working
+        // directory (its sessions, its own notes) stays with this workspace and never reaches
+        // another one of the same repository.
+        let cwd = project_dir;
         let server = self
             .server
             .as_ref()
@@ -3682,8 +3683,14 @@ mod tests {
             repo.join("opendesigner/workspaces/app store/od.toml")
                 .is_file()
         );
-        assert!(repo.join(".opendesigner/README.md").is_file());
-        assert!(repo.join(".opendesigner/memory").is_dir());
+        assert!(
+            repo.join(".opendesigner/workspaces/app store/README.md")
+                .is_file()
+        );
+        assert!(
+            repo.join(".opendesigner/workspaces/app store/memory")
+                .is_dir()
+        );
         assert_eq!(s.agent_notes(), json!([]));
         let dir = s.project_dir().unwrap();
         od_agent::memory::write(

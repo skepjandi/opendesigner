@@ -1,4 +1,5 @@
-//! The agent's memory across tasks: small text notes in `<repo>/.opendesigner/memory/`, next to
+//! The agent's memory across tasks: small text notes per workspace, in
+//! `<repo>/.opendesigner/workspaces/<name>/memory/` (the legacy project: `<repo>/.opendesigner/memory/`), next to
 //! (not inside) the `opendesigner/` folder of generated assets, so the notes can be tracked in git
 //! while the assets are ignored. Every path is built from a validated plain name; symlinks are
 //! never followed; sizes are capped; writes are atomic (`docs/wiki/agent-integration.md#agent-memory`).
@@ -60,15 +61,38 @@ pub struct Note {
     pub modified: u64,
 }
 
-/// The `.opendesigner` folder for the project at `project_dir`.
+/// The folder that holds the notes of the project at `project_dir`.
 ///
-/// The notes live next to the assets folder, never inside it: a workspace
-/// (`<repo>/opendesigner/workspaces/<name>/`) and a legacy project (`<repo>/opendesigner/`) both
-/// put them in `<repo>/.opendesigner`, one level above the assets. A project that is not inside an
-/// `opendesigner/` folder keeps its notes in `<project>/.opendesigner/`, so nothing is ever
-/// written outside the folder the user picked.
+/// Notes belong to one workspace, so what is learned in one never reaches another:
+/// - a named workspace (`<repo>/opendesigner/workspaces/<name>/`) keeps them in
+///   `<repo>/.opendesigner/workspaces/<name>/`, next to the assets folder so they can be tracked
+///   in git while the assets are ignored;
+/// - the legacy project (`<repo>/opendesigner/`, the workspace called `main`) keeps them in
+///   `<repo>/.opendesigner/`; a named workspace never reads that folder;
+/// - a project that is not inside an `opendesigner/` folder keeps them in
+///   `<project>/.opendesigner/`, so nothing is ever written outside the folder the user picked.
 pub fn folder_of(project_dir: &Path) -> Option<PathBuf> {
-    Some(repo_of(project_dir)?.join(FOLDER))
+    let repo = repo_of(project_dir)?;
+    let base = repo.join(FOLDER);
+    if is_named_workspace(project_dir) {
+        Some(
+            base.join(crate::workspaces::WORKSPACES_DIR)
+                .join(project_dir.file_name()?),
+        )
+    } else {
+        Some(base)
+    }
+}
+
+/// Whether `project_dir` is a workspace folder inside `opendesigner/workspaces/`.
+fn is_named_workspace(project_dir: &Path) -> bool {
+    let root = crate::workspaces::root_of(project_dir);
+    project_dir.parent() == Some(root.as_path())
+        && root
+            .parent()
+            .and_then(|a| a.file_name())
+            .and_then(|n| n.to_str())
+            == Some(ASSETS_DIR)
 }
 
 /// The repository folder that holds the assets of the project at `project_dir`.
@@ -96,7 +120,7 @@ fn memory_dir(project_dir: &Path) -> Result<PathBuf, MemoryError> {
 fn memory_dir_checked(project_dir: &Path) -> Result<PathBuf, MemoryError> {
     let mem = memory_dir(project_dir)?;
     if let Some(folder) = mem.parent() {
-        refuse_symlink(folder)?;
+        refuse_links_in(folder)?;
     }
     refuse_symlink(&mem)?;
     Ok(mem)
@@ -136,6 +160,17 @@ fn refuse_symlink(p: &Path) -> Result<(), MemoryError> {
     }
 }
 
+/// Refuses a link in `folder` or in any folder between it and `.opendesigner` (inclusive).
+fn refuse_links_in(folder: &Path) -> Result<(), MemoryError> {
+    for part in folder.ancestors() {
+        refuse_symlink(part)?;
+        if part.file_name().is_some_and(|n| n == FOLDER) {
+            break;
+        }
+    }
+    Ok(())
+}
+
 /// Creates `.opendesigner/` with its README and `memory/`. Never overwrites an existing README.
 pub fn ensure(project_dir: &Path) -> Result<PathBuf, MemoryError> {
     let mem = memory_dir(project_dir)?;
@@ -144,6 +179,7 @@ pub fn ensure(project_dir: &Path) -> Result<PathBuf, MemoryError> {
         .map(Path::to_path_buf)
         .ok_or_else(|| MemoryError("no memory folder".into()))?;
     refuse_symlink(&folder)?;
+    refuse_links_in(&folder)?;
     fs::create_dir_all(&folder).map_err(|e| io("cannot create .opendesigner", e))?;
     refuse_symlink(&mem)?;
     fs::create_dir_all(&mem).map_err(|e| io("cannot create .opendesigner/memory", e))?;
@@ -398,9 +434,28 @@ mod tests {
     }
 
     #[test]
-    fn the_folder_is_at_the_repository_root_for_both_layouts() {
+    fn notes_belong_to_one_workspace_and_never_reach_another() {
         let (tmp, dir) = project();
-        assert_eq!(folder_of(&dir).unwrap(), tmp.path().join(".opendesigner"));
+        let other = tmp.path().join("opendesigner/workspaces/other");
+        fs::create_dir_all(&other).unwrap();
+        write(&dir, "brand.md", "# Brand\nInter", Mode::Append).unwrap();
+        let legacy = tmp.path().join("opendesigner");
+        write(&legacy, "old.md", "# Old", Mode::Append).unwrap();
+        assert!(list(&other).unwrap().is_empty());
+        assert!(read(&other, "brand.md").is_err());
+        assert!(read(&other, "old.md").is_err());
+        let names: Vec<String> = list(&dir).unwrap().into_iter().map(|n| n.name).collect();
+        assert_eq!(names, ["brand.md"]);
+        assert_ne!(folder_of(&dir), folder_of(&other));
+    }
+
+    #[test]
+    fn the_folder_depends_on_the_layout() {
+        let (tmp, dir) = project();
+        assert_eq!(
+            folder_of(&dir).unwrap(),
+            tmp.path().join(".opendesigner/workspaces/app")
+        );
         let legacy = tmp.path().join("opendesigner");
         assert_eq!(
             folder_of(&legacy).unwrap(),
@@ -412,13 +467,17 @@ mod tests {
     fn ensure_makes_the_folder_and_never_overwrites_the_readme() {
         let (tmp, dir) = project();
         ensure(&dir).unwrap();
-        let readme = tmp.path().join(".opendesigner/README.md");
+        let readme = tmp.path().join(".opendesigner/workspaces/app/README.md");
         assert!(
             fs::read_to_string(&readme)
                 .unwrap()
                 .contains("Track this folder in git")
         );
-        assert!(tmp.path().join(".opendesigner/memory").is_dir());
+        assert!(
+            tmp.path()
+                .join(".opendesigner/workspaces/app/memory")
+                .is_dir()
+        );
         assert!(!tmp.path().join(".gitignore").exists());
         fs::write(&readme, "mine").unwrap();
         ensure(&dir).unwrap();
@@ -475,11 +534,12 @@ mod tests {
         let (tmp, dir) = project();
         write(&dir, "a.md", "one", Mode::Replace).unwrap();
         write(&dir, "a.md", "two", Mode::Replace).unwrap();
-        let names: Vec<String> = fs::read_dir(tmp.path().join(".opendesigner/memory"))
-            .unwrap()
-            .flatten()
-            .map(|e| e.file_name().to_string_lossy().into_owned())
-            .collect();
+        let names: Vec<String> =
+            fs::read_dir(tmp.path().join(".opendesigner/workspaces/app/memory"))
+                .unwrap()
+                .flatten()
+                .map(|e| e.file_name().to_string_lossy().into_owned())
+                .collect();
         assert_eq!(names, ["a.md"]);
     }
 
@@ -511,7 +571,7 @@ mod tests {
         let (tmp2, dir2) = project();
         let elsewhere = tmp2.path().join("elsewhere");
         fs::create_dir_all(&elsewhere).unwrap();
-        let folder = tmp2.path().join(".opendesigner");
+        let folder = tmp2.path().join(".opendesigner/workspaces/app");
         fs::create_dir_all(&folder).unwrap();
         std::os::unix::fs::symlink(&elsewhere, folder.join("memory")).unwrap();
         assert!(write(&dir2, "a.md", "x", Mode::Replace).is_err());

@@ -45,10 +45,10 @@ Kino's MCP endpoint is a useful precedent for the UX (fixed loopback port, keep 
 
 ## Agent memory
 
-`write_memory` is a write surface outside the project folder: `<repo>/.opendesigner/memory/`, where `<repo>` is the parent of the `opendesigner/` assets folder (a project that is not inside an `opendesigner/` folder keeps its notes in `<project>/.opendesigner/`) (`od_agent::memory`). Rules, each covered by a unit test:
+`write_memory` is a write surface outside the project folder: `<repo>/.opendesigner/workspaces/<name>/memory/` for a named workspace (`<repo>/.opendesigner/memory/` for the legacy project), so a workspace can neither read nor write another's notes, where `<repo>` is the parent of the `opendesigner/` assets folder (a project that is not inside an `opendesigner/` folder keeps its notes in `<project>/.opendesigner/`) (`od_agent::memory`). Rules, each covered by a unit test:
 
 - Names are plain `[a-z0-9._-]+`, at most 64 characters, ending `.md` or `.txt`, no leading dot, no `..`, no separators. The path is always `memory/` joined with a validated name; the agent never supplies a path.
-- Symlinks are never followed (`symlink_metadata`): a linked note, `.opendesigner` or `memory/` is refused for reads, writes and listing.
+- Symlinks are never followed (`symlink_metadata`): a linked note, `.opendesigner`, `workspaces/`, the workspace folder or `memory/` is refused for reads, writes and listing.
 - Caps: 64 KB per note, 200 notes, 2 MB in total. Text only (no NUL bytes); the folder never holds binaries.
 - Writes are atomic (temporary file, then rename). Append adds a dated entry; replace swaps the file.
 - OpenDesigner creates the folder and a README when a working folder is opened (best effort) and never edits `.gitignore`.
