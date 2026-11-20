@@ -199,6 +199,10 @@ pub struct VideoRow {
     pub overlays: Vec<crate::video::Overlay>,
     /// The sound under the picture (none for a silent video).
     pub audio: Option<AudioRow>,
+    /// The other sound tracks: music, voice and effects.
+    pub tracks: Vec<crate::audio::SoundTrack>,
+    /// The captions: style and cues with their words.
+    pub captions: CaptionsRow,
     /// Numbers of nodes keyframed over the video's time.
     pub animations: Vec<crate::animation::Animation>,
     /// Pictures blended per frame for motion blur (0 is off).
@@ -206,6 +210,13 @@ pub struct VideoRow {
     /// What happens, in order, in words: the clips with their motion and how each one arrives,
     /// then the overlays by start time, then what is animated.
     pub story: Vec<String>,
+}
+
+/// A video's captions as listed: the style and every cue, empty or not.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct CaptionsRow {
+    pub style: crate::captions::CaptionStyle,
+    pub cues: Vec<crate::captions::Cue>,
 }
 
 /// The sound track of a video.
@@ -312,7 +323,45 @@ fn story_of(doc: &Document, v: &crate::video::Video) -> Vec<String> {
             a.gain
         ));
     }
+    out.extend(v.tracks.iter().map(track_story));
+    out.extend(caption_story(&v.captions));
     out
+}
+
+fn track_story(t: &crate::audio::SoundTrack) -> String {
+    let duck = t.duck.map_or(String::new(), |d| {
+        format!(", ducking under the voice (depth {:.2})", d.depth)
+    });
+    let trim = match (t.in_ms, t.out_ms) {
+        (0, None) => String::new(),
+        (i, None) => format!(", from {} into the file", secs(u64::from(i))),
+        (i, Some(o)) => format!(
+            ", {} to {} of the file",
+            secs(u64::from(i)),
+            secs(u64::from(o))
+        ),
+    };
+    format!(
+        "{} track {}: {} from {} at volume {:.2}{trim}{duck}",
+        t.role.name(),
+        t.id,
+        t.file,
+        secs(u64::from(t.start_ms)),
+        t.gain
+    )
+}
+
+fn caption_story(c: &crate::captions::Captions) -> Option<String> {
+    let (first, last) = (c.cues.first()?, c.cues.last()?);
+    let timed = c.cues.iter().filter(|q| !q.words.is_empty()).count();
+    Some(format!(
+        "captions: {} cues from {} to {}, {timed} with word timings; {} at {}% of the height",
+        c.cues.len(),
+        secs(u64::from(first.start_ms)),
+        secs(u64::from(last.end_ms)),
+        c.style.font_family,
+        c.style.size_pct
+    ))
 }
 
 /// Every video with its clips placed on the timeline.
@@ -367,6 +416,11 @@ pub fn videos(doc: &Document) -> Vec<VideoRow> {
                     fade_in_ms: a.fade_in_ms,
                     fade_out_ms: a.fade_out_ms,
                 }),
+                tracks: v.tracks.clone(),
+                captions: CaptionsRow {
+                    style: v.captions.style.clone(),
+                    cues: v.captions.cues.clone(),
+                },
                 animations: v.animations.clone(),
                 motion_blur: v.motion_blur,
                 story: story_of(doc, v),
