@@ -32,8 +32,9 @@ jobs:
       - run: cargo clippy --all-targets --locked -- -D warnings
       - run: cargo test --locked
 
-  # The Qt Quick editor. Only macOS has been run by hand; Linux and Windows jobs come once their
-  # Qt installs are verified.
+  # The Qt Quick editor. macOS has been run by hand. The Linux and Windows jobs below are the first
+  # automated runs of the editor on those systems: until a run of them is green they are unverified
+  # (each is a separate job, so a failure in one does not hide the others).
   app-macos:
     name: Editor (macOS, Qt 6)
     runs-on: macos-latest
@@ -48,6 +49,72 @@ jobs:
       - name: Lint and test the editor
         run: |
           export QMAKE="$(brew --prefix qt)/bin/qmake"
+          cargo clippy -p opendesigner-app --all-targets --locked -- -D warnings
+          cargo test -p opendesigner-app --locked
+
+  # Qt 6 from the distribution (Ubuntu 24.04 ships 6.4) with the same package set as
+  # packaging/linux/Dockerfile, which scripts/test-linux.sh builds and tests in. The window is
+  # drawn offscreen with the software renderer, so no display or GPU is needed.
+  app-linux:
+    name: Editor (Linux, Qt 6)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      QMAKE: /usr/lib/qt6/bin/qmake6
+      QT_QPA_PLATFORM: offscreen
+      QT_QUICK_BACKEND: software
+      RUSTFLAGS: -C link-arg=-fuse-ld=lld
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: swatinem/rust-cache@v2
+      - name: Install Qt 6
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config lld \
+            qt6-base-dev qt6-base-dev-tools qt6-declarative-dev \
+            qml6-module-qtquick qml6-module-qtquick-controls qml6-module-qtquick-layouts \
+            qml6-module-qtquick-dialogs qml6-module-qtquick-window qml6-module-qtquick-templates \
+            qml6-module-qtqml qml6-module-qtqml-workerscript qml6-module-qt-labs-folderlistmodel \
+            qml6-module-qt-labs-platform qml6-module-qtcore \
+            libgl1-mesa-dev libxkbcommon-dev libfontconfig1 fonts-dejavu-core
+      - name: Lint and test the editor
+        run: |
+          cargo clippy -p opendesigner-app --all-targets --locked -- -D warnings
+          cargo test -p opendesigner-app --locked
+
+  # Qt 6.8 (the current LTS line) from the official installers through install-qt-action, which
+  # puts Qt's bin on PATH and sets QT_ROOT_DIR and QML2_IMPORT_PATH. The build links only the
+  # modules in crates/app/build.rs (Qt Network, plus what cxx-qt-lib's qt_full needs from qtbase
+  # and qtdeclarative), all LGPL.
+  app-windows:
+    name: Editor (Windows, Qt 6)
+    runs-on: windows-2022
+    timeout-minutes: 90
+    env:
+      QT_QPA_PLATFORM: offscreen
+      QT_QUICK_BACKEND: software
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: swatinem/rust-cache@v2
+      - name: Install Qt 6
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: 6.8.3
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          cache: true
+      - name: Lint and test the editor
+        shell: bash
+        run: |
+          export QMAKE="$QT_ROOT_DIR/bin/qmake.exe"
           cargo clippy -p opendesigner-app --all-targets --locked -- -D warnings
           cargo test -p opendesigner-app --locked
 
