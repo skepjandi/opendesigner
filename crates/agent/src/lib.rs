@@ -3,6 +3,7 @@
 
 pub mod acp;
 pub mod assets;
+pub mod blocks;
 pub mod connect;
 pub mod device;
 pub mod direction;
