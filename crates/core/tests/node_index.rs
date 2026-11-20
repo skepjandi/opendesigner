@@ -3,9 +3,7 @@
 //! The id lookup index must answer exactly what a walk over the tree answers, through every kind
 //! of edit: create, move, reparent, delete, undo, redo, restore and a reload.
 
-use od_core::{
-    Actor, Document, Node, NodeId, NodeKind, Operation, Session, model::Location,
-};
+use od_core::{Actor, Document, Node, NodeId, NodeKind, Operation, Session, model::Location};
 
 fn walk(node: &Node, id: &NodeId, path: &mut Vec<usize>) -> bool {
     if &node.id == id {

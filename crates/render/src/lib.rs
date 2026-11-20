@@ -4,12 +4,14 @@
 
 mod device;
 mod images;
+mod incremental;
 mod text;
 pub mod three_d;
 pub mod video;
 
 pub use device::Media;
 pub use images::dimensions as image_dimensions;
+pub use incremental::{Refresh, Retained};
 pub use tiny_skia::Pixmap;
 
 use std::collections::{BTreeMap, HashMap};
@@ -152,15 +154,12 @@ pub fn render_frame_with(
     render_frame_in_bands(doc, frame, scale, project_dir, media, None)
 }
 
-/// [`render_frame_with`] with the number of bands chosen (`None`: by size and cores).
-fn render_frame_in_bands(
-    doc: &Document,
+/// The frame node and its size in pixels at `scale`, or why it cannot be drawn.
+fn frame_geometry<'a>(
+    doc: &'a Document,
     frame: &NodeId,
     scale: f32,
-    project_dir: Option<&FsPath>,
-    media: &mut Media,
-    bands: Option<usize>,
-) -> Result<Rendered, RenderError> {
+) -> Result<(&'a Node, (u32, u32)), RenderError> {
     if !(0.01..=16.0).contains(&scale) || !scale.is_finite() {
         return Err(RenderError::BadScale);
     }
@@ -181,7 +180,19 @@ fn render_frame_in_bands(
     if width > u64::from(MAX_SIDE) || height > u64::from(MAX_SIDE) || width * height > MAX_PIXELS {
         return Err(RenderError::TooLarge { width, height });
     }
-    let (w, h) = (width as u32, height as u32);
+    Ok((node, (width as u32, height as u32)))
+}
+
+/// [`render_frame_with`] with the number of bands chosen (`None`: by size and cores).
+fn render_frame_in_bands(
+    doc: &Document,
+    frame: &NodeId,
+    scale: f32,
+    project_dir: Option<&FsPath>,
+    media: &mut Media,
+    bands: Option<usize>,
+) -> Result<Rendered, RenderError> {
+    let (node, (w, h)) = frame_geometry(doc, frame, scale)?;
     let bands = bands.unwrap_or_else(|| band_count(node, h));
     let mut warnings = Vec::new();
     let devices = device::prepare(node, scale, &doc.tokens, project_dir, media, &mut warnings)?;
@@ -244,27 +255,7 @@ fn render_bands(
     let rows = h.div_ceil(bands.max(1) as u32).max(1);
     let starts: Vec<u32> = (0..h).step_by(rows as usize).collect();
     let draw_band = |top: u32| -> Result<Band, RenderError> {
-        // Draw a few rows beyond the slice on each side: a shape that crosses the seam is then
-        // anti-aliased with its whole outline in view, and the seam shows no difference.
-        let first = top.saturating_sub(BAND_OVERLAP);
-        let last = (top + rows).min(h);
-        let band_h = (last + BAND_OVERLAP).min(h) - first;
-        let mut pixmap = Pixmap::new(w, band_h).ok_or_else(too_large)?;
-        let mut ctx = Ctx {
-            tokens: &doc.tokens,
-            project_dir,
-            warnings: Vec::new(),
-            view: View {
-                width: w as f32,
-                height: band_h as f32,
-            },
-            devices,
-        };
-        let base = Transform::from_row(scale, 0.0, 0.0, scale, 0.0, -(first as f32));
-        draw(&mut ctx, &mut pixmap, node, base, 1.0, None, true)?;
-        let skip = (top - first) as usize * w as usize * 4;
-        let keep = (last - top) as usize * w as usize * 4;
-        Ok((pixmap.data()[skip..skip + keep].to_vec(), ctx.warnings))
+        draw_rows(doc, node, scale, (w, h), project_dir, devices, top, rows)
     };
     let parts: Vec<Result<Band, RenderError>> = if starts.len() == 1 {
         vec![draw_band(0)]
@@ -298,6 +289,45 @@ fn render_bands(
     }
     warnings.extend(check_text(node));
     Ok(Rendered { pixmap, warnings })
+}
+
+/// Draws rows `top..top + rows` of the `(w, h)` frame. A few rows beyond the slice on each side
+/// are drawn too: a shape that crosses the seam is then anti-aliased with its whole outline in
+/// view, and the seam shows no difference.
+#[allow(clippy::too_many_arguments)]
+fn draw_rows(
+    doc: &Document,
+    node: &Node,
+    scale: f32,
+    (w, h): (u32, u32),
+    project_dir: Option<&FsPath>,
+    devices: &HashMap<NodeId, Arc<Pixmap>>,
+    top: u32,
+    rows: u32,
+) -> Result<Band, RenderError> {
+    let too_large = || RenderError::TooLarge {
+        width: u64::from(w),
+        height: u64::from(h),
+    };
+    let first = top.saturating_sub(BAND_OVERLAP);
+    let last = (top + rows).min(h);
+    let band_h = (last + BAND_OVERLAP).min(h) - first;
+    let mut pixmap = Pixmap::new(w, band_h).ok_or_else(too_large)?;
+    let mut ctx = Ctx {
+        tokens: &doc.tokens,
+        project_dir,
+        warnings: Vec::new(),
+        view: View {
+            width: w as f32,
+            height: band_h as f32,
+        },
+        devices,
+    };
+    let base = Transform::from_row(scale, 0.0, 0.0, scale, 0.0, -(first as f32));
+    draw(&mut ctx, &mut pixmap, node, base, 1.0, None, true)?;
+    let skip = (top - first) as usize * w as usize * 4;
+    let keep = (last - top) as usize * w as usize * 4;
+    Ok((pixmap.data()[skip..skip + keep].to_vec(), ctx.warnings))
 }
 
 /// A drawn band's rows (RGBA, premultiplied) and what it could not draw.

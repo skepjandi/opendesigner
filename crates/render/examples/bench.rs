@@ -114,6 +114,44 @@ fn apply_timing(nodes: usize) -> Duration {
     median(runs)
 }
 
+/// Redraws one moved node into the retained picture: the editor's cost after a drag step. The
+/// first number is a full draw into tiles, the second the update after one `Move`.
+fn incremental_timing(nodes: usize, scale: f32) -> (Duration, Duration) {
+    let (mut s, frame) = build(nodes);
+    let mut full = Vec::new();
+    let mut retained = None;
+    for _ in 0..7 {
+        let t = Instant::now();
+        retained = od_render::Retained::render(s.document(), &frame, scale, None)
+            .unwrap_or_else(|e| panic!("{e}"));
+        full.push(t.elapsed());
+    }
+    let mut retained = retained.unwrap_or_else(|| panic!("not retained"));
+    let target = s
+        .document()
+        .node(&frame)
+        .and_then(|f| f.children.get(nodes / 2).map(|c| c.id.clone()))
+        .unwrap_or_else(|| panic!("no node"));
+    let mut steps = Vec::new();
+    for round in 0..7 {
+        let position = s.log().len() as u64;
+        let op = Operation::Move {
+            id: target.clone(),
+            x: 100.0 + f64::from(round) * 7.0,
+            y: 900.0 + f64::from(round) * 3.0,
+        };
+        let t = Instant::now();
+        s.apply(Actor::User, None, &[op])
+            .unwrap_or_else(|e| panic!("{e}"));
+        let changed = s.touched_since(position);
+        retained
+            .update(s.document(), &changed, None)
+            .unwrap_or_else(|e| panic!("{e}"));
+        steps.push(t.elapsed());
+    }
+    (median(full), median(steps))
+}
+
 /// A 3D device: a phone turned a little, with a capture on its screen.
 fn device_timing(model: DeviceModel, w: u32, h: u32) -> Duration {
     let mut device = Device3d {
@@ -184,6 +222,12 @@ fn main() {
                 ms(r + p)
             );
         }
+        let (full, step) = incremental_timing(nodes, 0.3);
+        println!(
+            "{nodes:>6}  tiled draw at 0.3: {:.1} ms, one moved node (apply + update): {:.2} ms",
+            ms(full),
+            ms(step)
+        );
         println!(
             "{nodes:>6}  100-operation transaction + checkpoint: {:.2} ms",
             ms(apply_timing(nodes))
