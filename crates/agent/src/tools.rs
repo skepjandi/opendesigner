@@ -302,13 +302,17 @@ fn core_definitions() -> Vec<Value> {
              {op:'add_clip', video, frame | footage:{file:'media/x.mp4', in_ms}, duration_ms, index?, transition?, motion?} (a clip shows a design frame or plays footage from list_footage), \
              {op:'remove_clip', video, clip}, {op:'move_clip', video, clip, index}, \
              {op:'set_clip', video, clip, prop:{name, value}} with name one of duration_ms, frame, \
-             source (value {frame} or {footage:{file,in_ms}}), transition (value {kind: cut|fade|slide_left|slide_right|slide_up|slide_down|dip|zoom_in, duration_ms, ease?}), motion (value {scale_from, scale_to, ease?}, 1 to 3), \
+             source (value {frame} or {footage:{file,in_ms}}), transition (value {kind: cut|fade|slide_left|slide_right|slide_up|slide_down|dip|zoom_in|wipe_left|wipe_right|wipe_up|wipe_down|iris|flash|blur_dissolve|glitch_slice, duration_ms, ease?}), motion (value {scale_from, scale_to, ease?}, 1 to 3), \
+             speed (footage only, 0.25 to 4; duration_ms is the length on the timeline, the clip plays duration_ms*speed of the file), \
+             speed_ramp (footage only, value [{at_ms, rate 0.25 to 4, ease?}] in clip time, needs speed 1; [] removes it), \
+             grade (value {exposure?(-3..3 stops), contrast?, saturation?, temperature?, tint? (all -1..1), vignette? (0..1), blur? (0..50), look?: warm|cool|mono|faded|punchy}, or null; a look fills the numbers and the numbers you give override it; also set on an image node with {op:'set', id, prop:{name:'grade', value}}). \
+             Times (durations, starts, in points, transitions, keys) are rounded to the video's frame grid; the receipt shows the value kept. \
              {op:'add_overlay', video, frame, start_ms, duration_ms, fade_ms?, enter?, exit?, ease?} (a design frame drawn over the whole video for a while: titles, lower thirds, call-outs; a frame with no fill is transparent; enter and exit are none, fade, slide_up, slide_down, slide_left, slide_right, pop or zoom, taking fade_ms each), {op:'remove_overlay', video, overlay}, \
              {op:'set_overlay', video, overlay, prop:{name, value}} with name one of frame, start_ms, duration_ms, fade_ms, enter, exit, ease, \
              {op:'animate', video, node, prop, keys:[{at_ms, value, ease?}]} (keyframes one number of a node over the video's time, \
              at_ms from the start of the video, strictly increasing; the value holds before the first key and after the last; \
              prop one of x, y, width, height, opacity, corner_radius, rotate_x, rotate_y, rotate_z, zoom, fov, light_angle, shadow, glare, \
-             screen_scroll; keys:[] removes it; animate_preset writes these for you). Eases: linear, ease_in, ease_out, ease_in_out, \
+             screen_scroll, or on an image node grade_exposure, grade_contrast, grade_saturation, grade_temperature, grade_tint, grade_vignette, grade_blur; keys:[] removes it; animate_preset writes these for you). Eases: linear, ease_in, ease_out, ease_in_out, \
              back (overshoots) or spring (overshoots and settles). Colors are '#rrggbb', '#rrggbbaa' or \
              '{token.name}'. Template variables (see list_variables): {op:'declare_variable', variable:{id, kind, label, description?, \
              portrays?, default, enum_values?, binds?:[{node, prop}]}} with kind one of string, number, color, bool, enum, image, font \

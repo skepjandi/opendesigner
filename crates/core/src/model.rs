@@ -167,6 +167,9 @@ pub struct Node {
     /// The 3D device a `device3d` node draws (present exactly on those nodes).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub device3d: Option<crate::device3d::Device3d>,
+    /// Colour grading and effects on an image node (`crate::grade`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grade: Option<crate::grade::Grade>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub children: Vec<Node>,
 }
@@ -211,6 +214,7 @@ impl Node {
             image: None,
             image_fit: None,
             device3d: (kind == NodeKind::Device3d).then(crate::device3d::Device3d::default),
+            grade: None,
             children: Vec::new(),
         }
     }
@@ -629,6 +633,15 @@ pub(crate) fn validate_node_fields(
             });
         }
         (None, _) => {}
+    }
+    if let Some(grade) = &node.grade {
+        if node.kind != NodeKind::Image {
+            return Err(OpError::NotApplicable {
+                property: "grade",
+                kind: node.kind.as_str(),
+            });
+        }
+        grade.checked()?;
     }
     Ok(())
 }
