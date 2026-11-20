@@ -13,6 +13,12 @@ use std::thread::JoinHandle;
 
 use thiserror::Error;
 
+pub mod analysis;
+pub mod mix;
+
+pub use analysis::Pause;
+pub use mix::{AudioPiece, DuckSettings, PieceRole};
+
 /// Names the `OPENDESIGNER_FFMPEG` environment variable gives a specific `ffmpeg` to use.
 pub const FFMPEG_ENV: &str = "OPENDESIGNER_FFMPEG";
 
@@ -544,20 +550,6 @@ pub fn audio_path(project: &Path, reference: &str) -> Result<PathBuf, MediaError
     }
 }
 
-/// One piece of sound on the finished timeline.
-#[derive(Debug, Clone)]
-pub struct AudioPiece {
-    pub file: PathBuf,
-    pub in_ms: u64,
-    pub start_ms: u64,
-    pub duration_ms: u64,
-    /// The volume it is played at: 1 is as recorded, 0 is silent.
-    pub gain: f32,
-    /// How long it takes to reach its volume, and how long it takes to leave.
-    pub fade_in_ms: u64,
-    pub fade_out_ms: u64,
-}
-
 /// Puts the sound of `pieces` under the picture of `video` (copied, not re-encoded) and writes
 /// `output`. Each piece is cut from its file, delayed to its place and mixed with the others.
 pub fn add_audio(
@@ -569,40 +561,10 @@ pub fn add_audio(
     let mut cmd = Command::new(&ffmpeg.path);
     cmd.args(["-hide_banner", "-loglevel", "error", "-y", "-i"])
         .arg(video);
-    let mut filter = String::new();
-    for (n, p) in pieces.iter().enumerate() {
+    for p in pieces {
         cmd.arg("-i").arg(&p.file);
-        filter.push_str(&format!(
-            "[{i}:a]atrim=start={s:.3}:duration={d:.3},asetpts=PTS-STARTPTS",
-            i = n + 1,
-            s = p.in_ms as f64 / 1000.0,
-            d = p.duration_ms as f64 / 1000.0
-        ));
-        if (p.gain - 1.0).abs() > f32::EPSILON {
-            filter.push_str(&format!(",volume={g:.3}", g = p.gain));
-        }
-        let fade_in = p.fade_in_ms.min(p.duration_ms);
-        if fade_in > 0 {
-            filter.push_str(&format!(
-                ",afade=t=in:st=0:d={d:.3}",
-                d = fade_in as f64 / 1000.0
-            ));
-        }
-        let fade_out = p.fade_out_ms.min(p.duration_ms);
-        if fade_out > 0 {
-            filter.push_str(&format!(
-                ",afade=t=out:st={s:.3}:d={d:.3}",
-                s = (p.duration_ms - fade_out) as f64 / 1000.0,
-                d = fade_out as f64 / 1000.0
-            ));
-        }
-        filter.push_str(&format!(",adelay={delay}:all=1[a{n}];", delay = p.start_ms));
     }
-    let labels: String = (0..pieces.len()).map(|n| format!("[a{n}]")).collect();
-    filter.push_str(&format!(
-        "{labels}amix=inputs={}:normalize=0:duration=longest[a]",
-        pieces.len()
-    ));
+    let filter = mix::filter_graph(pieces);
     let out = cmd
         .args(["-filter_complex", &filter, "-map", "0:v", "-map", "[a]"])
         .args(["-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-shortest"])

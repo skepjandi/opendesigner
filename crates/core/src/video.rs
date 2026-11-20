@@ -253,6 +253,12 @@ pub struct Video {
     /// The sound under the picture (none for a silent video).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub audio: Option<AudioTrack>,
+    /// More sound tracks (music, voice, effects) mixed with `audio`; see `crate::audio`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tracks: Vec<crate::audio::SoundTrack>,
+    /// Timed captions burned into the picture; see `crate::captions`.
+    #[serde(default, skip_serializing_if = "crate::captions::Captions::is_empty")]
+    pub captions: crate::captions::Captions,
     /// Numbers of nodes keyframed over the video's time, sorted by node and property.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub animations: Vec<crate::animation::Animation>,
@@ -337,6 +343,8 @@ impl Video {
         if let Some(a) = &self.audio {
             check_audio(a)?;
         }
+        crate::audio::check_tracks(&self.tracks)?;
+        crate::captions::check_captions(&self.captions)?;
         for clip in &self.clips {
             check_source(&ClipSource {
                 frame: clip.frame.clone(),
@@ -495,6 +503,10 @@ pub enum VideoProperty {
     },
     /// The sound under the picture (`null` for a silent video).
     Audio(Option<AudioTrack>),
+    /// The sound tracks besides `audio` (`crate::audio`).
+    Tracks(Vec<crate::audio::SoundTrack>),
+    /// The captions: style and cues (`crate::captions`).
+    Captions(crate::captions::Captions),
     /// Pictures blended per frame for motion blur: 0 (off) or 2 to 16.
     MotionBlur(u32),
 }
@@ -639,6 +651,8 @@ pub(crate) fn apply(
                 clips: Vec::new(),
                 overlays: Vec::new(),
                 audio: None,
+                tracks: Vec::new(),
+                captions: Default::default(),
                 animations: Vec::new(),
                 motion_blur: 0,
             };
@@ -718,6 +732,14 @@ pub(crate) fn apply(
                     }
                     let old = std::mem::replace(&mut video.audio, audio.clone());
                     (VideoProperty::Audio(old), prop.clone())
+                }
+                VideoProperty::Tracks(tracks) => {
+                    let old = std::mem::replace(&mut video.tracks, tracks.clone());
+                    (VideoProperty::Tracks(old), prop.clone())
+                }
+                VideoProperty::Captions(captions) => {
+                    let old = std::mem::replace(&mut video.captions, captions.clone());
+                    (VideoProperty::Captions(old), prop.clone())
                 }
                 VideoProperty::MotionBlur(samples) => {
                     let old = std::mem::replace(&mut video.motion_blur, *samples);

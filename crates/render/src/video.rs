@@ -183,6 +183,9 @@ impl<'a> VideoRenderer<'a> {
                 self.live_signature(&o.frame, time, footage_moves, &mut sig)?;
             }
         }
+        if let Some((cue, word)) = crate::captions::signature(self.video, time) {
+            sig.extend([-2, cue as i64, word.map_or(-1, |w| w as i64)]);
+        }
         Some(sig)
     }
 
@@ -392,6 +395,7 @@ impl<'a> VideoRenderer<'a> {
             let played = moment.footage_time.saturating_sub(o.start_ms);
             self.draw_overlay(&mut canvas, &o.frame, &moment, played, pose)?;
         }
+        crate::captions::draw(&mut canvas, self.video, time)?;
         Ok(canvas)
     }
 

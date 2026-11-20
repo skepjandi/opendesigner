@@ -6,6 +6,8 @@
 pub mod animation;
 pub mod annotations;
 pub mod arrange;
+pub mod audio;
+pub mod captions;
 pub mod device3d;
 pub mod dryrun;
 pub mod error;
@@ -17,6 +19,7 @@ pub mod media;
 pub mod model;
 pub mod ops;
 pub mod paint;
+pub mod pauses;
 pub mod project;
 pub mod variables;
 pub mod video;
@@ -25,6 +28,8 @@ pub mod workspace;
 
 pub use animation::{AnimProp, Animation, Key, Preset, PresetRequest};
 pub use annotations::{Annotation, AnnotationStatus, AnnotationTarget, Annotations};
+pub use audio::{Duck, NewTrack, SoundTrack, TrackPatch, TrackRole};
+pub use captions::{CaptionPosition, CaptionPreset, CaptionStyle, Captions, Cue, NewCue, Word};
 pub use device3d::{Device3d, DeviceModel};
 pub use dryrun::{OpFailure, OpReport, OpsCheck};
 pub use error::{OpError, ProjectError};

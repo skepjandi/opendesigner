@@ -5,6 +5,7 @@ pub mod acp;
 pub mod assets;
 pub mod blocks;
 pub mod batch;
+pub mod audio_tools;
 pub mod connect;
 pub mod device;
 pub mod direction;

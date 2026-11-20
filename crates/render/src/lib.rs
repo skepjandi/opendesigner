@@ -2,6 +2,7 @@
 //! and 3D devices to pixels, and PNG export. Anything it cannot draw (a missing or unreadable
 //! image) is reported as a warning so an export never silently drops content.
 
+pub mod captions;
 mod device;
 mod images;
 mod text;

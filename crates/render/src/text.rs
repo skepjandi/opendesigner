@@ -229,3 +229,61 @@ fn blend(data: &mut [u8], i: usize, c: CtColor, a: f32) {
     }
     px[3] = (255.0 * a + f32::from(px[3]) * keep).round().min(255.0) as u8;
 }
+
+/// How much room one run of text takes at `size` pixels: its width and its line height.
+pub(crate) fn measure_run(text: &str, family: &str, weight: u16, size: f32) -> (f32, f32) {
+    let style = run_style(text, family, weight, size);
+    with_layout(&style, |buffer, system, _| {
+        buffer.shape_until_scroll(system, false);
+        buffer
+            .layout_runs()
+            .fold((0.0_f32, style.line), |(w, h), run| {
+                (w.max(run.line_w), h.max(run.line_height))
+            })
+    })
+}
+
+/// Draws one run of text with its top-left corner at `(x, y)`.
+pub(crate) fn draw_run(
+    pixmap: &mut Pixmap,
+    text: &str,
+    (family, weight, size): (&str, u16, f32),
+    (x, y): (f32, f32),
+    color: Rgba,
+) {
+    let style = run_style(text, family, weight, size);
+    let (origin_x, origin_y) = (x.round() as i32, y.round() as i32);
+    let (width, height) = (pixmap.width() as i32, pixmap.height() as i32);
+    let alpha = f32::from(color.a) / 255.0;
+    let data = pixmap.data_mut();
+    with_layout(&style, |buffer, system, cache| {
+        buffer.draw(
+            system,
+            cache,
+            CtColor::rgb(color.r, color.g, color.b),
+            |gx, gy, gw, gh, c| {
+                let coverage = f32::from(c.a()) / 255.0 * alpha;
+                for dy in 0..gh as i32 {
+                    for dx in 0..gw as i32 {
+                        let (px, py) = (origin_x + gx + dx, origin_y + gy + dy);
+                        if px >= 0 && py >= 0 && px < width && py < height {
+                            blend(data, ((py * width + px) * 4) as usize, c, coverage);
+                        }
+                    }
+                }
+            },
+        );
+    });
+}
+
+fn run_style<'a>(text: &'a str, family: &'a str, weight: u16, size: f32) -> Style<'a> {
+    Style {
+        text,
+        size,
+        line: size * DEFAULT_LINE_HEIGHT as f32,
+        family,
+        weight,
+        align: Align::Left,
+        wrap_width: None,
+    }
+}

@@ -3,7 +3,9 @@
 //! `ffmpeg` only compresses them (see `od_media`).
 
 use od_core::{Document, NodeId, Workspace};
-use od_media::{AudioPiece, EncodeSettings, Ffmpeg, FootageDecoder, VideoWriter};
+use od_media::{
+    AudioPiece, DuckSettings, EncodeSettings, Ffmpeg, FootageDecoder, PieceRole, VideoWriter,
+};
 use od_render::video::{FootageSource, VideoRenderer};
 use od_store::video::{VideoFacts, VideoPreset, VideoViolation};
 
@@ -346,18 +348,21 @@ pub fn export_video(
         if info.has_audio {
             audio.push(AudioPiece {
                 file: path,
+                role: PieceRole::Footage,
                 in_ms: f.in_ms,
                 start_ms: placed.start_ms,
                 duration_ms: u64::from(clip.duration_ms),
                 gain: 1.0,
                 fade_in_ms: 0,
                 fade_out_ms: 0,
+                pan: 0.0,
+                duck: None,
             });
         }
     }
-    // The sound track of the video: played under the picture, cut at the end of the video.
+    // The sound tracks of the video: played under the picture, cut at the end of the video.
     let mut warnings: Vec<String> = Vec::new();
-    if let Some(track) = &v.audio {
+    for track in v.sound_tracks() {
         let project = project
             .as_deref()
             .ok_or_else(|| ToolError("the project has no folder, so no sound track".into()))?;
@@ -367,22 +372,15 @@ pub fn export_video(
             .probe_duration(&path)
             .map_err(|e| ToolError(e.to_string()))?;
         let start = u64::from(track.start_ms);
-        let left = v.duration_ms().saturating_sub(start);
-        if left == 0 {
+        let room = v.duration_ms().saturating_sub(start);
+        let played = track.played_ms(length, room);
+        if played == 0 {
             warnings.push(format!(
-                "the sound track {} starts after the video ends, so it is not in the file",
-                track.file
+                "the sound track {} ({}) is not in the file: it starts after the video ends or its trim is empty",
+                track.id, track.file
             ));
         } else {
-            audio.push(AudioPiece {
-                file: path,
-                in_ms: 0,
-                start_ms: start,
-                duration_ms: length.min(left),
-                gain: track.gain,
-                fade_in_ms: u64::from(track.fade_in_ms),
-                fade_out_ms: u64::from(track.fade_out_ms),
-            });
+            audio.push(piece_of(&track, path, start, played));
         }
     }
     std::fs::create_dir_all(&dir).map_err(|e| ToolError(format!("{}: {e}", dir.display())))?;
@@ -484,6 +482,34 @@ pub fn export_video(
             .chain(renderer.warnings().iter().map(ToString::to_string))
             .collect(),
     })
+}
+
+fn piece_of(
+    track: &od_core::SoundTrack,
+    file: std::path::PathBuf,
+    start_ms: u64,
+    duration_ms: u64,
+) -> AudioPiece {
+    AudioPiece {
+        file,
+        role: match track.role {
+            od_core::TrackRole::Music => PieceRole::Music,
+            od_core::TrackRole::Voice => PieceRole::Voice,
+            od_core::TrackRole::Sfx => PieceRole::Sfx,
+        },
+        in_ms: u64::from(track.in_ms),
+        start_ms,
+        duration_ms,
+        gain: track.gain,
+        fade_in_ms: u64::from(track.fade_in_ms),
+        fade_out_ms: u64::from(track.fade_out_ms),
+        pan: track.pan,
+        duck: track.duck.map(|d| DuckSettings {
+            depth: d.depth,
+            attack_ms: d.attack_ms,
+            release_ms: d.release_ms,
+        }),
+    }
 }
 
 fn violations_message(preset: &VideoPreset, broken: &[VideoViolation]) -> String {

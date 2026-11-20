@@ -7,6 +7,7 @@ pub mod editor;
 pub mod layout;
 pub mod servers;
 pub mod showcase;
+pub mod sound_rows;
 pub mod state;
 
 use cxx_qt_lib::{QGuiApplication, QQmlApplicationEngine, QQuickStyle, QString, QUrl};

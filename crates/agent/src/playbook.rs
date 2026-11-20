@@ -192,7 +192,7 @@ mod tests {
     fn named_calls(text: &str) -> Vec<String> {
         const VERBS: &[&str] = &[
             "get", "list", "set", "render", "review", "export", "find", "make", "search", "import",
-            "install", "unload", "create", "add", "remove", "resolve", "write", "read",
+            "install", "unload", "create", "add", "remove", "resolve", "write", "read", "detect",
         ];
         text.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
             .filter(|w| {

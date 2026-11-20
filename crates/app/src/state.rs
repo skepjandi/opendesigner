@@ -2083,7 +2083,7 @@ impl EditorState {
                     .unwrap_or_default(),
             ),
             memory: memory_of(&ws).to_string(),
-            videos: videos_json(doc),
+            videos: videos_json(doc, ws.dir()),
             jobs: self.jobs_json(),
             workspaces: workspaces_of(&ws),
             brief: brief_of(&ws),
@@ -2183,7 +2183,7 @@ fn device_model_label(model: DeviceModel) -> &'static str {
 }
 
 /// The videos the panel shows: each animation also carries its node's name, for its lane.
-fn videos_json(doc: &od_core::Document) -> String {
+fn videos_json(doc: &od_core::Document, dir: Option<&Path>) -> String {
     let mut videos = serde_json::to_value(view::videos(doc)).unwrap_or(Value::Null);
     let rows = videos.as_array_mut().into_iter().flatten();
     for animation in rows
@@ -2200,6 +2200,7 @@ fn videos_json(doc: &od_core::Document) -> String {
             m.insert("node_name".into(), json!(name.unwrap_or_default()));
         }
     }
+    crate::sound_rows::annotate(&mut videos, dir);
     videos.to_string()
 }
 
@@ -3940,6 +3941,86 @@ mod tests {
         let videos: Value = serde_json::from_str(&s.snapshot().videos).unwrap();
         assert_eq!(videos[0]["audio"]["file"], "media/song.mp3");
     }
+    #[test]
+    fn the_snapshot_publishes_sound_tracks_sound_rows_and_captions_for_the_timeline() {
+        let (s, _t) = state();
+        let video = s
+            .with_ws(|ws| {
+                let created = ws
+                    .session
+                    .apply(
+                        Actor::User,
+                        None,
+                        &[Operation::CreateVideo {
+                            name: "Teaser".into(),
+                            fps: 30,
+                            width: 400,
+                            height: 300,
+                        }],
+                    )
+                    .map_err(|e| e.to_string())?;
+                Ok(created.created[0].clone())
+            })
+            .unwrap();
+        let frame = s.snapshot().active_frame;
+        s.with_ws(|ws| {
+            let v = ws.session.document().video(&video).cloned();
+            assert!(v.is_some());
+            ws.session
+                .apply(
+                    Actor::User,
+                    None,
+                    &[Operation::AddClip {
+                        video: video.clone(),
+                        frame: NodeId::parse(&frame).ok(),
+                        footage: None,
+                        duration_ms: 4000,
+                        index: None,
+                        transition: None,
+                        motion: None,
+                    }],
+                )
+                .map_err(|e| e.to_string())?;
+            let doc = ws.session.document().video(&video).cloned().unwrap();
+            let (tracks, _) = doc
+                .tracks_with_added(
+                    serde_json::from_value(json!({"role": "voice", "file": "media/vo.wav"}))
+                        .unwrap(),
+                )
+                .map_err(|e| e.to_string())?;
+            let cues =
+                od_core::captions::parse_subtitles("1\n00:00:00,500 --> 00:00:01,500\nHello\n")
+                    .map_err(|e| e.to_string())?;
+            let captions = doc.captions_with_cues(cues).map_err(|e| e.to_string())?;
+            ws.session
+                .apply(
+                    Actor::User,
+                    None,
+                    &[
+                        Operation::SetVideo {
+                            id: video.clone(),
+                            prop: od_core::VideoProperty::Tracks(tracks),
+                        },
+                        Operation::SetVideo {
+                            id: video.clone(),
+                            prop: od_core::VideoProperty::Captions(captions),
+                        },
+                    ],
+                )
+                .map_err(|e| e.to_string())?;
+            Ok(())
+        })
+        .unwrap();
+        let videos: Value = serde_json::from_str(&s.snapshot().videos).unwrap();
+        let v = &videos[0];
+        assert_eq!(v["tracks"][0]["role"], "voice");
+        assert_eq!(v["sound_rows"][0]["id"], "a1");
+        assert_eq!(v["sound_rows"][0]["legacy"], false);
+        assert_eq!(v["captions"]["cues"][0]["text"], "Hello");
+        assert_eq!(v["captions"]["cues"][0]["end_ms"], 1500);
+        assert!(v["captions"]["style"]["font_family"].is_string());
+    }
+
     fn offer_two(s: &EditorState) -> (Vec<String>, Value) {
         let frames: Vec<String> = serde_json::from_str::<Vec<Value>>(&s.snapshot().frames)
             .unwrap()
