@@ -10,6 +10,7 @@ pub mod device3d;
 pub mod error;
 pub mod geometry;
 pub mod history;
+mod index;
 pub mod limits;
 pub mod media;
 pub mod model;

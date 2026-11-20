@@ -243,6 +243,7 @@ pub fn load(dir: &Path) -> Result<Session, ProjectError> {
         locales,
         pages,
         videos,
+        index: crate::index::NodeIndex::default(),
     };
 
     let history = dir.join(HISTORY_DIR);

@@ -259,6 +259,7 @@ pub struct Document {
     pub pages: Vec<Page>,
     /// Timelines of clips that show frames of the pages.
     pub videos: Vec<crate::video::Video>,
+    pub(crate) index: crate::index::NodeIndex,
 }
 
 /// Where a node sits: the page index and the child indices from the page root.
@@ -278,6 +279,7 @@ impl Document {
             locales: BTreeMap::new(),
             pages: Vec::new(),
             videos: Vec::new(),
+            index: crate::index::NodeIndex::default(),
         }
     }
 
@@ -302,6 +304,9 @@ impl Document {
             name: name.to_string(),
             root: Node::blank(root_id, NodeKind::Group, "Root".to_string()),
         });
+        if let Some(page) = self.pages.last() {
+            self.index.note_page(self.pages.len() - 1, &page.root);
+        }
         Ok(id)
     }
 
@@ -410,13 +415,7 @@ impl Document {
     }
 
     pub fn locate(&self, id: &NodeId) -> Option<Location> {
-        for (page, p) in self.pages.iter().enumerate() {
-            let mut path = Vec::new();
-            if find_path(&p.root, id, &mut path) {
-                return Some(Location { page, path });
-            }
-        }
-        None
+        self.index.locate(&self.pages, id)
     }
 
     pub fn node_at(&self, loc: &Location) -> Option<&Node> {
@@ -547,20 +546,6 @@ impl Document {
         }
         Ok(())
     }
-}
-
-fn find_path(node: &Node, id: &NodeId, path: &mut Vec<usize>) -> bool {
-    if &node.id == id {
-        return true;
-    }
-    for (i, child) in node.children.iter().enumerate() {
-        path.push(i);
-        if find_path(child, id, path) {
-            return true;
-        }
-        path.pop();
-    }
-    false
 }
 
 /// Field-level checks shared by loading and by `Restore`.

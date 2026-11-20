@@ -692,6 +692,9 @@ fn insert(
     let index = index.unwrap_or(target.children.len());
     check_insert_index(parent, index, target.children.len())?;
     target.children.insert(index, node);
+    if let Some(inserted) = doc.node_at(&loc).and_then(|p| p.children.get(index)) {
+        doc.index.note_inserted(parent, index, inserted);
+    }
     Ok(index)
 }
 
@@ -871,6 +874,7 @@ pub fn apply(
                 .ok_or_else(|| OpError::Internal("parent vanished".to_string()))?;
             let parent_id = parent_node.id.clone();
             let removed = parent_node.children.remove(index);
+            doc.index.note_removed(&removed);
             let mut touched = Vec::new();
             removed.ids(&mut touched);
             Ok(AppliedOp {
