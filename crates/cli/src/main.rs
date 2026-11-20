@@ -10,6 +10,7 @@ use od_core::{
     Actor, AnnotationTarget, Node, NodeId, OpError, Operation, ProjectError, Session, Workspace,
     project,
 };
+mod blocks;
 mod serve;
 mod skillcmd;
 
@@ -256,6 +257,11 @@ enum Command {
         /// opencode, cursor or other.
         #[arg(long, default_value = "claude-code")]
         agent: String,
+    },
+    /// The block catalog: ready-made titles, overlays, backgrounds, charts and motion.
+    Blocks {
+        #[command(subcommand)]
+        action: blocks::BlocksAction,
     },
     /// Install, inspect or remove the Agent Skill that teaches coding agents to use OpenDesigner.
     Skill {
@@ -794,6 +800,7 @@ fn run(cli: Cli) -> Result<(), CliError> {
             rotate_token,
             agent,
         } => serve::run(&dir, port, show_token, rotate_token, &agent)?,
+        Command::Blocks { action } => blocks::run(action)?,
         Command::Skill { action } => skillcmd::run(action)?,
     }
     Ok(())

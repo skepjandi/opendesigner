@@ -452,3 +452,88 @@ fn a_3d_device_is_printed_and_animated_from_the_command_line() {
     assert!(!out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains("unknown move"));
 }
+
+#[test]
+fn the_block_catalog_lists_describes_and_adds_a_block_to_a_project() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("blocks.od");
+    let dir_s = s(&dir);
+    ok(&["new", dir_s, "--name", "Blocks"]);
+
+    let listed = ok(&["blocks", "list"]);
+    assert!(listed.contains("title_card"), "{listed}");
+    assert!(listed.contains("lower_third"), "{listed}");
+    let charts = ok(&["blocks", "list", "--query", "chart"]);
+    assert!(charts.contains("bar_chart"), "{charts}");
+    assert!(!charts.contains("title_card"), "{charts}");
+    assert!(
+        !od(&["blocks", "list", "--category", "nope"])
+            .status
+            .success()
+    );
+
+    let one: serde_json::Value =
+        serde_json::from_str(&ok(&["blocks", "show", "title_card"])).unwrap();
+    assert!(
+        one["params"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|p| p["name"] == "title")
+    );
+
+    let page = fs::read_to_string(dir.join("pages/p_1.json")).unwrap();
+    let root: serde_json::Value = serde_json::from_str(&page).unwrap();
+    let root_id = root["root"]["id"].as_str().unwrap().to_string();
+    let ops = tmp.path().join("ops.json");
+    fs::write(
+        &ops,
+        serde_json::json!([{"op": "create", "parent": root_id, "node": {
+            "kind": "frame", "name": "Slide", "width": 1290, "height": 2796, "fill": "#0d0f14"}}])
+        .to_string(),
+    )
+    .unwrap();
+    let receipt: serde_json::Value = serde_json::from_str(&ok(&["apply", dir_s, s(&ops)])).unwrap();
+    let frame = receipt["created"][0].as_str().unwrap().to_string();
+
+    let params = tmp.path().join("params.json");
+    fs::write(
+        &params,
+        serde_json::json!({"name": "Sam Lee", "title": "CTO"}).to_string(),
+    )
+    .unwrap();
+    let added: serde_json::Value = serde_json::from_str(&ok(&[
+        "blocks",
+        "add",
+        dir_s,
+        "lower_third",
+        "--frame",
+        &frame,
+        "--params",
+        s(&params),
+    ]))
+    .unwrap();
+    assert_eq!(added["block"], "lower_third");
+    assert!(added["root"].as_str().unwrap().starts_with("n_"));
+    let page = fs::read_to_string(dir.join("pages/p_1.json")).unwrap();
+    assert!(
+        page.contains("block:lower_third#1"),
+        "the block is in the page"
+    );
+
+    let again: serde_json::Value = serde_json::from_str(&ok(&[
+        "blocks",
+        "add",
+        dir_s,
+        "badge_pill",
+        "--frame",
+        &frame,
+    ]))
+    .unwrap();
+    assert_eq!(again["name"], "block:badge_pill#1");
+    assert!(
+        !od(&["blocks", "add", dir_s, "no_such_block", "--frame", &frame])
+            .status
+            .success()
+    );
+}

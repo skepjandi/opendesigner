@@ -127,6 +127,7 @@ fn tool_full(
 pub fn definitions() -> Vec<Value> {
     let mut all = core_definitions();
     all.extend(crate::motion::definitions());
+    all.extend(crate::blocks::definitions());
     all.extend(crate::assets::tools::definitions());
     all.extend(crate::assets::logo::definitions());
     all.extend(showcase_definitions());
@@ -156,9 +157,10 @@ fn core_definitions() -> Vec<Value> {
              (named looks with rules), video (start with the inventory of media, footage, sounds and \
              assets), motion (timings, easing, recipes), 3d (devices in 3D, captures from a \
              simulator, moves), formats (sizes and \
-             safe zones), logo (identity design). Call it with no topic for the list; read the ones that apply before you \
-             build, not after.",
-            json!({"topic": {"type": "string", "enum": ["design", "style", "video", "motion", "3d", "formats", "logo"]}}),
+             safe zones), logo (identity design), blocks (the catalog of ready-made titles, overlays, backgrounds, \
+             charts and motion, and when to use one). Call it with no topic for the list; read the ones that apply \
+             before you build, not after.",
+            json!({"topic": {"type": "string", "enum": ["design", "style", "video", "motion", "3d", "formats", "logo", "blocks"]}}),
             &[],
             true,
         ),
@@ -672,6 +674,7 @@ pub fn call(ctx: &mut CallCtx, name: &str, args: Value) -> Result<Output, ToolEr
     match name {
         "get_guidance" => get_guidance(ctx),
         n if crate::motion::NAMES.contains(&n) => crate::motion::call(ctx, n, args),
+        n if crate::blocks::NAMES.contains(&n) => crate::blocks::call(ctx, n, args),
         n if crate::assets::logo::NAMES.contains(&n) => {
             let dir = ctx.ws.dir().map(std::path::Path::to_path_buf);
             crate::assets::logo::call(dir.as_deref(), n, args)

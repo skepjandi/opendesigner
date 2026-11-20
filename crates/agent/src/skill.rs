@@ -137,6 +137,10 @@ pub fn generate() -> Vec<SkillFile> {
             path: "references/formats.md",
             contents: playbook::topic("formats").unwrap_or_default().to_string(),
         },
+        SkillFile {
+            path: "references/blocks-playbook.md",
+            contents: playbook::topic("blocks").unwrap_or_default().to_string(),
+        },
     ]
 }
 

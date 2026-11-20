@@ -11,7 +11,8 @@ generated is not done.\n\
 the product's own repository, screens, colors and copy, and use the user's media (list_media, \
 find_files, import_file). Never invent facts, numbers, reviews or features.\n\
 2. Read the craft: call get_playbook with `design` for images, `video` and `motion` for video, \
-`formats` to choose sizes, `style` to pick a named look, `logo` for marks. Say which look you chose and its rules.\n\
+`formats` to choose sizes, `style` to pick a named look, `logo` for marks, `blocks` for the catalog of ready-made \
+titles, overlays, backgrounds and charts. Say which look you chose and its rules.\n\
 3. Build a system first (tokens, one or two type families and a scale, a grid, named layers), then \
 one hero frame, look at it, fix it, and only then the rest.\n\
 4. Check, do not hope: render_preview (also at 160 to 320 px), review_frame on every frame and fix \
@@ -25,8 +26,9 @@ an import returns whenever it says attribution_required. A video starts with an 
 list_media, list_footage, list_sounds, search_assets and list_asset_sources; every asset reaches the \
 timeline as an image node (its `image` is the media/ file) in a frame that is a clip or an overlay, \
 so decorate videos with icons, generated backgrounds and pack art instead of bare colors.\n\
-6. Use every tool that helps (media, device frames, tokens, languages, presets, workspaces, \
-exports). Sizes the user chose are theirs: change them only through set_format, which asks. If they \
+6. Use every tool that helps (media, device frames, tokens, languages, presets, blocks (a catalog of \
+ready-made titles, overlays, backgrounds and charts), workspaces, exports). Sizes the user chose are \
+theirs: change them only through set_format, which asks. If they \
 chose nothing, pick from list_formats and record it with set_format.\n\
 7. Memory: get_guidance lists the notes earlier runs left (list_memory, read_memory): read the \
 relevant ones before you build. Before you finish, write_memory what the next run should know \
@@ -75,6 +77,11 @@ pub const TOPICS: &[(&str, &str, &str)] = &[
         "formats",
         "sizes, aspect ratios and safe zones per platform",
         include_str!("../skill/formats.md"),
+    ),
+    (
+        "blocks",
+        "the block catalog: ready-made titles, overlays, backgrounds, charts and motion, and when to use one",
+        include_str!("../skill/blocks-playbook.md"),
     ),
 ];
 
