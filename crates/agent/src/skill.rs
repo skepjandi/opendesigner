@@ -189,7 +189,9 @@ project files directly: that bypasses validation, checkpoints and the user's vie
    Prefer `set` and `move` on existing nodes over deleting and recreating them: ids stay stable and
    the user's outline and notes stay attached. Use design tokens (`{brand.gold}`) over hard-coded
    colors when `list_tokens` has a fitting one. Never invent ids: they are minted for you, and the
-   result lists what was created.
+   result lists what was created. Unsure a batch is valid (a delete, a large reparent)? Send it with
+   `dry_run: true` first: you get what would change, or a stable error code and a hint, and nothing
+   is applied. An applied result says `stage: applied` and names the checkpoint and the changed ids.
 4. **Check your work.** `render_preview` again. For store assets, run `export` with the right
    `preset`. A listing is a set: use `export_set` for several frames, or lay the slides edge to
    edge on one wide frame (so a background or a device can cross the seams) and use
@@ -198,7 +200,8 @@ project files directly: that bypasses validation, checkpoints and the user's vie
    you exactly which rule broke; fix that, do not argue with it. For a phone or tablet around a
    screenshot, call `device_template`, put its node in `apply_ops`, and ask the user to drop the
    capture on the `Screen` (or use an image from `list_media` as the template's `image`).
-5. **Close the loop.** Call `resolve_annotation` for each note you acted on, saying what you
+5. **Close the loop.** Call `validate_document` and fix every error and warning it reports (stable
+   codes like `OD013`), or say why you left one. Call `resolve_annotation` for each note you acted on, saying what you
    changed in the user's terms (\"raised the headline to 96 px\"). End your turn by saying what you
    changed and what you left alone.
 
@@ -403,6 +406,21 @@ the user's token, and the answer says so if there is none), `import_sound` to br
 shows them all. Then set the track. A Freesound sound keeps its
 author's license: show the attribution the tool gives you (title, author, license, link) wherever
 the sound is used, and prefer CC0.
+
+Template variables: slots you can fill many times (one card per customer, one video per
+language). Declare one with its kind and what it drives, then set its value:
+
+```json
+{"ops": [{"op": "declare_variable", "variable": {
+            "id": "title", "kind": "string", "label": "Headline", "default": "Welcome",
+            "portrays": "subject_name", "binds": [{"node": "n_7", "prop": "text"}]}}]}
+{"ops": [{"op": "set_variable_value", "id": "title", "value": "Acme"}]}
+```
+
+Setting a value rewrites every bound node property through the same validated path as `set`, so it
+is attributed, checkpointed and undoable like any other edit. `list_variables` shows the slots and
+what they portray; a slot that portrays the subject's identity must come from the user, never from
+you. `batch_export` renders the design once per row of values without changing the project.
 "##;
 
 fn store_specs_md() -> String {

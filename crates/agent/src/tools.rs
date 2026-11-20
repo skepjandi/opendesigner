@@ -127,6 +127,7 @@ fn tool_full(
 pub fn definitions() -> Vec<Value> {
     let mut all = core_definitions();
     all.extend(crate::motion::definitions());
+    all.extend(crate::doctools::definitions());
     all.extend(crate::assets::tools::definitions());
     all.extend(crate::assets::logo::definitions());
     all.extend(showcase_definitions());
@@ -306,12 +307,22 @@ fn core_definitions() -> Vec<Value> {
              prop one of x, y, width, height, opacity, corner_radius, rotate_x, rotate_y, rotate_z, zoom, fov, light_angle, shadow, glare, \
              screen_scroll; keys:[] removes it; animate_preset writes these for you). Eases: linear, ease_in, ease_out, ease_in_out, \
              back (overshoots) or spring (overshoots and settles). Colors are '#rrggbb', '#rrggbbaa' or \
-             '{token.name}'. Ids are minted for you; the result lists the created ids. A checkpoint is taken \
-             before your first change in a turn so the user can restore it.",
+             '{token.name}'. Template variables (see list_variables): {op:'declare_variable', variable:{id, kind, label, description?, \
+             portrays?, default, enum_values?, binds?:[{node, prop}]}} with kind one of string, number, color, bool, enum, image, font \
+             (enum_values only for enum) and portrays one of subject_name, subject_domain, subject_tagline, subject_logo, host_identity, \
+             {op:'set_variable', id, prop:{name, value}} with name one of label, description, portrays, default, enum_values, binds, \
+             {op:'remove_variable', id}, {op:'set_variable_value', id, value} (writes every bound node property through the same \
+             validated path as set, so it is attributed and undoable). Ids are minted for you; the result lists the created ids. \
+             A checkpoint is taken before your first change in a turn so the user can restore it. Set dry_run true to check the \
+             operations without applying them: you get ok, what each operation would do, the node ids that would change, and for a \
+             rejection a stable code (E_NODE_NOT_FOUND, E_OUT_OF_BOUNDS, E_LIMIT, ...) with a hint; nothing is changed, \
+             checkpointed or saved. An applied result has stage 'applied', the checkpoint taken before the turn, the transaction, \
+             the changed ids and whether the project was saved.",
             json!({
                 "ops": {"type": "array", "minItems": 1, "maxItems": 1000, "items": {"type": "object"}},
                 "turn": id("Groups related calls into one turn; omit and each call is its own turn."),
-                "summary": id("One line, in the user's terms, naming what this turn does.")
+                "summary": id("One line, in the user's terms, naming what this turn does."),
+                "dry_run": {"type": "boolean", "description": "Check the operations on a scratch copy and report what would happen; changes nothing."},
             }),
             &["ops"],
             false,
@@ -672,6 +683,7 @@ pub fn call(ctx: &mut CallCtx, name: &str, args: Value) -> Result<Output, ToolEr
     match name {
         "get_guidance" => get_guidance(ctx),
         n if crate::motion::NAMES.contains(&n) => crate::motion::call(ctx, n, args),
+        n if crate::doctools::NAMES.contains(&n) => crate::doctools::call(ctx, n, args),
         n if crate::assets::logo::NAMES.contains(&n) => {
             let dir = ctx.ws.dir().map(std::path::Path::to_path_buf);
             crate::assets::logo::call(dir.as_deref(), n, args)
@@ -694,7 +706,7 @@ pub fn call(ctx: &mut CallCtx, name: &str, args: Value) -> Result<Output, ToolEr
         "get_tree" => get_tree(ctx, parse(args)?),
         "find_nodes" => find_nodes(ctx, parse(args)?),
         "list_tokens" => Ok(Output::json(&to_json(&ctx.ws.session.document().tokens)?)),
-        "apply_ops" => apply_ops(ctx, parse(args)?),
+        "apply_ops" => crate::doctools::apply_ops_call(ctx, args),
         "list_checkpoints" => Ok(Output::json(&to_json(ctx.ws.session.checkpoints())?)),
         "diff_checkpoint" => diff_checkpoint(ctx, parse(args)?),
         "restore_checkpoint" => restore_checkpoint(ctx, parse(args)?),
@@ -1228,7 +1240,7 @@ fn set_format(ctx: &mut CallCtx, a: SetFormatArgs) -> Result<Output, ToolError> 
     }))
 }
 
-fn check_brief(ctx: &CallCtx, ops: &[Operation]) -> Result<(), ToolError> {
+pub(crate) fn check_brief(ctx: &CallCtx, ops: &[Operation]) -> Result<(), ToolError> {
     let brief = brief_of(ctx);
     if !brief.chosen_by_user {
         return Ok(());
@@ -1276,9 +1288,12 @@ pub(crate) fn apply_ops(ctx: &mut CallCtx, a: ApplyArgs) -> Result<Output, ToolE
     let receipt = ctx
         .ws
         .session
-        .apply(ctx.actor.clone(), Some(turn.clone()), &a.ops)?;
+        .apply(ctx.actor.clone(), Some(turn.clone()), &a.ops)
+        .map_err(|e| ToolError(crate::doctools::failure_text(&e)))?;
     persist(ctx.ws)?;
     Ok(Output::json(&json!({
+        "stage": "applied",
+        "saved": ctx.ws.dir().is_some(),
         "transaction": receipt.id,
         "turn": turn,
         "checkpoint_before": checkpoint,

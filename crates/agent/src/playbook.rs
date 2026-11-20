@@ -15,7 +15,8 @@ find_files, import_file). Never invent facts, numbers, reviews or features.\n\
 3. Build a system first (tokens, one or two type families and a scale, a grid, named layers), then \
 one hero frame, look at it, fix it, and only then the rest.\n\
 4. Check, do not hope: render_preview (also at 160 to 320 px), review_frame on every frame and fix \
-what it finds, render_video_frame at each beat and mid-transition, read the story in list_videos. \
+what it finds, validate_document for the whole design (stable codes, fix every error and warning), \
+render_video_frame at each beat and mid-transition, read the story in list_videos. \
 Iterate at least once after you first look. A video also gets sound unless the user asked for \
 silence: make_sound for effects, search_sounds or the user's own file for a music bed (gain 0.15 to \
 0.3 under a voice, fades 300 to 800 ms), then set_video audio.\n\
@@ -270,6 +271,9 @@ mod tests {
             "create_workspace",
             "open_workspace",
             "set_localized_text",
+            "set_variable",
+            "set_variable_value",
+            "remove_variable",
         ];
         let known =
             |w: &str| tools.iter().any(|t| t == w) || ops.contains(&w) || w == "device_template";

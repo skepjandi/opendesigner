@@ -3,9 +3,11 @@
 
 pub mod acp;
 pub mod assets;
+pub mod batch;
 pub mod connect;
 pub mod device;
 pub mod direction;
+pub mod doctools;
 pub mod error;
 pub mod export;
 pub mod formats;
