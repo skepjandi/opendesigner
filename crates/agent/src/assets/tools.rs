@@ -282,7 +282,7 @@ fn search(root: &Path, a: SearchArgs) -> Result<Output, ToolError> {
         }
         Some("sound") if hits.is_empty() => {
             v["note"] = json!(
-                "no sound pack is installed: list_asset_packs shows kenney-interface-sounds, kenney-impact-sounds and kenney-ui-audio; install_asset_pack asks the user"
+                "no sound pack is installed: list_asset_packs shows kenney-interface-sounds, kenney-impact-sounds, kenney-ui-audio, kenney-sci-fi-sounds, kenney-digital-audio, kenney-rpg-audio and kenney-music-jingles; install_asset_pack asks the user"
             )
         }
         _ if hits.is_empty() => {
