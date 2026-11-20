@@ -390,7 +390,7 @@ Arguments:
 - `kind` (string, required) Which sound.
 - `name` (string) A plain file name without the .wav ending; default is the kind. An existing file is never overwritten.
 - `pitch_hz` (number) The base pitch of chime, drone, tick, pop, riser, hit and stinger.
-- `seed` (integer) Another seed gives another variation (noise, and the notes of a stinger). Default 1.
+- `seed` (integer) Another seed gives another variation (noise, the notes of a stinger, and the pitch or tempo when you give none). Default: a new random seed each call, returned as `seed` and kept in the sidecar. Pass the same seed to make the same sound again.
 - `stereo` (boolean) Two channels (default one).
 
 ## `list_video_presets`

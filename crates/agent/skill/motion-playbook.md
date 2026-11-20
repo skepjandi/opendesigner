@@ -108,6 +108,7 @@ silence (an App Store preview autoplays muted, but still gets a track for when s
   word. Tracks mix: put a hit or whoosh on its own `sfx` track at the cut's time (`add_sound_track`
   with `start_ms`), or let one longer sound (`beat`, `drone`) carry the video.
 - **Silence is a tool.** A short gap before the reveal makes the hit land. Do not fill every moment.
+- **Vary the sound.** Never reuse one video's sounds for the next: leave `seed` out (each call is a new variation) or pick pitch and tempo for this video's mood, and check `list_sounds` so no two videos share a bed, hit or chime. Sources beyond the synth: `search_assets` kind `sound` (Kenney sound packs, once the user has installed one) and `search_sounds` (needs the Freesound token).
 - **Where sound comes from.** `make_sound` (kind, duration_ms, seed, pitch_hz): synthesized in the
   project, no licence. `search_sounds` then `import_sound` for music and real recordings (needs
   the user's Freesound token; show the attribution). `import_file` with kind audio for the user's

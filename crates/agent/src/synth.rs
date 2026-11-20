@@ -118,7 +118,8 @@ pub struct Spec {
     pub kind: Kind,
     /// How long the sound is. A `beat` takes its length from `bpm` and `bars` instead.
     pub duration_ms: u32,
-    /// Changes the noise and the choice of notes; the same seed gives the same sound.
+    /// Changes the noise, the choice of notes and, when no pitch or tempo is given, the pitch
+    /// and the tempo; the same seed gives the same sound.
     pub seed: u64,
     /// The base pitch of the tonal kinds (chime, drone, tick, riser, hit, stinger).
     pub pitch_hz: Option<f32>,
@@ -210,9 +211,46 @@ fn hz_of_semitones(base: f32, semitones: f32) -> f32 {
     base * (semitones / 12.0).exp2()
 }
 
+/// Semitone steps of a major pentatonic, so every pitch a seed picks sounds good with the others.
+const SCALE_STEPS: [f32; 5] = [0.0, 2.0, 4.0, 7.0, 9.0];
+/// Tempos a seed picks for a `beat`, in beats per minute; the first is the default of seed 1.
+const TEMPOS: [f32; 6] = [120.0, 104.0, 112.0, 96.0, 124.0, 108.0];
+
+/// What a seed changes when the caller named no pitch or tempo: the pitch moves along the scale
+/// (and an octave, now and then) and the beat takes another tempo. Seed 1 keeps the defaults.
+fn vary_by_seed(spec: &mut Spec) {
+    let n = spec.seed.wrapping_sub(1);
+    if spec.pitch_hz.is_none() {
+        let step = SCALE_STEPS[(n % 5) as usize] + 12.0 * ((n / 5) % 2) as f32;
+        let base = match spec.kind {
+            Kind::Pop => 700.0,
+            Kind::Riser => 220.0,
+            Kind::Hit => 48.0,
+            Kind::Chime => 880.0,
+            Kind::Drone => 110.0,
+            Kind::Tick => 1_500.0,
+            Kind::Stinger => 523.25,
+            _ => 0.0,
+        };
+        if base > 0.0 {
+            // a low thump stays low: its steps go down an octave instead of up
+            let step = if spec.kind == Kind::Hit {
+                step % 12.0
+            } else {
+                step
+            };
+            spec.pitch_hz = Some(hz_of_semitones(base, step));
+        }
+    }
+    if spec.kind == Kind::Beat && spec.bpm.is_none() {
+        spec.bpm = Some(TEMPOS[(n % TEMPOS.len() as u64) as usize]);
+    }
+}
+
 /// Makes the sound. Errors say what to change.
 pub fn render(spec: &Spec) -> Result<Rendered, String> {
     let mut spec = spec.clone();
+    vary_by_seed(&mut spec);
     if spec.kind == Kind::Beat {
         let bpm = spec.bpm.unwrap_or(120.0);
         if !(40.0..=240.0).contains(&bpm) {
@@ -742,6 +780,37 @@ mod tests {
                 "{name} end is loud"
             );
         }
+    }
+
+    #[test]
+    fn another_seed_gives_every_tonal_kind_and_the_beat_another_sound() {
+        for kind in [
+            Kind::Pop,
+            Kind::Chime,
+            Kind::Tick,
+            Kind::Drone,
+            Kind::Riser,
+            Kind::Hit,
+            Kind::Beat,
+        ] {
+            let sounds: std::collections::HashSet<Vec<u8>> = (1..=6)
+                .map(|seed| {
+                    let mut sp = spec(kind, 900);
+                    sp.seed = seed;
+                    wav_bytes(&render(&sp).unwrap().channels)
+                })
+                .collect();
+            assert!(sounds.len() >= 5, "{kind:?} gave {} sounds", sounds.len());
+        }
+    }
+
+    #[test]
+    fn a_pitch_or_tempo_asked_for_wins_over_the_seed() {
+        let mut a = spec(Kind::Chime, 900);
+        a.pitch_hz = Some(440.0);
+        let mut b = a.clone();
+        b.seed = 4;
+        assert_eq!(render(&a).unwrap(), render(&b).unwrap());
     }
 
     #[test]
