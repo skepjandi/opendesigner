@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 use super::BlockError;
 use super::args::{Args, Param};
 use super::kit::Kit;
-use super::{backdrops, data, overlays, social, titles, wrappers};
+use super::{backdrops, data, guides, land, micro, overlays, sky, social, titles, wrappers};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Category {
@@ -60,6 +60,9 @@ impl Category {
 pub enum Layer {
     Front,
     Back,
+    /// Behind the content, in a fixed order among the scenery blocks whatever order they are
+    /// added in: a lower rank sits further back (sky 0, then stars, sun, clouds, hills, water).
+    Scenery(u8),
 }
 
 /// Where a block lays itself out when the caller gives no box.
@@ -106,7 +109,7 @@ impl Block {
             "category_label": self.category.label(),
             "about": self.about,
             "tags": self.tags,
-            "layer": match self.layer { Layer::Front => "in front of the frame's content", Layer::Back => "behind the frame's content" },
+            "layer": match self.layer { Layer::Front => "in front of the frame's content", Layer::Back => "behind the frame's content", Layer::Scenery(_) => "behind the frame's content, stacked with other scenery from far to near" },
             "default_box": match self.place {
                 Place::Safe => "the frame inside its safe margin",
                 Place::Frame => "the whole frame",
@@ -135,6 +138,10 @@ pub fn all() -> impl Iterator<Item = &'static Block> {
         data::BLOCKS,
         social::BLOCKS,
         wrappers::BLOCKS,
+        sky::BLOCKS,
+        land::BLOCKS,
+        micro::BLOCKS,
+        guides::BLOCKS,
     ]
     .into_iter()
     .flat_map(|b| b.iter())

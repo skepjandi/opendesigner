@@ -84,6 +84,11 @@ pub const TOPICS: &[(&str, &str, &str)] = &[
         "the block catalog: ready-made titles, overlays, backgrounds, charts and motion, and when to use one",
         include_str!("../skill/blocks-playbook.md"),
     ),
+    (
+        "scenery",
+        "flat-vector scenes: layered scenery blocks, parallax, idle loops, scene moves and camera presets",
+        include_str!("../skill/scenery-playbook.md"),
+    ),
 ];
 
 pub fn topic(name: &str) -> Option<&'static str> {

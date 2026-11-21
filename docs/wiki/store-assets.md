@@ -133,10 +133,37 @@ All three are 3D, which OpenDesigner cannot place yet, so they are recommended f
 
 **Pictures.** Backdrops and icons are written to the project's `media/` folder (the file name is the hash of the recipe, so the same block asks for the same file): the backdrops come from the procedural generators (`gradient`, `aurora`, `pattern`/`grid`, `grain`) and the icons from the bundled Lucide set, which asks for its credit line (returned in the result). A block that needs a picture needs a project folder; without one the call says so.
 
-**Shapes.** The document has no path node, so a line or a ring is a chain of small ellipses (a dot every 0.45 of the stroke width), and a block never uses more than one font family.
+**Shapes.** The first blocks were written before the document had a `path` node, so their lines and rings are chains of small ellipses (a dot every 0.45 of the stroke width); the scenery blocks below draw with `path` nodes, gradients and strokes. A block never uses more than one font family.
 
 **Data.** The data blocks take JSON and check it: 12 bars, 24 points, 3 series, 6 slices, 6 columns by 8 rows; a negative value, a missing label or a value outside the bounds is refused with the reason.
 
+
+### Scenery blocks
+
+> **Status: Built** (`crates/agent/src/blocks/{scene,sky,land,micro,guides}.rs`, 2026-11-24). Twelve blocks build layered flat-vector scenes (the Kurzgesagt look) out of `path` nodes, linear and radial gradients, soft shadows, blur and keyframed loops, instead of a picture behind the content. Playbook: `get_playbook` `scenery`.
+
+| Block | What it makes |
+|-------|---------------|
+| `sky_gradient` | A 2 to 4 stop sky (vertical or at an `angle`), a horizon glow that breathes, and optionally a sun or moon (`light`) with halos |
+| `sun_glow` | A sun (disc, halos that breathe, slowly turning rays), a moon (craters) or a bare glow, placed by `x`, `y` |
+| `starfield` | Up to 220 stars of three sizes in twinkle groups with their own periods and phases, 0 to 3 nebulae (radial gradients), 0 to 3 shooting stars (translate plus `trim_start`/`trim_end`, one streak every `loop_ms` or so) |
+| `clouds` | Up to three layers of path clouds (flat base, three bumps, soft shadow) drifting right; each layer is a group with a `depth` and four copies of its tile so it scrolls one tile and starts over with no seam |
+| `parallax_hills` | 3 to 5 ridges (`hills` smooth, `mountains` softened peaks), each a group with `depth` rising from `min_depth` to `max_depth`, paler and hazier far away, an optional soft shadow on the ridge behind and an optional sway |
+| `ocean_waves` | 3 to 6 wave paths with whole cycles per tile that scroll one tile per loop (slower far away), with foam on the crests and a slow bob |
+| `city_skyline` | 2 or 3 layers of flat-shaded buildings; windows are three `path` nodes per layer (subpaths) whose opacity dips out of step |
+| `cells_backdrop` | Translucent cells (organic body path, membrane stroke, nucleus, glint) in 2 or 3 depth planes, the far and near planes blurred, each cell with its own drift and turn loops |
+| `particles` | `kind` bubbles, dust, confetti, snow, embers or sparkles in three depth planes; the planes scroll a whole screen height per cycle, with two copies so the loop is exact; at most about 150 nodes |
+| `grid_floor` | A perspective grid: converging columns (one stroked path) and rows whose y, thickness and opacity follow a perspective curve and wrap invisibly at the horizon and at the viewer |
+| `connector` | A straight, arc or S curve between two points or nodes that draws on (`trim_end`), pops an arrowhead (scale with `ease_out_back`), streams dots along it and shows an optional label on a pill |
+| `highlight_ring` | A ring or rounded box drawn on around a target with `trim_end`, then breathing, with an echo ring spreading outward |
+
+**Layer order.** Scenery blocks use `Layer::Scenery(rank)`: the group is inserted behind the frame's content and among the other scenery by rank (sky 0, stars and cells 1, sun 2, clouds 3, hills 4, water, skyline and grid 5, particles 6), so the order they are added in does not matter. `connector` and `highlight_ring` are in front like the overlays.
+
+**Depth and the camera.** Layers that should parallax are groups with a `depth` (`min_depth` to `max_depth`); the sky and glows are at depth 0 (pinned) and far layers at 0.1 to 0.4. A layer's width grows by `depth * 25 percent` on each side (at most 45) so a camera pan never shows its edge; the frame cuts what bleeds. With a custom `box` smaller than the frame the block draws inside a clipping group at the box instead, so nothing leaves it (it then moves with the camera as a whole). `BLEEDS` in the block tests lists the blocks allowed to reach past the frame.
+
+**Loops.** Every ambient track repeats (`repeat: loop`) and either ends on the value it starts from (sine and sample loops) or is a straight run over a tile or a turn (scrolls and spins), whose copy stands where the layer began. Periods are whole seconds, so keys keep their spacing after they snap to the video's frames at any frame rate. A scene of scrolling layers repeats exactly every four times `loop_ms` (the layers are 1, 2 or 4 times slower than the nearest) when `loop_ms` is a multiple of two seconds; `particles` repeat every `loop_ms` (rounded to a multiple of four seconds). The tests compare rendered frames one loop apart.
+
+**Palette.** Colors are mixed from the four roles (tokens first, created tokens when none), never hard-coded: skies run from the background toward the accent and the light, hills and water darken and desaturate toward the viewer, and windows, stars and glows take the foreground tinted with the accent.
 
 ## The studio (intended)
 

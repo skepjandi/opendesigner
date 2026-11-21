@@ -314,7 +314,12 @@ fn move_ops(
                 scratch, video, &node, request,
             )?)
         }
-        Move::Keys { target, prop, keys } => {
+        Move::Keys {
+            target,
+            prop,
+            keys,
+            repeat,
+        } => {
             let node = target_id(target, root, names)?;
             Ok(vec![Operation::Animate {
                 video: video.clone(),
@@ -328,8 +333,33 @@ fn move_ops(
                         ease,
                     })
                     .collect(),
-                repeat: od_core::Repeat::Once,
+                repeat: *repeat,
             }])
+        }
+    }
+}
+
+/// The scenery rank of a block's group (`block:<id>#<n>`), when it is a scenery block.
+fn scenery_rank(node: &Node) -> Option<u8> {
+    let id = node.name.strip_prefix("block:")?.split('#').next()?;
+    match find(id).ok()?.layer {
+        Layer::Scenery(rank) => Some(rank),
+        _ => None,
+    }
+}
+
+/// Where in the frame's children a block's group goes.
+fn insert_index(doc: &Document, frame: &NodeId, layer: Layer) -> Option<usize> {
+    match layer {
+        Layer::Front => None,
+        Layer::Back => Some(0),
+        Layer::Scenery(rank) => {
+            let kids = doc.node(frame).map_or(&[][..], |f| &f.children[..]);
+            Some(
+                kids.iter()
+                    .take_while(|c| scenery_rank(c).is_some_and(|r| r <= rank))
+                    .count(),
+            )
         }
     }
 }
@@ -418,7 +448,7 @@ pub fn plan(doc: &Document, req: &Request) -> Result<Plan, BlockError> {
     if makes_nodes {
         ops.push(Operation::Create {
             parent: frame_id.clone(),
-            index: (block.layer == Layer::Back).then_some(0),
+            index: insert_index(doc, &frame_id, block.layer),
             node: built.root,
         });
     }

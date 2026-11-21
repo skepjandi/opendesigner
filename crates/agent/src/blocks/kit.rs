@@ -4,7 +4,7 @@
 
 use std::collections::BTreeMap;
 
-use od_core::animation::{AnimProp, Preset};
+use od_core::animation::{AnimProp, Preset, Repeat};
 use od_core::geometry::Rect;
 use od_core::{
     Document, Ease, ImageFit, NewNode, Node, NodeId, NodeKind, Paint, Rgba, Stroke, TextAlign,
@@ -104,6 +104,8 @@ pub enum Move {
         target: Target,
         prop: AnimProp,
         keys: Vec<(u64, f64, Ease)>,
+        /// What the track does after its last key; a cycle runs from the first key to the last.
+        repeat: Repeat,
     },
 }
 
@@ -112,7 +114,10 @@ impl Move {
     pub fn end(&self) -> u64 {
         match self {
             Move::Preset { at, duration, .. } => at + duration,
-            Move::Keys { keys, .. } => keys.last().map_or(0, |k| k.0),
+            Move::Keys { keys, repeat, .. } if *repeat == Repeat::Once => {
+                keys.last().map_or(0, |k| k.0)
+            }
+            Move::Keys { .. } => 0,
         }
     }
 }
@@ -449,6 +454,12 @@ impl<'a> Kit<'a> {
     }
 
     pub fn end(&mut self) {
+        self.end_with(|_| {});
+    }
+
+    /// Ends the current group after `style` has set what a group can have: a box, a clip, a
+    /// depth, a turn or an effect.
+    pub fn end_with(&mut self, style: impl FnOnce(&mut NewNode)) {
         if self.stack.len() < 2 {
             return;
         }
@@ -456,6 +467,7 @@ impl<'a> Kit<'a> {
             let mut g = NewNode::new(NodeKind::Group);
             g.name = Some(name);
             g.children = children;
+            style(&mut g);
             if let Some((_, nodes)) = self.stack.last_mut() {
                 nodes.push(g);
             }
@@ -645,10 +657,22 @@ impl<'a> Kit<'a> {
     }
 
     pub fn keys(&mut self, target: Target, prop: AnimProp, keys: &[(u64, f64, Ease)]) {
+        self.track(target, prop, keys, Repeat::Once);
+    }
+
+    /// Keys that cycle (`Loop`, `Pingpong`) or play once.
+    pub fn track(
+        &mut self,
+        target: Target,
+        prop: AnimProp,
+        keys: &[(u64, f64, Ease)],
+        repeat: Repeat,
+    ) {
         self.moves.push(Move::Keys {
             target,
             prop,
             keys: keys.to_vec(),
+            repeat,
         });
     }
 
