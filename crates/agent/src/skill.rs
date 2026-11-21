@@ -448,6 +448,7 @@ write the file with `export_video`, which needs `ffmpeg` on the user's computer 
 is missing. For the App Store pass `preset` to `export_video` (see `list_video_presets`): sizes, 15 to 30
 seconds and 30 fps are checked before anything is encoded, and the preset says what it does not
 check (the audio track, the H.264 profile).
+Pass `loudness` (-14 social, -16 podcast, -23 broadcast LUFS) to bring the sound to a platform level. For a hand-drawn rhythm set the video's `hold_frames` to 2 (on twos) or 3 and use `steps_4`-style eases.
 
 Sound: a video can carry one sound track under its picture, a file in the project's `media/`
 folder. `{"op": "set_video", "video": "v_20", "prop": {"name": "audio", "value": {"file":

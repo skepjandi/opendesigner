@@ -99,6 +99,12 @@ fn chain(input: usize, label: usize, p: &AudioPiece) -> String {
 /// picture does (`-shortest`) even when every sound is shorter than the video. `pieces` must not
 /// be empty.
 pub fn filter_graph(pieces: &[AudioPiece]) -> String {
+    filter_graph_with(pieces, None)
+}
+
+/// [`filter_graph`] with `master` (a loudness filter such as `loudnorm=...`) applied to the
+/// summed mix, before it is padded, so the filter sees exactly the sound that exports.
+pub fn filter_graph_with(pieces: &[AudioPiece], master: Option<&str>) -> String {
     let mut graph: String = pieces
         .iter()
         .enumerate()
@@ -137,10 +143,14 @@ pub fn filter_graph(pieces: &[AudioPiece]) -> String {
         }
     }
     graph.push_str(&format!(
-        "{}amix=inputs={}:normalize=0:duration=longest[m];[m]apad[a]",
+        "{}amix=inputs={}:normalize=0:duration=longest[m];",
         mixed.concat(),
         mixed.len()
     ));
+    match master {
+        Some(filter) => graph.push_str(&format!("[m]{filter}[n];[n]apad[a]")),
+        None => graph.push_str("[m]apad[a]"),
+    }
     graph
 }
 
@@ -291,5 +301,34 @@ mod tests {
         assert_eq!(duck_ratio(1.0), 20.0);
         assert!((duck_ratio(0.5) - 10.5).abs() < 1e-6);
         assert_eq!(duck_ratio(7.0), 20.0);
+    }
+}
+
+#[cfg(test)]
+mod master_tests {
+    use super::*;
+
+    fn piece() -> AudioPiece {
+        AudioPiece {
+            file: "a.wav".into(),
+            role: PieceRole::Music,
+            in_ms: 0,
+            start_ms: 0,
+            duration_ms: 1000,
+            gain: 1.0,
+            fade_in_ms: 0,
+            fade_out_ms: 0,
+            pan: 0.0,
+            duck: None,
+        }
+    }
+
+    #[test]
+    fn the_master_filter_sits_between_the_mix_and_its_padding() {
+        let plain = filter_graph(&[piece()]);
+        assert!(plain.ends_with("[m]apad[a]"), "{plain}");
+        let loud = filter_graph_with(&[piece()], Some("loudnorm=I=-14"));
+        assert!(loud.ends_with("[m]loudnorm=I=-14[n];[n]apad[a]"), "{loud}");
+        assert_eq!(filter_graph_with(&[piece()], None), plain);
     }
 }

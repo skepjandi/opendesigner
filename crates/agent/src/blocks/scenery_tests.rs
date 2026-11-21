@@ -876,6 +876,60 @@ fn stagger_offsets_each_node_by_its_step_from_the_chosen_end() {
 }
 
 #[test]
+fn a_grid_stagger_delays_each_cell_by_its_distance_and_bad_grids_are_refused() {
+    let mut s = scene(1280, 720);
+    let ops: Vec<Operation> = (0..6)
+        .map(|i| Operation::Create {
+            parent: s.frame.clone(),
+            index: None,
+            node: serde_json::from_value(json!({"kind": "rect", "x": 100 + i * 150, "y": 100, "width": 100, "height": 100, "fill": "#ffffff"})).unwrap(),
+        })
+        .collect();
+    let made = apply(&mut s.ws, ops);
+    let ids: Vec<String> = made.created.iter().map(ToString::to_string).collect();
+    let video = s.video.to_string();
+    let args = |extra: Value| {
+        let mut a = json!({"video": video, "preset": "stagger", "of": "fade_up", "nodes": ids, "start_ms": 1000, "duration_ms": 400, "step_ms": 100, "columns": 3});
+        a.as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().cloned().unwrap());
+        a
+    };
+    call_tool(
+        &mut s.ws,
+        "animate_preset",
+        args(json!({"metric": "manhattan", "start_index": 4})),
+    )
+    .unwrap();
+    let v = s.doc().video(&s.video).unwrap();
+    let starts: Vec<u64> = made
+        .created
+        .iter()
+        .map(|id| {
+            v.animations
+                .iter()
+                .find(|a| &a.node == id && a.prop == AnimProp::Opacity)
+                .unwrap()
+                .keys[0]
+                .at_ms
+        })
+        .collect();
+    assert_eq!(starts, [1200, 1100, 1200, 1100, 1000, 1100]);
+    for bad in [
+        json!({"columns": 0}),
+        json!({"columns": 7}),
+        json!({"metric": "chebyshev"}),
+        json!({"start_index": 6}),
+    ] {
+        assert!(call_tool(&mut s.ws, "animate_preset", args(bad)).is_err());
+    }
+    let mut flat = args(json!({}));
+    flat.as_object_mut().unwrap().remove("columns");
+    flat["metric"] = json!("euclid");
+    assert!(call_tool(&mut s.ws, "animate_preset", flat).is_err());
+}
+
+#[test]
 fn bad_scene_moves_are_refused_with_a_reason() {
     let mut s = scene(1280, 720);
     let video = s.video.to_string();
@@ -1028,6 +1082,7 @@ fn the_tool_text_names_every_scene_move() {
         "camera_drift",
         "camera_shake",
         "camera_whip",
+        "camera_burst",
         "float",
         "bob",
         "breathe",

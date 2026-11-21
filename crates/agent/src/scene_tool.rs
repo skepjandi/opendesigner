@@ -12,8 +12,8 @@ use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
 use crate::scene_motion::{
-    CameraPose, Named, Origin, Pose, Side, Spec, Track, camera_tracks, follow, node_tracks, orbit,
-    resample, stagger_delays,
+    CameraPose, Metric, Named, Origin, Pose, Side, Spec, Track, camera_tracks, follow, grid_delays,
+    node_tracks, orbit, resample, stagger_delays,
 };
 use crate::tools::{ApplyArgs, CallCtx, Output, ToolError, apply_ops, node_id};
 
@@ -65,10 +65,10 @@ pub fn description() -> &'static str {
      Camera moves write the video's camera (the node is the video; layers with a `depth` follow it \
      by that much): camera_push_in, camera_pull_back, camera_pan (`direction` left|right|up|down, \
      `amount` in document units), camera_drift (slow loop), camera_shake (decays), camera_whip \
-     (fast pan, `direction`). animate_along_path: the `path` node's curve is sampled into x/y keys (and, \
+     (fast pan, `direction`), camera_burst (a kick that is fastest on its first frame, decays over about nine frames with power4_out and then holds; `direction`, `amount`, `start_ms`). animate_along_path: the `path` node's curve is sampled into x/y keys (and, \
      with `orient`, rotation) so `node` follows it over the time range with `ease`. stagger: apply \
      the move named in `of` to every id in `nodes`, `step_ms` apart, starting `from` first|last| \
-     center|random (seeded). `intensity` scales how far a move goes (1 as designed), `repeat` is \
+     center|edges|random (seeded); with `columns` the nodes are a grid read row by row and each is delayed by its distance (`metric` manhattan or euclid, default euclid; `step_ms` per unit) from the start cell: `start_index` (an index into `nodes`) or the cell `from` names. `intensity` scales how far a move goes (1 as designed), `repeat` is \
      once|loop|pingpong, `ease` overrides the move's own."
 }
 
@@ -80,8 +80,8 @@ pub fn extra_properties() -> Map<String, Value> {
         "intensity": {"type": "number", "minimum": MIN_STRENGTH, "maximum": MAX_STRENGTH, "description": "How far the move goes; 1 is as designed (the same as strength)."},
         "repeat": {"type": "string", "enum": ["once", "loop", "pingpong"], "description": "What the track does after its last key (scene moves; ambient ones loop by default)."},
         "seed": {"type": "integer", "minimum": 0, "description": "Shifts an ambient move's phase and orders a random stagger."},
-        "direction": {"type": "string", "enum": ["left", "right", "up", "down"], "description": "camera_pan and camera_whip."},
-        "amount": num("camera_pan and camera_whip: how far the camera goes, in document units."),
+        "direction": {"type": "string", "enum": ["left", "right", "up", "down"], "description": "camera_pan, camera_whip and camera_burst."},
+        "amount": num("camera_pan, camera_whip and camera_burst: how far the camera goes, in document units."),
         "center_x": num("orbit: the middle of the circle, in the node's parent coordinates."),
         "center_y": num("orbit: the middle of the circle, in the node's parent coordinates."),
         "radius": num("orbit: the radius when there is no center."),
@@ -90,7 +90,10 @@ pub fn extra_properties() -> Map<String, Value> {
         "of": id("stagger: the move to apply to each node (any move name except stagger)."),
         "nodes": {"type": "array", "items": {"type": "string"}, "maxItems": MAX_STAGGERED, "description": "stagger: ids of the nodes, in order."},
         "step_ms": {"type": "integer", "minimum": 0, "maximum": 5000, "description": "stagger: delay between one node and the next."},
-        "from": {"type": "string", "enum": ["first", "last", "center", "random"], "description": "stagger: which node goes first."},
+        "from": {"type": "string", "enum": ["first", "last", "center", "edges", "random"], "description": "stagger: which node goes first (edges: both ends together, then inward; in a grid, the outer ring first)."},
+        "columns": {"type": "integer", "minimum": 1, "maximum": MAX_STAGGERED, "description": "stagger: lay the nodes out as a grid this many columns wide, row by row, and delay by distance from the start cell."},
+        "metric": {"type": "string", "enum": ["manhattan", "euclid"], "description": "stagger with columns: how distance is measured (default euclid)."},
+        "start_index": {"type": "integer", "minimum": 0, "maximum": MAX_STAGGERED - 1, "description": "stagger with columns: index in nodes of the cell the wave starts from (overrides from)."},
     });
     props.as_object().cloned().unwrap_or_default()
 }
@@ -137,6 +140,12 @@ pub struct SceneArgs {
     step_ms: Option<u64>,
     #[serde(default)]
     from: Option<String>,
+    #[serde(default)]
+    columns: Option<usize>,
+    #[serde(default)]
+    metric: Option<String>,
+    #[serde(default)]
+    start_index: Option<usize>,
     #[serde(default)]
     turn: Option<String>,
     #[serde(default)]
@@ -298,22 +307,55 @@ impl Request<'_> {
         let from = match self.a.from.as_deref() {
             None => Origin::First,
             Some(f) => Origin::parse(f).ok_or_else(|| {
-                ToolError(format!("from {f:?} is not first, last, center or random"))
+                ToolError(format!(
+                    "from {f:?} is not first, last, center, edges or random"
+                ))
             })?,
         };
         let seed = self.a.seed.unwrap_or(0);
-        let delays = stagger_delays(
-            self.a.nodes.len(),
-            self.a.step_ms.unwrap_or(120),
-            from,
-            seed,
-        );
+        let delays = self.stagger_delays(from, seed)?;
         let mut ops = Vec::new();
         for (i, (id, delay)) in self.a.nodes.iter().zip(delays).enumerate() {
             let each = seed.wrapping_add(i as u64 * 7919);
             ops.extend(self.named(of, self.a.start_ms + delay, Some(id), each)?);
         }
         Ok(ops)
+    }
+
+    fn stagger_delays(&self, from: Origin, seed: u64) -> Result<Vec<u64>, ToolError> {
+        let (count, step) = (self.a.nodes.len(), self.a.step_ms.unwrap_or(120));
+        let Some(columns) = self.a.columns else {
+            if self.a.metric.is_some() || self.a.start_index.is_some() {
+                return Err(ToolError(
+                    "metric and start_index need `columns` (a grid stagger)".into(),
+                ));
+            }
+            return Ok(stagger_delays(count, step, from, seed));
+        };
+        if columns == 0 || columns > count {
+            return Err(ToolError(format!(
+                "columns {columns} is not from 1 to the {count} nodes"
+            )));
+        }
+        let metric = match self.a.metric.as_deref() {
+            None => Metric::Euclid,
+            Some(m) => Metric::parse(m)
+                .ok_or_else(|| ToolError(format!("metric {m:?} is not manhattan or euclid")))?,
+        };
+        if self.a.start_index.is_some_and(|s| s >= count) {
+            return Err(ToolError(format!(
+                "start_index is not an index into the {count} nodes"
+            )));
+        }
+        Ok(grid_delays(
+            count,
+            columns,
+            step,
+            from,
+            self.a.start_index,
+            metric,
+            seed,
+        ))
     }
 
     fn along_path(&self) -> Result<Vec<Operation>, ToolError> {

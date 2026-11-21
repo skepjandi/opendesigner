@@ -326,6 +326,7 @@ fn core_definitions() -> Vec<Value> {
              {op:'set_video', id, prop:{name, value}} with name one of name, fps, size (value {width, height}), \
              audio (value {file:'media/x.mp3', start_ms?, gain? (0 to 2), fade_in_ms?, fade_out_ms?} for the sound under the picture; null takes it away), \
              motion_blur (0 off, or 2 to 16 pictures blended while anything moves), \
+             hold_frames (1 to 6, default 1: every drawing is held for this many frames, 2 is animation on twos, 3 on threes; audio is unaffected), \
              {op:'add_clip', video, frame | footage:{file:'media/x.mp4', in_ms}, duration_ms, index?, transition?, motion?} (a clip shows a design frame or plays footage from list_footage), \
              {op:'remove_clip', video, clip}, {op:'move_clip', video, clip, index}, \
              {op:'set_clip', video, clip, prop:{name, value}} with name one of duration_ms, frame, \
@@ -348,7 +349,7 @@ fn core_definitions() -> Vec<Value> {
              and camera_rotation (degrees the scene turns clockwise about the center) take the VIDEO's id as node and move every node of a \
              clip's frame by its depth (nodes at depth 0 and overlays stay); a single key holds a camera still; keys:[] removes it; \
              animate_preset writes some of these for you). Eases: linear, ease_in, ease_out, ease_in_out (also ease_in_out_cubic), \
-             back (overshoots; also ease_out_back), spring (overshoots and settles), elastic (rings past the end) or bounce (bounces off the end). \
+             back (overshoots; also ease_out_back), spring (overshoots and settles), elastic (rings past the end) or bounce (bounces off the end); power2_in|out|in_out and power4_in|out|in_out (stronger cubic-like curves), expo_in|out|in_out, circ_in|out|in_out, sine_in|out|in_out (the gentlest); steps_2, steps_3, steps_4, steps_6, steps_8 and steps_12 (no in-between: the value holds each of that many poses, jumping between them, for the stepped feel of drawn animation). \
              Colors are '#rrggbb', '#rrggbbaa' or \
              '{token.name}'. Template variables (see list_variables): {op:'declare_variable', variable:{id, kind, label, description?, \
              portrays?, default, enum_values?, binds?:[{node, prop}]}} with kind one of string, number, color, bool, enum, image, font \
@@ -696,7 +697,8 @@ fn core_definitions() -> Vec<Value> {
                 "video": id("Id of a video from list_videos."),
                 "file": id("File name ending in .mp4, for example preview.mp4."),
                 "preset": id("A preset id from list_video_presets: the video is checked against the store's rules and nothing is written if it breaks one."),
-                "locale": id("A language from list_locales: text nodes show that language.")
+                "locale": id("A language from list_locales: text nodes show that language."),
+                "loudness": {"type": "integer", "enum": [-14, -16, -23], "description": "Bring the final mix to this integrated loudness in LUFS: -14 social, -16 podcast, -23 broadcast. Default: leave the level as mixed. Measured first, then applied as a gain (ffmpeg loudnorm); a video with no sound is unaffected."}
             }),
             &["video", "file"],
             false,
@@ -1717,6 +1719,8 @@ struct ExportVideoArgs {
     preset: Option<String>,
     #[serde(default)]
     locale: Option<String>,
+    #[serde(default)]
+    loudness: Option<f64>,
 }
 
 fn export_video_tool(ctx: &mut CallCtx, a: ExportVideoArgs) -> Result<Output, ToolError> {
@@ -1743,16 +1747,28 @@ fn run_export_video(
     let id = node_id(&a.video)?;
     crate::video_export::check_export(src, &id, &a.file, a.locale.as_deref(), a.preset.as_deref())?;
     let ffmpeg = od_media::Ffmpeg::locate().map_err(|e| ToolError(e.to_string()))?;
-    let out = crate::video_export::export_video(
+    let loudness = a.loudness.map(loudness_target).transpose()?;
+    let out = crate::video_export::export_video_mastered(
         src,
         &id,
         &a.file,
         a.locale.as_deref(),
         a.preset.as_deref(),
         &ffmpeg,
+        od_render::export::default_workers(),
+        loudness,
         progress,
     )?;
     Ok(Output::json(&video_outcome_json(&out)))
+}
+
+/// The loudness target a number of LUFS names (-14 social, -16 podcast, -23 broadcast).
+pub fn loudness_target(lufs: f64) -> Result<od_media::Loudness, ToolError> {
+    od_media::Loudness::from_lufs(lufs).ok_or_else(|| {
+        ToolError(format!(
+            "loudness {lufs} is not one of -14 (social), -16 (podcast) or -23 (broadcast) LUFS"
+        ))
+    })
 }
 
 /// The result of a video export as the tools and the CLI report it.

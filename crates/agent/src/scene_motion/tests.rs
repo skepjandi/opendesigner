@@ -356,3 +356,93 @@ fn the_generator_is_deterministic_and_spread() {
     assert!((mean - 0.5).abs() < 0.05);
     assert!((0..200).all(|_| (3..=7).contains(&a.count(3, 7))));
 }
+
+#[test]
+fn edges_go_together_from_both_ends_inward() {
+    assert_eq!(
+        stagger_delays(5, 100, Origin::Edges, 0),
+        vec![0, 100, 200, 100, 0]
+    );
+    assert_eq!(
+        stagger_delays(4, 100, Origin::Edges, 0),
+        vec![0, 100, 100, 0]
+    );
+    assert_eq!(Origin::parse("edges"), Some(Origin::Edges));
+}
+
+#[test]
+fn a_grid_stagger_delays_by_distance_from_the_start_cell() {
+    // 3 columns x 2 rows, indices 0 1 2 / 3 4 5
+    let manhattan = |from, start| grid_delays(6, 3, 100, from, start, Metric::Manhattan, 0);
+    assert_eq!(
+        manhattan(Origin::First, None),
+        vec![0, 100, 200, 100, 200, 300]
+    );
+    assert_eq!(
+        manhattan(Origin::Last, None),
+        vec![300, 200, 100, 200, 100, 0]
+    );
+    assert_eq!(
+        manhattan(Origin::First, Some(4)),
+        vec![200, 100, 200, 100, 0, 100]
+    );
+    let euclid = grid_delays(6, 3, 100, Origin::First, Some(0), Metric::Euclid, 0);
+    assert_eq!(euclid, vec![0, 100, 200, 100, 141, 224]);
+    // a 3x3 grid: the middle cell is last from the edges, first from the center
+    let edges = grid_delays(9, 3, 100, Origin::Edges, None, Metric::Euclid, 0);
+    assert_eq!(edges, vec![0, 0, 0, 0, 100, 0, 0, 0, 0]);
+    let center = grid_delays(9, 3, 100, Origin::Center, None, Metric::Manhattan, 0);
+    assert_eq!(center, vec![200, 100, 200, 100, 0, 100, 200, 100, 200]);
+    let a = grid_delays(9, 3, 100, Origin::Random, None, Metric::Euclid, 4);
+    assert_eq!(
+        a,
+        grid_delays(9, 3, 100, Origin::Random, None, Metric::Euclid, 4)
+    );
+}
+
+#[test]
+fn a_camera_burst_is_fastest_at_its_first_frame_then_holds() {
+    let mut spec = Spec::new(1_000, 600);
+    spec.gap_ms = 35;
+    spec.side = Some(Side::Left);
+    spec.amount = Some(300.0);
+    let tracks = camera_tracks(Named::CameraBurst, &spec, &camera());
+    assert_eq!(tracks.len(), 1);
+    let t = &tracks[0];
+    assert_eq!(t.prop, AnimProp::CameraX);
+    assert_eq!(t.keys[0].value, 0.0);
+    assert_eq!(t.keys[1].ease, Ease::Power4Out);
+    assert_eq!(t.keys[1].value, -300.0);
+    assert_eq!(t.keys[1].at_ms, 1_000 + 9 * 33);
+    assert_eq!(t.keys[2].value, -300.0);
+    assert_eq!(t.keys[2].at_ms, 1_600);
+    let a = animation(t);
+    let step = |ms: f64| (a.value_at(ms + 33.0).unwrap() - a.value_at(ms).unwrap()).abs();
+    assert!(step(1_000.0) > 3.0 * step(1_000.0 + 3.0 * 33.0), "decays");
+    assert_eq!(a.value_at(1_400.0), Some(-300.0));
+    assert_eq!(a.value_at(1_500.0), Some(-300.0), "then holds");
+}
+
+#[test]
+fn a_vertical_burst_moves_the_camera_y() {
+    let mut spec = Spec::new(0, 600);
+    spec.side = Some(Side::Down);
+    let tracks = camera_tracks(Named::CameraBurst, &spec, &camera());
+    assert_eq!(tracks[0].prop, AnimProp::CameraY);
+    assert!((tracks[0].keys[1].value - 1080.0 / 6.0).abs() < 1e-9);
+}
+
+#[test]
+fn a_steps_ease_holds_each_pose_in_a_preset_track() {
+    let mut spec = Spec::new(0, 1_000);
+    spec.ease = Some(Ease::Steps4);
+    let track = camera_tracks(Named::CameraPan, &spec, &camera());
+    let a = animation(&track[0]);
+    let (first, mid, late) = (
+        a.value_at(100.0).unwrap(),
+        a.value_at(400.0).unwrap(),
+        a.value_at(990.0).unwrap(),
+    );
+    assert_eq!(first, a.value_at(240.0).unwrap(), "held for a quarter");
+    assert!(mid > first && late > mid);
+}
