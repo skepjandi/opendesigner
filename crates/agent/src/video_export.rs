@@ -69,7 +69,7 @@ pub(crate) fn video_file_name(file: &str) -> Result<&str, ToolError> {
 }
 
 /// The document as it reads in `locale`, or as it is.
-fn document_in<'a>(
+pub(crate) fn document_in<'a>(
     ws: &'a Source,
     locale: Option<&str>,
 ) -> Result<std::borrow::Cow<'a, od_core::Document>, ToolError> {

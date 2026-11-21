@@ -19,6 +19,12 @@ use serde_json::{Value, json};
 use crate::tools::{CallCtx, Output, ToolError, node_id, parse, tool};
 use crate::video_export::Source;
 
+mod checks;
+mod flash;
+#[cfg(test)]
+mod more_tests;
+mod overlap;
+
 pub const NAMES: [&str; 1] = ["review_video"];
 
 /// Samples across the video when the caller does not choose.
@@ -58,11 +64,18 @@ pub fn definitions() -> Vec<Value> {
          ambient motion, RV005 no camera move in a video over 15 s, RV006 too few vector shapes, \
          RV007 repeated scene compositions, RV008 captions cover too much, RV009 no sound, RV010 the \
          sound is the same in every scene, RV011 colors are not from tokens, RV012 too few layers \
-         moving. It returns per-scene and whole-video numbers, a score from 0 to 100 and the three \
-         fixes that would help most. A score under 70 is not ready.",
+         moving, RV013 flash safety (over 3 large brightness changes in a second: an error that \
+         makes the video not ready), RV014 cuts off the beat (needs `bpm`), RV015 text leaves before \
+         it can be read, RV016 text in a vertical video's unsafe top or bottom zone, RV017 a 2 s \
+         stretch with fewer than 3 moving layers, RV018 the same scene twice, RV019 no held last \
+         picture. `overlap` lists regions where two layers of a scene overlap, back to front: check \
+         each with video_crop and confirm which should be on top. It returns per-scene and \
+         whole-video numbers, a score from 0 to 100 and the three fixes that would help most. A \
+         score under 70 is not ready.",
         json!({
             "video": {"type": "string", "description": "Id of a video from list_videos; defaults to the first."},
-            "samples": {"type": "integer", "minimum": MIN_SAMPLES, "maximum": MAX_SAMPLES, "description": "How many moments to render (default 12)."}
+            "samples": {"type": "integer", "minimum": MIN_SAMPLES, "maximum": MAX_SAMPLES, "description": "How many moments to render (default 12)."},
+            "bpm": {"type": "number", "minimum": 30, "maximum": 300, "description": "The tempo of the music, to check that cuts land on a beat (RV014). Videos have no tempo of their own."}
         }),
         &[],
         true,
@@ -73,7 +86,8 @@ pub fn call(ctx: &mut CallCtx, name: &str, args: Value) -> Result<Output, ToolEr
     match name {
         "review_video" => {
             let a: Args = parse(args)?;
-            let report = review(&Source::of(ctx.ws), a.video.as_deref(), a.samples)?;
+            let report =
+                review_at_tempo(&Source::of(ctx.ws), a.video.as_deref(), a.samples, a.bpm)?;
             Ok(Output::json(&report.to_json()))
         }
         other => Err(ToolError(format!("unknown tool {other:?}"))),
@@ -87,6 +101,8 @@ struct Args {
     video: Option<String>,
     #[serde(default)]
     samples: Option<usize>,
+    #[serde(default)]
+    bpm: Option<f64>,
 }
 
 /// One thing wrong, with a stable code and what to do about it.
@@ -94,6 +110,8 @@ struct Args {
 pub struct Finding {
     pub code: &'static str,
     pub name: &'static str,
+    /// `error` for what must not ship (photosensitivity), `warning` for the rest.
+    pub severity: &'static str,
     /// Scenes (by position, from 0) the finding is about; empty for the whole video.
     pub scenes: Vec<usize>,
     pub message: String,
@@ -113,6 +131,10 @@ pub struct Report {
     pub top_fixes: Vec<String>,
     pub scenes: Vec<Value>,
     pub metrics: Value,
+    /// Regions where two layers of a scene overlap, back to front (`overlap.rs`); information.
+    pub overlap: Vec<Value>,
+    /// How many regions there were before the list was cut.
+    pub overlap_total: usize,
 }
 
 impl Report {
@@ -125,10 +147,15 @@ impl Report {
             top_fixes: Vec::new(),
             scenes: Vec::new(),
             metrics: json!({}),
+            overlap: Vec::new(),
+            overlap_total: 0,
         }
     }
 
     fn verdict(&self) -> &'static str {
+        if self.findings.iter().any(|f| f.severity == "error") {
+            return "not ready";
+        }
         match self.score {
             80..=100 => "ready",
             55..=79 => "needs work",
@@ -158,11 +185,17 @@ impl Report {
             "findings": self.findings.iter().map(|f| json!({
                 "code": f.code,
                 "name": f.name,
+                "severity": f.severity,
                 "scenes": f.scenes,
                 "message": f.message,
                 "fix": f.fix,
             })).collect::<Vec<_>>(),
             "scenes": self.scenes,
+            "overlap": {
+                "regions": self.overlap,
+                "total": self.overlap_total,
+                "note": "Regions where two layers overlap, back to front. Check each with video_crop and confirm which should be on top.",
+            },
             "metrics": self.metrics,
         })
     }
@@ -171,7 +204,16 @@ impl Report {
     pub fn text(&self) -> String {
         let mut out = self.summary();
         for f in &self.findings {
-            out.push_str(&format!("\n{} {}: {}", f.code, f.name, f.message));
+            out.push_str(&format!(
+                "\n{} {} ({}): {}",
+                f.code, f.name, f.severity, f.message
+            ));
+        }
+        if !self.overlap.is_empty() {
+            out.push_str(&format!(
+                "\n{} overlap regions to check with video_crop (see --json)",
+                self.overlap_total
+            ));
         }
         out
     }
@@ -204,6 +246,19 @@ pub fn review(
     video: Option<&str>,
     samples: Option<usize>,
 ) -> Result<Report, ToolError> {
+    review_at_tempo(src, video, samples, None)
+}
+
+/// [`review`] that also checks the cuts against a music tempo of `bpm` beats a minute (RV014).
+pub fn review_at_tempo(
+    src: &Source,
+    video: Option<&str>,
+    samples: Option<usize>,
+    bpm: Option<f64>,
+) -> Result<Report, ToolError> {
+    if let Some(b) = bpm.filter(|b| !checks::valid_bpm(*b)) {
+        return Err(ToolError(format!("bpm {b} is not a tempo from 30 to 300")));
+    }
     let doc = &src.doc;
     let v = match video {
         Some(id) => doc
@@ -231,7 +286,8 @@ pub fn review(
         .unwrap_or(DEFAULT_SAMPLES)
         .clamp(MIN_SAMPLES, MAX_SAMPLES);
     let sampled = sample(src, v, count)?;
-    Ok(build(doc, v, &scenes, &sampled))
+    let flash = flash::scan(src, v)?;
+    Ok(build(doc, v, &scenes, &sampled, flash.as_ref(), bpm))
 }
 
 fn scenes_of(doc: &Document, v: &Video) -> Vec<Scene> {
@@ -322,6 +378,11 @@ fn sample(src: &Source, v: &Video, count: usize) -> Result<Vec<Sample>, ToolErro
     }
     Ok(out)
 }
+
+/// The findings that are errors, not warnings.
+const ERROR_CODES: [&str; 1] = ["RV013"];
+/// The score a video with an error cannot rise above.
+const ERROR_SCORE_CAP: u32 = 54;
 
 struct Draft {
     code: &'static str,
@@ -644,6 +705,11 @@ fn finish(drafts: Vec<Draft>, scene_count: usize) -> (Vec<Finding>, u32, Vec<Str
             Finding {
                 code: d.code,
                 name: d.name,
+                severity: if ERROR_CODES.contains(&d.code) {
+                    "error"
+                } else {
+                    "warning"
+                },
                 scenes: d.scenes,
                 message: d.message,
                 fix: d.fix.to_string(),
@@ -654,7 +720,10 @@ fn finish(drafts: Vec<Draft>, scene_count: usize) -> (Vec<Finding>, u32, Vec<Str
         .collect();
     findings.sort_by(|a, b| a.code.cmp(b.code));
     let lost: f64 = findings.iter().map(|f| f.penalty).sum();
-    let score = (100.0 - lost).round().clamp(0.0, 100.0) as u32;
+    let mut score = (100.0 - lost).round().clamp(0.0, 100.0) as u32;
+    if findings.iter().any(|f| f.severity == "error") {
+        score = score.min(ERROR_SCORE_CAP);
+    }
     let mut ranked: Vec<&Finding> = findings.iter().collect();
     ranked.sort_by(|a, b| b.penalty.total_cmp(&a.penalty).then(a.code.cmp(b.code)));
     let fixes = ranked.iter().take(3).map(|f| f.fix.clone()).collect();
@@ -699,6 +768,7 @@ fn metrics_json(
     samples: &[Sample],
     palette: &Palette,
     doc: &Document,
+    flash: Option<&flash::FlashScan>,
 ) -> Value {
     json!({
         "duration_ms": v.duration_ms(),
@@ -718,10 +788,19 @@ fn metrics_json(
         "token_paints": palette.tokens_used,
         "hard_coded_paints": palette.loose_refs,
         "distinct_hard_coded_colors": palette.loose.len(),
+        "flash_scanned_ms": flash.map(|f| f.scanned_ms),
+        "flash_changes_per_second_max": flash.map(|f| f.worst_window().0),
     })
 }
 
-fn build(doc: &Document, v: &Video, scenes: &[Scene], samples: &[Sample]) -> Report {
+fn build(
+    doc: &Document,
+    v: &Video,
+    scenes: &[Scene],
+    samples: &[Sample],
+    flash: Option<&flash::FlashScan>,
+    bpm: Option<f64>,
+) -> Report {
     let palette = palette_of(doc, scenes);
     let mut drafts = scene_drafts(scenes);
     drafts.extend(repeated_scenes(doc, scenes));
@@ -730,7 +809,15 @@ fn build(doc: &Document, v: &Video, scenes: &[Scene], samples: &[Sample]) -> Rep
     drafts.extend(caption_draft(v));
     drafts.extend(sound_drafts(v, scenes));
     drafts.extend(palette_draft(doc, &palette));
+    drafts.extend(flash.and_then(flash::draft));
+    drafts.extend(bpm.and_then(|b| checks::off_beat(v, scenes, b)));
+    drafts.extend(checks::text_too_brief(doc, v, scenes));
+    drafts.extend(checks::text_in_unsafe_zone(doc, v, scenes));
+    drafts.extend(checks::thin_stretch(v, scenes));
+    drafts.extend(checks::identical_scenes(doc, scenes));
+    drafts.extend(checks::no_final_hold(v));
     let (findings, score, top_fixes) = finish(drafts, scenes.len());
+    let (overlap, overlap_total) = overlap::regions(doc, v, scenes);
     Report {
         video: Some(v.id.clone()),
         message: None,
@@ -742,7 +829,9 @@ fn build(doc: &Document, v: &Video, scenes: &[Scene], samples: &[Sample]) -> Rep
             .enumerate()
             .map(|(i, s)| scene_json(i, s))
             .collect(),
-        metrics: metrics_json(v, scenes, samples, &palette, doc),
+        metrics: metrics_json(v, scenes, samples, &palette, doc, flash),
+        overlap,
+        overlap_total,
     }
 }
 

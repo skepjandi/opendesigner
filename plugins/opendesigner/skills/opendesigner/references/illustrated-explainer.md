@@ -253,7 +253,8 @@ results. Replace the copy and the seeds.
    clipped, nothing outside the frame, text readable at 360 px wide.
 4. Every living element has an ambient loop; at least three layers move at any time; the camera moves.
 5. Sound set, ducked under the voice, effects on cuts; captions styled and small.
-6. Say what you made, the palette and the idea of each scene.
+6. Run the self-critique loop of `get_playbook review`: `video_strip` of every key motion, `video_crop` of every face and contact, the `overlap` list of `review_video`; no RV013 (flashing) ever.
+7. Say what you made, the palette and the idea of each scene.
 
 ## Mistakes to avoid
 

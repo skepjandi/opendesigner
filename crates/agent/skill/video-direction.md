@@ -132,7 +132,7 @@ fix every finding or have a reason, until the score is 70 or more. Then:
 First frame: strongest picture? Every shot 1 to 6 s? Anything still for more than 4 s without
 life? Text readable at phone size (the thumbnail test at 360 px wide)? Nothing important in the
 platform UI zones? Ending held, with one clear thing? Sound set, quiet under any voice, faded out? The same transition vocabulary throughout?
-If any answer is no, fix it before exporting.
+If any answer is no, fix it before exporting. For a harsh look at your own animated video (strips of every key motion, crops at 1:1, overlaps), read `get_playbook review`.
 
 ## Memory across tasks
 

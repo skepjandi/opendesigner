@@ -13,6 +13,7 @@ use od_core::{
 mod blocks;
 mod doccmd;
 mod external;
+mod inspect;
 mod review_video;
 mod serve;
 mod skillcmd;
@@ -354,6 +355,8 @@ enum Command {
     RemoveBackground(external::RemoveBackground),
     /// Which external programs (ffmpeg, whisper, rembg) are installed, and how to install the rest.
     Doctor(external::Doctor),
+    /// Look closely at a video: a strip of frames, a crop at full size, a coordinate grid, a diff. Writes a PNG to exports/.
+    Inspect(inspect::Inspect),
     /// Sound tracks, pauses and waveforms of a video.
     Sound {
         #[command(subcommand)]
@@ -1056,6 +1059,7 @@ fn run(cli: Cli) -> Result<(), CliError> {
         Command::Transcribe(args) => external::transcribe(args)?,
         Command::RemoveBackground(args) => external::remove_background(args)?,
         Command::Doctor(args) => external::doctor(args),
+        Command::Inspect(args) => inspect::run(args)?,
         Command::Sound { action } => sound::sound(action)?,
         Command::Captions { action } => sound::captions(action)?,
         Command::Skill { action } => skillcmd::run(action)?,
