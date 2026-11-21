@@ -11,24 +11,24 @@ generated is not done.\n\
 the product's own repository, screens, colors and copy, and use the user's media (list_media, \
 find_files, import_file). Never invent facts, numbers, reviews or features.\n\
 2. Read the craft: call get_playbook with `design` for images, `video` and `motion` for video, \
-`formats` to choose sizes, `style` to pick a named look, `logo` for marks, `blocks` for the catalog of ready-made \
-titles, overlays, backgrounds and charts. Say which look you chose and its rules.\n\
+`formats` to choose sizes, `style` to pick a named look, `logo` for marks, `blocks` for ready-made parts. Anything animated (animation, scene, explainer, motion graphics, cartoon, 2D, \
+illustration, Kurzgesagt, In a Nutshell) starts with `explainer`: an image backdrop with moving text is never an \
+animated scene; build it from moving vector shapes. \
+Say which look you chose and its rules.\n\
 3. Build a system first (tokens, one or two type families and a scale, a grid, named layers), then \
 one hero frame, look at it, fix it, and only then the rest.\n\
 4. Check, do not hope: render_preview (also at 160 to 320 px), review_frame on every frame and fix \
 what it finds, validate_document for the whole design (stable codes, fix every error and warning), \
 render_video_frame at each beat and mid-transition, read the story in list_videos. \
-Iterate at least once after you first look. A video also gets sound unless the user asked for \
+Iterate at least once after you first look. An animated video gets review_video before export_video: fix its findings. A video also gets sound unless the user asked for \
 silence: make_sound for effects, search_sounds or the user's own file for a music bed (gain 0.15 to \
 0.3 under a voice, fades 300 to 800 ms), then set_video audio.\n\
 5. Assets: before drawing an icon, blob, background or texture by hand, search_assets, \
 import_asset (recolored to your tokens) and make_asset; one icon set per design; show the credit line \
 an import returns whenever it says attribution_required. A video starts with an inventory: \
 list_media, list_footage, list_sounds, search_assets and list_asset_sources; every asset reaches the \
-timeline as an image node (its `image` is the media/ file) in a frame that is a clip or an overlay, \
-so decorate videos with icons, generated backgrounds and pack art instead of bare colors.\n\
-6. Use every tool that helps (media, device frames, tokens, languages, presets, blocks (a catalog of \
-ready-made titles, overlays, backgrounds and charts), workspaces, exports). Sizes the user chose are \
+timeline as an image node (its `image` is the media/ file) in a frame that is a clip or an overlay.\n\
+6. Use every tool that helps (media, device frames, tokens, languages, presets, blocks, workspaces, exports). Sizes the user chose are \
 theirs: change them only through set_format, which asks. If they \
 chose nothing, pick from list_formats and record it with set_format.\n\
 7. Memory: get_guidance lists the notes earlier runs left (list_memory, read_memory): read the \
@@ -88,6 +88,11 @@ pub const TOPICS: &[(&str, &str, &str)] = &[
         "characters",
         "flat-vector characters, speech and thought bubbles and animated props (rocket, bulb, atom, planet, tree, house, laptop, gear, cell, DNA): the rig, actions, timing",
         include_str!("../skill/characters-playbook.md"),
+    ),
+    (
+        "explainer",
+        "animated 2D scenes and explainers (Kurzgesagt look): script, palette, depth layers, blocks, motion, camera, sound, review_video gate",
+        include_str!("../skill/illustrated-explainer.md"),
     ),
 ];
 
@@ -296,6 +301,7 @@ mod tests {
             ("skill body", body.contents.as_str()),
             ("video playbook", topic("video").unwrap()),
             ("motion playbook", topic("motion").unwrap()),
+            ("explainer playbook", topic("explainer").unwrap()),
         ] {
             for w in named_calls(text) {
                 assert!(
@@ -316,5 +322,125 @@ mod tests {
                 assert!(known(&w), "{name}'s description names {w}");
             }
         }
+    }
+
+    #[test]
+    fn animated_requests_are_routed_to_the_explainer_playbook() {
+        let explainer = topic("explainer").unwrap();
+        for id in [
+            "sky_gradient",
+            "parallax_hills",
+            "starfield",
+            "clouds",
+            "sun_glow",
+            "ocean_waves",
+            "city_skyline",
+            "cells_backdrop",
+            "particles",
+            "grid_floor",
+            "connector",
+            "highlight_ring",
+            "character",
+            "speech_bubble",
+            "thought_bubble",
+            "prop_rocket",
+            "prop_lightbulb",
+            "prop_atom",
+            "prop_planet",
+            "prop_tree",
+            "prop_house",
+            "prop_laptop_2d",
+            "prop_gear",
+            "prop_cell",
+            "prop_dna",
+        ] {
+            assert!(
+                explainer.contains(id),
+                "the explainer playbook lacks block {id}"
+            );
+        }
+        for name in [
+            "float",
+            "bob",
+            "breathe",
+            "pulse",
+            "spin",
+            "wobble",
+            "shake",
+            "swing",
+            "pop_in",
+            "bounce_in",
+            "elastic_in",
+            "slide_in_",
+            "fade_up",
+            "zoom_in",
+            "draw_on",
+            "orbit",
+            "stagger",
+            "camera_push_in",
+            "camera_pull_back",
+            "camera_pan",
+            "camera_drift",
+            "camera_shake",
+            "camera_whip",
+            "animate_along_path",
+            "set_token",
+            "import_svg_vector",
+            "review_video",
+            "add_block",
+            "depth",
+            "clip",
+        ] {
+            assert!(
+                explainer.contains(name),
+                "the explainer playbook lacks {name}"
+            );
+        }
+        assert!(explainer.contains("never an animated scene"));
+
+        let skill = crate::skill::generate();
+        let body = &skill
+            .iter()
+            .find(|f| f.path == "SKILL.md")
+            .unwrap()
+            .contents;
+        let defs = crate::tools::definitions();
+        let described = |tool: &str| {
+            defs.iter()
+                .find(|d| d["name"] == tool)
+                .and_then(|d| d["description"].as_str())
+                .unwrap()
+                .to_string()
+        };
+        for (what, text) in [
+            ("the quality bar", QUALITY_BAR.to_string()),
+            ("SKILL.md", body.clone()),
+            ("get_playbook", described("get_playbook")),
+        ] {
+            assert!(
+                text.contains("explainer"),
+                "{what} should route to explainer"
+            );
+        }
+        for trigger in [
+            "animated",
+            "scene",
+            "motion graphics",
+            "cartoon",
+            "2D",
+            "Kurzgesagt",
+            "In a Nutshell",
+        ] {
+            assert!(QUALITY_BAR.contains(trigger), "the bar lacks {trigger}");
+        }
+        assert!(QUALITY_BAR.contains("never an animated scene"));
+        assert!(QUALITY_BAR.contains("review_video"));
+        assert!(described("export_video").contains("review_video"));
+        assert!(topic("video").unwrap().contains("never an acceptable"));
+        assert!(
+            skill
+                .iter()
+                .any(|f| f.path == "references/illustrated-explainer.md")
+        );
     }
 }

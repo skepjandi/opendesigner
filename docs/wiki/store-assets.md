@@ -108,6 +108,10 @@ All three are 3D, which OpenDesigner cannot place yet, so they are recommended f
 
 **Size accounting** (measured): the repository gains 149,898 bytes of data (+3,208 of licence text); a release CLI binary grew by 1,382,400 bytes (646,246 gzip-compressed) with the bundled set and `resvg`, measured by building `main` and this branch; `list_asset_packs` reports each pack's size on disk, `installed_bytes` and the cap, and the test checks that the reported size is the file's length.
 
+## Animated app previews and promo films
+
+An app preview is footage of the app; a promo or an explainer around it is built from the vector engine, not from a stock picture. The `explainer` playbook (`get_playbook explainer`) is the guide for any animated, illustrated or Kurzgesagt-style piece, and `review_video` (also `opendesigner review-video`) scores it before `export_video`. A store screenshot or a still keeps using the image playbooks; an image backdrop is fine there, never as the world of an animated scene. Status: **Built** ([Agent Integration](./agent-integration.md#animation-review-review_video), [Video Editing](./video-editing.md#animated-explainers)).
+
 ## Blocks: a catalog of ready-made designs
 
 > **Status: Built** (`crates/agent/src/blocks/`; read on 2026-11-20). A block is a named, parameterized, deterministic generator: it expands into ordinary nodes (frames, rectangles, ellipses, text, images, groups) and, where it has motion, ordinary `animate` keyframes on the video. Everything is applied as **one attributed, undoable transaction through the same path as `apply_ops`**: no new operation, no way around the history.

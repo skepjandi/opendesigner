@@ -542,3 +542,62 @@ fn every_rule_has_a_unique_stable_code_and_a_row_in_the_wiki_table() {
         );
     }
 }
+
+fn scene_fixture(w: u32, h: u32) -> (Fixture, NodeId, NodeId) {
+    let mut f = Fixture::new();
+    let frame = f.frame(w, h);
+    f.apply(json!([{"op": "create_video", "name": "V", "fps": 30, "width": w, "height": h}]));
+    let video = f.ws.session.document().videos[0].id.clone();
+    f.apply(json!([{"op": "add_clip", "video": video.as_str(), "frame": frame.as_str(), "duration_ms": 3000}]));
+    (f, frame, video)
+}
+
+fn fade(f: &mut Fixture, video: &NodeId, node: &NodeId) {
+    f.apply(
+        json!([{"op": "animate", "video": video.as_str(), "node": node.as_str(), "prop": "opacity",
+        "keys": [{"at_ms": 0, "value": 0.2}, {"at_ms": 800, "value": 1.0}]}]),
+    );
+}
+
+#[test]
+fn a_picture_with_animated_text_is_not_an_animated_scene() {
+    let (mut f, frame, video) = scene_fixture(1000, 1000);
+    f.create(
+        &frame,
+        json!({"kind": "image", "name": "Photo", "x": 0, "y": 0, "width": 1000, "height": 1000, "image": "media/photo.png"}),
+    );
+    let title = f.create(&frame, text(100.0, 100.0, 600.0, 100.0, "Hello", 80.0));
+    fade(&mut f, &video, &title);
+    let found = run(&f.doc());
+    assert!(has(&found, "OD090", &frame), "{found:?}");
+    assert!(!codes(&found).contains(&"OD091"), "OD090 already says it");
+
+    let star = f.create(
+        &frame,
+        json!({"kind": "ellipse", "name": "Star", "x": 800, "y": 100, "width": 40, "height": 40, "fill": "#ffcc00"}),
+    );
+    fade(&mut f, &video, &star);
+    let found = run(&f.doc());
+    assert!(!codes(&found).contains(&"OD090"), "{found:?}");
+    assert!(!codes(&found).contains(&"OD091"), "{found:?}");
+}
+
+#[test]
+fn a_scene_where_only_text_and_rectangles_move_is_flagged() {
+    let (mut f, frame, video) = scene_fixture(1920, 1080);
+    let title = f.create(&frame, text(100.0, 100.0, 600.0, 100.0, "Hello", 80.0));
+    let band = f.create(
+        &frame,
+        json!({"kind": "rect", "name": "Band", "x": 0, "y": 800, "width": 1920, "height": 200, "fill": "#222222"}),
+    );
+    fade(&mut f, &video, &title);
+    fade(&mut f, &video, &band);
+    assert!(has(&run(&f.doc()), "OD091", &frame));
+    let moon = f.create(
+        &frame,
+        json!({"kind": "path", "name": "Moon", "x": 800, "y": 100, "width": 80, "height": 80,
+               "path": "M0 0 L10 0 L5 10 Z", "fill": "#ffeeaa"}),
+    );
+    fade(&mut f, &video, &moon);
+    assert!(!codes(&run(&f.doc())).contains(&"OD091"));
+}

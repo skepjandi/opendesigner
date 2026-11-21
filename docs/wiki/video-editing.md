@@ -53,6 +53,12 @@ Where we deliberately differ: local-only and open files (Kino stores footage in 
 
 Nodes turn, scale, blur, cast shadows and clip, tracks repeat, and a video has a camera ([Document Format](./document-format.md#transform-and-effects)). Eases added: `ease_in_out_cubic` (the curve of `ease_in_out`), `ease_out_back` (the curve of `back`), `elastic` and `bounce`. The renderer treats a frame as live while a camera animation or a repeating track is under way (`VideoRenderer::signature`, `moving_at`), so an export redraws it for every moment and reuses a picture only while nothing moves; `Animation::value_at` folds a repeating track's time into its cycle, so frames are a pure function of the time and a parallel export is unchanged. The camera is applied to frames shown by clips, not to overlays.
 
+## Animated explainers
+
+> **Status: Built** (`crates/agent/skill/illustrated-explainer.md`, `crates/agent/src/review_video.rs`).
+
+A flat-vector explainer (the Kurzgesagt look) is made only of what is above: `path` nodes and gradients for the art, groups with `depth` for parallax layers, looping `animate` tracks for ambient life, `camera_*` tracks for the moves, clip transitions chosen by continuity, and sound tracks. The `explainer` playbook is the process (script and storyboard, a 4 to 6 token palette, five layers per scene, entrances, loops, camera, sound, a final gate); `add_block` supplies the scenery, characters and props. An image backdrop with animated text is never an acceptable animated scene: `review_video` flags it (`RV001`) along with text-only motion, still stretches, missing loops, no camera and no sound, and the lint rules `OD090` and `OD091` catch the first two from the document alone. Agents run `review_video` before `export_video`. See [Agent Integration](./agent-integration.md#animation-review-review_video).
+
 ## Sound tracks
 
 `Video.tracks`: up to 8 `SoundTrack`s besides `audio` (`crates/core/src/audio.rs`; fields and bounds in [Document Format](./document-format.md#sound-tracks-and-captions)): `role` (`music`, `voice`, `sfx`), `file`, `start_ms`, trim `in_ms`/`out_ms`, `gain`, `fade_in_ms`/`fade_out_ms`, `pan` and, on music, `duck {depth, attack_ms, release_ms}`. They change as a whole list through `set_video` `tracks`; `add_sound_track`, `set_sound_track` and `remove_sound_track` (MCP and `opendesigner sound add|set|remove`) compute the new list for one change. Files are plain names in `media/` with the audio extension rules and, for the tools, must exist.

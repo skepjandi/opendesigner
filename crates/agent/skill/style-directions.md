@@ -16,8 +16,10 @@ For brand openers, event titles, bold statements.
 - No shadows, no overshoot, no centered-everything layouts.
 
 ## Flat vector explainer
-For product promos, onboarding, how-it-works.
-- Four to five flat colors, no gradients, shapes with at least 3 px outlines or none.
+For product promos, onboarding, how-it-works. For a full animated film (Kurzgesagt look: soft
+gradients, layered scenery, characters, camera) read `get_playbook` `explainer` instead.
+- Four to five flat colors, shapes with at least 3 px outlines or none; a soft gradient only when the
+  piece is animated scenery.
 - Enter with a small overshoot (`pop` + `back`, 300 ms); group items stagger by 80 to 120 ms.
 - A change of scene is carried by a shape: a rectangle that grows to fill the frame and becomes the
   next background (two clips: the second frame starts with that color) beats a crossfade.

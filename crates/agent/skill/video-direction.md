@@ -1,12 +1,21 @@
 # Video direction: from a request to a finished video
 
+## Animated, illustrated or explainer? Read `explainer` first
+
+If the request says animated, animation, scene, explainer, motion graphics, cartoon, 2D, illustration,
+Kurzgesagt or In a Nutshell, call `get_playbook` with `explainer` before anything else and build the
+film that page describes. **An image or JPG backdrop with text animated on top is never an acceptable
+animated scene**: the world is vector shapes in depth layers (`add_block` scenery and props, `path`
+nodes, `import_svg_vector`) that move, with a camera and ambient loops. Before `export_video`, call
+`review_video` and fix its findings (the `explainer` playbook has the gate).
+
 ## Which kind of video is it?
 
 | kind | length | shape | notes |
 |---|---|---|---|
 | App Store app preview | 15 to 30 s | the device's size from `list_video_presets` | autoplays muted: must work with the sound off; screen captures of the app only, words and overlays allowed |
 | Reel / TikTok / Short | 7 to 30 s (up to 60) | 1080x1920, 9:16, 30 fps | hook in the first 1.5 s; captions inside the safe zone |
-| Explainer / product demo | 45 to 90 s | 1920x1080, 16:9 | one idea; script first |
+| Explainer / product demo | 45 to 90 s | 1920x1080, 16:9 | one idea; script first; an animated one follows the `explainer` playbook |
 | Teaser / trailer | 15 to 45 s | any | build to one payoff |
 | Edit of the user's footage | their length | their footage's shape | cut, tighten, title, caption |
 
@@ -34,7 +43,7 @@ inside a design frame, and the frame is a clip or an overlay.
 | asset | how |
 |---|---|
 | icon, shape, logo (`import_asset`, `width`/`height` at least the size it is drawn, `color` a token) | `create` an `image` node in a transparent overlay frame (`add_overlay`, `enter` pop or fade) or inside a scene frame next to its caption |
-| background, pattern, aurora, grain, blob (`make_asset`, the video's width and height, token colors, a seed) | `create` an `image` node that fills a scene frame (`image_fit` cover) under the text; one `make_asset` per scene or one for the whole video; grain over footage as an overlay with `opacity` 0.1 to 0.3 |
+| background, pattern, aurora, grain, blob (`make_asset`, the video's width and height, token colors, a seed) | for a slideshow or a text video only: an `image` node that fills a scene frame (`image_fit` cover) under the text; grain over footage as an overlay with `opacity` 0.1 to 0.3. Never the world of an animated scene: use vector scenery there |
 | picture or screenshot (`list_media`) | an `image` node in a scene frame, or inside a `device_template` screen; give it `motion` on the clip |
 | footage (`list_footage`) | `add_clip` with `footage:{file, in_ms}`, then overlays above it |
 | sound (`make_sound`, `import_asset`, `import_sound`, `import_file`) | `add_sound_track` (role music, voice or sfx; up to 8, each with start, trim, gain, fades, pan; music can `duck` under the voice) or the older single `set_video` prop `audio` |
@@ -115,6 +124,10 @@ percent of the video's height, colours are hex). Keep a cue to two lines, check 
 `render_video_frame` inside a cue and in a word of another, and keep captions off the platform's UI zones.
 
 ## Quality gate
+
+An animated or illustrated video: `review_video` scores it and lists findings with stable codes (an image
+backdrop, only text moving, a still stretch, no ambient loops, no camera move, thin scenes, no sound);
+fix every finding or have a reason, until the score is 70 or more. Then:
 
 First frame: strongest picture? Every shot 1 to 6 s? Anything still for more than 4 s without
 life? Text readable at phone size (the thumbnail test at 360 px wide)? Nothing important in the

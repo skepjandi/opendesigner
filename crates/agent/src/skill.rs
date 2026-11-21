@@ -147,6 +147,10 @@ pub fn generate() -> Vec<SkillFile> {
                 .unwrap_or_default()
                 .to_string(),
         },
+        SkillFile {
+            path: "references/illustrated-explainer.md",
+            contents: playbook::topic("explainer").unwrap_or_default().to_string(),
+        },
     ]
 }
 
@@ -174,7 +178,7 @@ Read the playbooks before you build, through the `get_playbook` tool or the file
 `references/design-direction.md` (images), `references/style-directions.md` (pick a named look),
 `references/video-direction.md` and `references/motion-playbook.md` (video),
 `references/three-d-devices.md` (3D devices, captures and moves), `references/formats.md`
-(sizes and safe zones).
+(sizes and safe zones), `references/illustrated-explainer.md` (anything animated; read it first).
 
 OpenDesigner is a design editor the user has open next to you. They guide you by **pointing**:
 selecting layers, pinning notes on the design, and fixing things by hand. You act through MCP tools;
@@ -269,8 +273,8 @@ memory are listed by `list_media`: use them when the work needs one, and say whi
   Fix the call; do not retry unchanged.
 - Images come from `media/` only: call `list_media` for the files the user imported (with sizes)
   and use a path as an image node's `image`. If the picture you need is not there, look for it
-  with `find_files` (pictures and videos anywhere under the user's home folder, if they allow it)
-  and bring it in with `import_file`; if that is switched off, ask the user to add it in the app. A missing or unreadable image is reported by the preview and is not drawn. Text that wraps to more rows than its box is tall is reported too (`warnings`); fix it before exporting.
+  with `find_files`
+  and bring it in with `import_file`; if that is switched off, ask the user to add it in the app. A missing or unreadable image is reported by the preview and is not drawn. Text overflowing its box is reported too (`warnings`); fix it.
 - Assets are built in: `search_assets` finds bundled Lucide icons, shapes, blobs, backgrounds,
   patterns, installed-pack art and sounds; `import_asset` puts one in `media/` (recolored to your
   tokens), `make_asset` generates one from a seed. Use them before drawing anything by hand.
@@ -278,8 +282,7 @@ memory are listed by `list_media`: use them when the work needs one, and say whi
   `list_asset_sources` and `search_assets`, then read `get_playbook` `video` and `motion`. An
   asset reaches the timeline as an `image` node (its `image` is the `media/` file) in a design
   frame that is a clip (`add_clip`) or an overlay (`add_overlay`); footage is an `add_clip` with
-  `footage`; sounds go to `set_video` `audio`. A video of flat rectangles and plain text, made
-  while icons and generators sit unused, is not done.
+  `footage`; sounds go to `add_sound_track`. A video of flat rectangles and plain text is not done.
 - Text is drawn; the default font is the bundled Lato, and `font_family` may name a font installed
   on the user's machine (an unknown family falls back to Lato, so check the preview).
 - The preset rules for store assets are listed in `references/store-specs.md`; the full tool list
