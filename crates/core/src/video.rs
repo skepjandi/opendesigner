@@ -39,6 +39,14 @@ pub enum Ease {
     Back,
     /// Springs past the end and settles with a few small, damped swings: a physical arrival.
     Spring,
+    /// The same curve as `ease_in_out`, under the name animation tools use.
+    EaseInOutCubic,
+    /// The same curve as `back`: overshoots the end a little, then settles.
+    EaseOutBack,
+    /// Snaps past the end and rings a few times before it settles, like a plucked string.
+    Elastic,
+    /// Falls to the end and bounces off it a few times, like a dropped ball.
+    Bounce,
 }
 
 impl Ease {
@@ -49,14 +57,14 @@ impl Ease {
             Ease::Linear => t,
             Ease::EaseIn => t * t * t,
             Ease::EaseOut => 1.0 - (1.0 - t).powi(3),
-            Ease::EaseInOut => {
+            Ease::EaseInOut | Ease::EaseInOutCubic => {
                 if t < 0.5 {
                     4.0 * t * t * t
                 } else {
                     1.0 - (-2.0 * t + 2.0).powi(3) / 2.0
                 }
             }
-            Ease::Back => {
+            Ease::Back | Ease::EaseOutBack => {
                 const C1: f64 = 1.70158;
                 const C3: f64 = C1 + 1.0;
                 1.0 + C3 * (t - 1.0).powi(3) + C1 * (t - 1.0).powi(2)
@@ -66,7 +74,34 @@ impl Ease {
                 let wave = |t: f64| 1.0 - (-6.0 * t).exp() * (t * 4.5 * std::f64::consts::PI).cos();
                 wave(t) + t * (1.0 - wave(1.0))
             }
+            Ease::Elastic => elastic_out(t),
+            Ease::Bounce => bounce_out(t),
         }
+    }
+}
+
+fn elastic_out(t: f64) -> f64 {
+    if t <= 0.0 || t >= 1.0 {
+        return t;
+    }
+    let c4 = std::f64::consts::TAU / 3.0;
+    2f64.powf(-10.0 * t) * ((t * 10.0 - 0.75) * c4).sin() + 1.0
+}
+
+fn bounce_out(t: f64) -> f64 {
+    const N1: f64 = 7.5625;
+    const D1: f64 = 2.75;
+    if t < 1.0 / D1 {
+        N1 * t * t
+    } else if t < 2.0 / D1 {
+        let t = t - 1.5 / D1;
+        N1 * t * t + 0.75
+    } else if t < 2.5 / D1 {
+        let t = t - 2.25 / D1;
+        N1 * t * t + 0.9375
+    } else {
+        let t = t - 2.625 / D1;
+        N1 * t * t + 0.984_375
     }
 }
 

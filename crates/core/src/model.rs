@@ -6,12 +6,14 @@ use serde::{Deserialize, Serialize};
 use crate::error::OpError;
 use crate::limits::{self, finite_in, text_within};
 use crate::paint::{Paint, valid_token_name};
+use crate::vector::{FillRule, LineCap, LineJoin, ViewBox};
 
 /// Version of the on-disk project format. A loader refuses a newer one. Version 2 added 3D
 /// devices and keyframe animations; version 3 added sound tracks, captions, clip speed and grades,
-/// transitions and template variables. Every older project is a valid version 3 project, because
+/// transitions and template variables; version 4 added vector paths, gradients, 2D transforms,
+/// effects, looping keyframes and the camera. Every older project is a valid version 4 project, because
 /// each addition is an optional field.
-pub const FORMAT_VERSION: u32 = 3;
+pub const FORMAT_VERSION: u32 = 4;
 
 /// Stable identifier of a node or page. Never reused within a document.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
@@ -78,6 +80,8 @@ pub enum NodeKind {
     Image,
     /// A device in 3D (phone, tablet, laptop, monitor) drawn in the node's box.
     Device3d,
+    /// A vector path (SVG path data) drawn in the node's box.
+    Path,
 }
 
 impl NodeKind {
@@ -90,6 +94,7 @@ impl NodeKind {
             NodeKind::Text => "text",
             NodeKind::Image => "image",
             NodeKind::Device3d => "device3d",
+            NodeKind::Path => "path",
         }
     }
 
@@ -103,6 +108,34 @@ impl NodeKind {
 pub struct Stroke {
     pub paint: Paint,
     pub width: f64,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub cap: LineCap,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub join: LineJoin,
+    /// Lengths of dash and gap, alternating (an odd count repeats itself); empty is solid.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dash: Vec<f64>,
+    /// The part of the outline that is drawn, as fractions of its length: from `trim_start` to
+    /// `trim_end` (the smaller to the larger). Moving `trim_end` from 0 to 1 draws the shape on.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub trim_start: f64,
+    #[serde(default = "default_one", skip_serializing_if = "is_one")]
+    pub trim_end: f64,
+}
+
+impl Stroke {
+    /// A plain stroke: butt caps, mitered corners, solid, the whole outline.
+    pub fn new(paint: Paint, width: f64) -> Stroke {
+        Stroke {
+            paint,
+            width,
+            cap: LineCap::default(),
+            join: LineJoin::default(),
+            dash: Vec::new(),
+            trim_start: 0.0,
+            trim_end: 1.0,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -139,6 +172,32 @@ pub struct Node {
     pub visible: bool,
     #[serde(default = "default_one", skip_serializing_if = "is_one")]
     pub opacity: f64,
+    /// Degrees clockwise about the pivot, applied with the scale to the node and everything in it.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub rotation: f64,
+    /// Scale about the pivot along the node's own axes; negative flips.
+    #[serde(default = "default_one", skip_serializing_if = "is_one")]
+    pub scale_x: f64,
+    #[serde(default = "default_one", skip_serializing_if = "is_one")]
+    pub scale_y: f64,
+    /// The point rotation and scale turn about, as fractions of the node's box (a group without
+    /// a size uses the box around its children).
+    #[serde(default = "default_half", skip_serializing_if = "is_half")]
+    pub pivot_x: f64,
+    #[serde(default = "default_half", skip_serializing_if = "is_half")]
+    pub pivot_y: f64,
+    /// Gaussian blur radius of the node and everything in it, in document units.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub blur: f64,
+    /// A drop shadow cast by the node as drawn.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shadow: Option<crate::transform::Shadow>,
+    /// On a group or frame: children are clipped to its box and corner radius. A frame always is.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub clip: bool,
+    /// How far the video camera moves the node: 1 with the scene, 0 pinned to the screen.
+    #[serde(default = "default_one", skip_serializing_if = "is_one")]
+    pub depth: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fill: Option<Paint>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -172,6 +231,15 @@ pub struct Node {
     /// Colour grading and effects on an image node (`crate::grade`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grade: Option<crate::grade::Grade>,
+    /// SVG path data of a `path` node (present exactly on those nodes); its bounds, or the
+    /// `view_box`, are stretched over the node's box.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub view_box: Option<ViewBox>,
+    /// Unset means nonzero.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fill_rule: Option<FillRule>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub children: Vec<Node>,
 }
@@ -190,6 +258,18 @@ fn is_one(v: &f64) -> bool {
 }
 fn is_zero(v: &f64) -> bool {
     *v == 0.0
+}
+fn is_default<T: Default + PartialEq>(v: &T) -> bool {
+    *v == T::default()
+}
+fn default_half() -> f64 {
+    0.5
+}
+fn is_half(v: &f64) -> bool {
+    *v == 0.5
+}
+fn is_false(v: &bool) -> bool {
+    !*v
 }
 
 impl Node {
@@ -217,6 +297,18 @@ impl Node {
             image_fit: None,
             device3d: (kind == NodeKind::Device3d).then(crate::device3d::Device3d::default),
             grade: None,
+            path: None,
+            view_box: None,
+            fill_rule: None,
+            rotation: 0.0,
+            scale_x: 1.0,
+            scale_y: 1.0,
+            pivot_x: 0.5,
+            pivot_y: 0.5,
+            blur: 0.0,
+            shadow: None,
+            clip: false,
+            depth: 1.0,
             children: Vec::new(),
         }
     }
@@ -400,12 +492,13 @@ impl Document {
     /// Ids of the nodes whose fill or stroke refers to the token `name`.
     pub fn token_users(&self, name: &str) -> Vec<NodeId> {
         fn uses(p: &crate::paint::Paint, name: &str) -> bool {
-            matches!(p, crate::paint::Paint::Token(t) if t == name)
+            p.uses_token(name)
         }
         fn walk(n: &Node, name: &str, out: &mut Vec<NodeId>) {
             let fill = n.fill.as_ref().is_some_and(|p| uses(p, name));
             let stroke = n.stroke.as_ref().is_some_and(|s| uses(&s.paint, name));
-            if fill || stroke {
+            let shadow = n.shadow.as_ref().is_some_and(|s| uses(&s.color, name));
+            if fill || stroke || shadow {
                 out.push(n.id.clone());
             }
             for c in &n.children {
@@ -599,12 +692,12 @@ pub(crate) fn validate_node_fields(
         crate::media::reference_name(path)?;
     }
     if let Some(fill) = &node.fill {
-        fill.resolve(tokens)?;
+        fill.normalized(tokens)?;
     }
     if let Some(stroke) = &node.stroke {
-        stroke.paint.resolve(tokens)?;
-        finite_in("stroke width", stroke.width, 0.0, limits::MAX_STROKE_WIDTH)?;
+        crate::vector::checked_stroke(stroke, tokens)?;
     }
+    crate::vector::check_node(node)?;
     match (&node.device3d, node.kind) {
         (Some(d), NodeKind::Device3d) => d.check()?,
         (None, NodeKind::Device3d) => {
@@ -629,6 +722,29 @@ pub(crate) fn validate_node_fields(
             });
         }
         grade.checked()?;
+    }
+    check_transform_fields(node, tokens)?;
+    Ok(())
+}
+
+/// Checks of the transform, blur, shadow, clip and depth fields (`crate::transform`).
+fn check_transform_fields(node: &Node, tokens: &BTreeMap<String, String>) -> Result<(), OpError> {
+    use crate::transform as t;
+    t::rotation(node.rotation)?;
+    t::scale("scale_x", node.scale_x)?;
+    t::scale("scale_y", node.scale_y)?;
+    t::pivot("pivot_x", node.pivot_x)?;
+    t::pivot("pivot_y", node.pivot_y)?;
+    t::blur(node.blur)?;
+    t::depth(node.depth)?;
+    if let Some(shadow) = &node.shadow {
+        shadow.checked(tokens)?;
+    }
+    if node.clip && !node.kind.is_container() {
+        return Err(OpError::NotApplicable {
+            property: "clip",
+            kind: node.kind.as_str(),
+        });
     }
     Ok(())
 }

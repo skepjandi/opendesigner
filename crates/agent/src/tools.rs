@@ -132,6 +132,7 @@ pub fn definitions() -> Vec<Value> {
     all.extend(crate::audio_tools::definitions());
     all.extend(crate::assets::tools::definitions());
     all.extend(crate::assets::logo::definitions());
+    all.extend(crate::vector_tools::definitions());
     all.extend(showcase_definitions());
     all
 }
@@ -260,7 +261,7 @@ fn core_definitions() -> Vec<Value> {
             "Find nodes by name and kind.",
             json!({
                 "name_contains": {"type": "string"},
-                "kind": {"type": "string", "enum": ["frame", "group", "rect", "ellipse", "text", "image", "device3d"]},
+                "kind": {"type": "string", "enum": ["frame", "group", "rect", "ellipse", "text", "image", "device3d", "path"]},
                 "limit": {"type": "integer", "minimum": 1, "maximum": 200}
             }),
             &[],
@@ -278,14 +279,26 @@ fn core_definitions() -> Vec<Value> {
             "Change the design with a list of operations, applied together or not at all. \
              Operations: {op:'create', parent, index?, node:{kind, name?, x, y, width, height, fill?, stroke?, \
              corner_radius?, opacity?, visible?, text?, font_size?, font_family?, font_weight?, text_align?, \
-             line_height?, image?, image_fit?, device3d?, children?}}, \
+             line_height?, image?, image_fit?, device3d?, path?, view_box?, fill_rule?, rotation?, scale_x?, scale_y?, pivot_x?, pivot_y?, blur?, shadow?, clip?, \
+             depth?, children?}}, \
              {op:'set', id, prop:{name, value}} with name one of name, x, y, width, height, visible, opacity, \
              fill, stroke, corner_radius, text, font_size, font_family, font_weight, text_align, line_height, \
-             image (a media/ path from list_media), image_fit (cover, contain or fill), {op:'move', id, x, y}, \
+             image (a media/ path from list_media), image_fit (cover, contain or fill), path, view_box, fill_rule, stroke_width, trim_start, trim_end, rotation, scale_x, scale_y, scale (both), \
+             scale_xy (value {x, y}), pivot_x, pivot_y, blur, drop_shadow, shadow_dx, shadow_dy, shadow_blur, clip, depth \
+             (see Transform and effects below), {op:'move', id, x, y}, \
              {op:'reparent', id, parent, index?}, {op:'delete', id}, \
              {op:'set_token', name, value} (a named color '#rrggbb'; value null removes an unused token), \
              {op:'set_localized_text', locale, id, text} (a translation of a text node; text null removes it). \
-             3D devices: kind 'device3d' is a phone, tablet, laptop or monitor drawn in 3D inside its box \
+             Vector shapes: kind 'path' draws SVG path data in its box: path:'M0 0 C10 20 30 20 40 0 Z' (commands M L H V C S Q T A Z, \
+             absolute or relative, at most 4000 segments and 64 KB). The path's own bounds are stretched over the node's \
+             width and height, so resizing scales it; give no width and height and the box takes the path's size. view_box:{x, y, width, height} \
+             maps that rectangle of path coordinates onto the box instead (exact placement for imported art); fill_rule is nonzero (default) or evenodd. \
+             Any shape (frame, rect, ellipse, path) takes a gradient as fill or as stroke paint: {type:'linear', angle?: degrees, 0 left to right, \
+             90 top to bottom (default), stops:[{offset: 0 to 1, color}]} or {type:'radial', cx?, cy?: fractions of the box (0.5), r?: fraction of the \
+             longer side (0.5), stops}, 2 to 8 stops whose colors are '#rrggbb[aa]' or '{token}'. A stroke is {paint, width, cap?: butt|round|square, \
+             join?: miter|round|bevel, dash?: [dash, gap, ...], trim_start?, trim_end?: 0 to 1 along the outline, only the stretch between them is \
+             drawn}; animate trim_end from 0 to 1 to draw a line on. A stroke width of 0 draws nothing. import_svg_vector turns a whole SVG illustration into \
+             path nodes. 3D devices: kind 'device3d' is a phone, tablet, laptop or monitor drawn in 3D inside its box \
              (the box is the viewport; 1 zoom fits the device with a margin at any turn); its fill is the body \
              finish, its image (with image_fit) is the capture on the screen; create it with \
              device3d:{model: phone|phone_punch_hole|tablet|laptop|monitor, rotate_x?, rotate_y?, rotate_z?, zoom?, fov?, \
@@ -295,6 +308,16 @@ fn core_definitions() -> Vec<Value> {
              light_angle (degrees, 0 from above, 90 from the right), shadow (0 to 1), glare (0 to 1, screen reflection), \
              screen_scroll (0 top to 1 bottom of a long capture; null centres), screen_footage (value {file, in_ms}: a \
              recording on the screen that plays while the frame is shown; null shows the image). \
+             Transform and effects (any node, drawn together with everything inside it; defaults mean no effect): rotation \
+             (degrees, clockwise, up to 36000), scale_x and scale_y (default 1, negative flips; scale sets both), pivot_x and \
+             pivot_y (fractions of the node's own box that rotation and scale turn about, default 0.5 the center; a group \
+             without a size uses the box around its children), blur (Gaussian radius in px, 0 to 500), shadow (create) or \
+             drop_shadow (set) = {dx, dy, blur, color} with the color's alpha as its opacity (null removes it; shadow_dx, \
+             shadow_dy and shadow_blur change one number of an existing shadow and can be keyframed), clip (true on a group or \
+             frame: children are cut at its box; a group needs a width and height for that, a frame always clips) and depth \
+             (0 to 10, default 1: how strongly the video's camera moves the node, 0 pins it to the screen, 0.5 moves half as \
+             far for parallax; depths multiply down the tree). The exported frame ignores its own transform. A node's bounds \
+             (and what a click hits) are the box around it after its transform. \
              Videos (see list_videos): {op:'create_video', name, fps, width, height} (even sizes), {op:'delete_video', id}, \
              {op:'set_video', id, prop:{name, value}} with name one of name, fps, size (value {width, height}), \
              audio (value {file:'media/x.mp3', start_ms?, gain? (0 to 2), fade_in_ms?, fade_out_ms?} for the sound under the picture; null takes it away), \
@@ -309,11 +332,20 @@ fn core_definitions() -> Vec<Value> {
              Times (durations, starts, in points, transitions, keys) are rounded to the video's frame grid; the receipt shows the value kept. \
              {op:'add_overlay', video, frame, start_ms, duration_ms, fade_ms?, enter?, exit?, ease?} (a design frame drawn over the whole video for a while: titles, lower thirds, call-outs; a frame with no fill is transparent; enter and exit are none, fade, slide_up, slide_down, slide_left, slide_right, pop or zoom, taking fade_ms each), {op:'remove_overlay', video, overlay}, \
              {op:'set_overlay', video, overlay, prop:{name, value}} with name one of frame, start_ms, duration_ms, fade_ms, enter, exit, ease, \
-             {op:'animate', video, node, prop, keys:[{at_ms, value, ease?}]} (keyframes one number of a node over the video's time, \
-             at_ms from the start of the video, strictly increasing; the value holds before the first key and after the last; \
-             prop one of x, y, width, height, opacity, corner_radius, rotate_x, rotate_y, rotate_z, zoom, fov, light_angle, shadow, glare, \
-             screen_scroll, or on an image node grade_exposure, grade_contrast, grade_saturation, grade_temperature, grade_tint, grade_vignette, grade_blur; keys:[] removes it; animate_preset writes these for you). Eases: linear, ease_in, ease_out, ease_in_out, \
-             back (overshoots) or spring (overshoots and settles). Colors are '#rrggbb', '#rrggbbaa' or \
+             {op:'animate', video, node, prop, keys:[{at_ms, value, ease?}], repeat?} (keyframes one number of a node over the video's time, \
+             at_ms from the start of the video, strictly increasing; the value holds before the first key and after the last unless \
+             repeat is loop (start again from the first key, for as long as the video plays; end on the first key's value for a seamless \
+             cycle) or pingpong (play back and forth), once being the default and what an animate without repeat sets, so send repeat \
+             again when you change the keys of a looping track; \
+             prop one of x, y, width, height, opacity, corner_radius, rotation, scale_x, scale_y, scale (both), blur, shadow_dx, shadow_dy, \
+             shadow_blur (the node needs a shadow), rotate_x, rotate_y, rotate_z, zoom, fov, light_angle, shadow, glare, \
+             screen_scroll, trim_start, trim_end, stroke_width (the node needs a stroke), fill_color (key value '#rrggbb[aa]', mixed in sRGB and listed back as the number 0xRRGGBBAA; the node needs a fill), or on an image node grade_exposure, grade_contrast, grade_saturation, grade_temperature, grade_tint, grade_vignette, grade_blur; \
+             the camera props camera_x, camera_y (pan in px: the scene moves the other way), camera_zoom (0.1 to 20, about the frame's center) \
+             and camera_rotation (degrees the scene turns clockwise about the center) take the VIDEO's id as node and move every node of a \
+             clip's frame by its depth (nodes at depth 0 and overlays stay); a single key holds a camera still; keys:[] removes it; \
+             animate_preset writes some of these for you). Eases: linear, ease_in, ease_out, ease_in_out (also ease_in_out_cubic), \
+             back (overshoots; also ease_out_back), spring (overshoots and settles), elastic (rings past the end) or bounce (bounces off the end). \
+             Colors are '#rrggbb', '#rrggbbaa' or \
              '{token.name}'. Template variables (see list_variables): {op:'declare_variable', variable:{id, kind, label, description?, \
              portrays?, default, enum_values?, binds?:[{node, prop}]}} with kind one of string, number, color, bool, enum, image, font \
              (enum_values only for enum) and portrays one of subject_name, subject_domain, subject_tagline, subject_logo, host_identity, \
@@ -697,6 +729,7 @@ pub fn call(ctx: &mut CallCtx, name: &str, args: Value) -> Result<Output, ToolEr
             let dir = ctx.ws.dir().map(std::path::Path::to_path_buf);
             crate::assets::logo::call(dir.as_deref(), n, args)
         }
+        n if crate::vector_tools::NAMES.contains(&n) => crate::vector_tools::call(ctx, n, args),
         n if crate::assets::tools::handles(n) => {
             let dir = ctx.ws.dir().map(std::path::Path::to_path_buf);
             crate::assets::tools::call(dir.as_deref(), n, args)

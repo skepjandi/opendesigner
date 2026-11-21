@@ -346,7 +346,43 @@ Properties for `set`: `name`, `x`, `y`, `width`, `height`, `visible`, `opacity` 
 (a color or null), `stroke` (`{"paint": "#000000", "width": 2}` or null), `corner_radius`, `text`,
 `font_size`, `font_family` (a name or null), `font_weight` (100 to 900 or null), `text_align`
 (`left`, `center`, `right` or null), `line_height` (a multiple of the font size, 0.5 to 4, or
-null), `image`. Not every property applies to every kind of node; a rejection says which.
+null), `image`, and on paths `path`, `view_box`, `fill_rule`. A stroke's `stroke_width`, `trim_start`
+and `trim_end` are properties too. Not every property applies to every kind of node; a rejection says
+which.
+
+Vector shapes: a `path` node draws SVG path data in its box (the path's own bounds are stretched over
+the box, so resizing scales it), and any shape can be filled or stroked with a gradient. A stroke
+has `cap`, `join`, a `dash` array and `trim_start` / `trim_end` (0 to 1 along the outline), so a line
+draws on when `trim_end` is animated from 0 to 1:
+
+```json
+{"ops": [{"op": "create", "parent": "n_3",
+          "node": {"kind": "path", "name": "Wave", "x": 80, "y": 600,
+                   "path": "M0 40 C60 0 120 80 180 40 S300 0 360 40",
+                   "stroke": {"paint": {"type": "linear", "angle": 0,
+                                        "stops": [{"offset": 0, "color": "#ff7a59"},
+                                                  {"offset": 1, "color": "#ffd166"}]},
+                           "width": 10, "cap": "round", "trim_end": 0}}]}
+```
+
+Then, with the created id:
+
+```json
+{"ops": [{"op": "animate", "video": "v_20", "node": "n_9", "prop": "trim_end",
+          "keys": [{"at_ms": 0, "value": 0}, {"at_ms": 1200, "value": 1, "ease": "ease_out"}]}]}
+```
+
+`import_svg_vector` brings a whole SVG illustration in as one group of shape nodes named after the
+SVG's ids (one undo removes it); `fill_color` keys (`"value": "#rrggbb"`) animate a shape's color.
+
+Transform and effects work on any node and on everything inside it: `rotation` (degrees, clockwise),
+`scale_x` and `scale_y` (negative flips; `scale` sets both), `pivot_x` and `pivot_y` (fractions of the
+node's own box the turn and scale happen about, 0.5 is the middle; a group without a size uses the box
+around its children), `blur` (px), `drop_shadow` (`{"dx": 0, "dy": 12, "blur": 24, "color": "#00000066"}`
+or null; `shadow_dx`, `shadow_dy` and `shadow_blur` change one number), `clip` (a group or frame cuts
+its children at its box; give a group a `width` and `height`) and `depth` (how far a video's camera
+moves it: 1 with the scene, 0 pinned to the screen, 0.5 for parallax). `create` takes the same names
+(`shadow` for the shadow). Bounds and hit tests follow the transform.
 
 Design tokens are named colors. Define or recolor one with `{"op": "set_token", "name":
 "brand.gold", "value": "#f2ca83"}`; every node that fills or strokes with `{brand.gold}` changes

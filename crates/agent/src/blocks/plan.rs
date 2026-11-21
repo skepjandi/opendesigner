@@ -328,6 +328,7 @@ fn move_ops(
                         ease,
                     })
                     .collect(),
+                repeat: od_core::Repeat::Once,
             }])
         }
     }

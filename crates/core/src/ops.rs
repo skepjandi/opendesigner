@@ -6,7 +6,7 @@ use std::mem::replace;
 
 use serde::{Deserialize, Serialize};
 
-use crate::animation::{AnimProp, Key};
+use crate::animation::{AnimProp, Key, Repeat};
 use crate::device3d::{self, Device3d, DeviceModel};
 use crate::error::OpError;
 use crate::limits::{self, finite_in, text_within};
@@ -14,6 +14,8 @@ use crate::model::{
     Document, ImageFit, Node, NodeId, NodeKind, Stroke, TextAlign, validate_node_fields,
 };
 use crate::paint::Paint;
+use crate::transform::Shadow;
+use crate::vector::{FillRule, ViewBox};
 use crate::video::{
     Clip, ClipProperty, Footage, Motion, Overlay, OverlayProperty, Transition, Video, VideoProperty,
 };
@@ -29,6 +31,27 @@ pub enum Property {
     Height(f64),
     Visible(bool),
     Opacity(f64),
+    /// Degrees clockwise about the pivot.
+    Rotation(f64),
+    ScaleX(f64),
+    ScaleY(f64),
+    /// Both scale factors at once; undone by `scale_xy`.
+    Scale(f64),
+    ScaleXy {
+        x: f64,
+        y: f64,
+    },
+    /// Fractions of the node's box that rotation and scale turn about.
+    PivotX(f64),
+    PivotY(f64),
+    Blur(f64),
+    /// The node's drop shadow (`null` for none). Named apart from the 3D device's `shadow`.
+    DropShadow(Option<Shadow>),
+    ShadowDx(f64),
+    ShadowDy(f64),
+    ShadowBlur(f64),
+    Clip(bool),
+    Depth(f64),
     Fill(Option<Paint>),
     Stroke(Option<Stroke>),
     CornerRadius(f64),
@@ -60,9 +83,43 @@ pub enum Property {
         param: crate::grade::GradeParam,
         value: f64,
     },
+    /// SVG path data of a path node.
+    Path(String),
+    /// The rectangle of path coordinates mapped onto the node's box (`null`: the path's own bounds).
+    ViewBox(Option<ViewBox>),
+    /// Which side of a self-crossing path is inside (`null`: nonzero).
+    FillRule(Option<FillRule>),
+    /// The stroke's width (the node must have a stroke); what a stroke-width keyframe moves.
+    StrokeWidth(f64),
+    /// Where along the outline the stroke starts, 0 to 1 (the node must have a stroke).
+    TrimStart(f64),
+    /// Where along the outline the stroke ends, 0 to 1 (the node must have a stroke).
+    TrimEnd(f64),
 }
 
 impl Property {
+    /// Whether the property belongs to `crate::transform` (rotation, scale, pivot, blur, shadow,
+    /// clip, depth).
+    pub(crate) fn is_transform(&self) -> bool {
+        matches!(
+            self,
+            Property::Rotation(_)
+                | Property::ScaleX(_)
+                | Property::ScaleY(_)
+                | Property::Scale(_)
+                | Property::ScaleXy { .. }
+                | Property::PivotX(_)
+                | Property::PivotY(_)
+                | Property::Blur(_)
+                | Property::DropShadow(_)
+                | Property::ShadowDx(_)
+                | Property::ShadowDy(_)
+                | Property::ShadowBlur(_)
+                | Property::Clip(_)
+                | Property::Depth(_)
+        )
+    }
+
     pub fn name(&self) -> &'static str {
         match self {
             Property::Name(_) => "name",
@@ -72,6 +129,20 @@ impl Property {
             Property::Height(_) => "height",
             Property::Visible(_) => "visible",
             Property::Opacity(_) => "opacity",
+            Property::Rotation(_) => "rotation",
+            Property::ScaleX(_) => "scale_x",
+            Property::ScaleY(_) => "scale_y",
+            Property::Scale(_) => "scale",
+            Property::ScaleXy { .. } => "scale_xy",
+            Property::PivotX(_) => "pivot_x",
+            Property::PivotY(_) => "pivot_y",
+            Property::Blur(_) => "blur",
+            Property::DropShadow(_) => "drop_shadow",
+            Property::ShadowDx(_) => "shadow_dx",
+            Property::ShadowDy(_) => "shadow_dy",
+            Property::ShadowBlur(_) => "shadow_blur",
+            Property::Clip(_) => "clip",
+            Property::Depth(_) => "depth",
             Property::Fill(_) => "fill",
             Property::Stroke(_) => "stroke",
             Property::CornerRadius(_) => "corner_radius",
@@ -96,6 +167,12 @@ impl Property {
             Property::ScreenFootage(_) => "screen_footage",
             Property::Grade(_) => "grade",
             Property::GradeParam { .. } => "grade_param",
+            Property::Path(_) => "path",
+            Property::ViewBox(_) => "view_box",
+            Property::FillRule(_) => "fill_rule",
+            Property::StrokeWidth(_) => "stroke_width",
+            Property::TrimStart(_) => "trim_start",
+            Property::TrimEnd(_) => "trim_end",
         }
     }
 
@@ -106,10 +183,29 @@ impl Property {
             | Property::X(_)
             | Property::Y(_)
             | Property::Visible(_)
-            | Property::Opacity(_) => true,
-            Property::Width(_) | Property::Height(_) => kind != Group,
-            Property::Fill(_) => matches!(kind, Frame | Rect | Ellipse | Text | Device3d),
-            Property::Stroke(_) => matches!(kind, Frame | Rect | Ellipse),
+            | Property::Opacity(_)
+            | Property::Width(_)
+            | Property::Height(_)
+            | Property::Rotation(_)
+            | Property::ScaleX(_)
+            | Property::ScaleY(_)
+            | Property::Scale(_)
+            | Property::ScaleXy { .. }
+            | Property::PivotX(_)
+            | Property::PivotY(_)
+            | Property::Blur(_)
+            | Property::DropShadow(_)
+            | Property::ShadowDx(_)
+            | Property::ShadowDy(_)
+            | Property::ShadowBlur(_)
+            | Property::Depth(_) => true,
+            Property::Clip(_) => kind.is_container(),
+            Property::Fill(_) => matches!(kind, Frame | Rect | Ellipse | Text | Device3d | Path),
+            Property::Stroke(_)
+            | Property::StrokeWidth(_)
+            | Property::TrimStart(_)
+            | Property::TrimEnd(_) => matches!(kind, Frame | Rect | Ellipse | Path),
+            Property::Path(_) | Property::ViewBox(_) | Property::FillRule(_) => kind == Path,
             Property::CornerRadius(_) => matches!(kind, Frame | Rect | Image),
             Property::Text(_)
             | Property::FontSize(_)
@@ -163,23 +259,14 @@ fn apply_property(
             Property::Opacity(replace(&mut node.opacity, v))
         }
         Property::Fill(v) => {
-            if let Some(p) = &v {
-                p.resolve(tokens)?;
-            }
+            let v = v.as_ref().map(|p| p.normalized(tokens)).transpose()?;
             Property::Fill(replace(&mut node.fill, v))
         }
         Property::Stroke(v) => {
-            let v = match v {
-                Some(s) => {
-                    s.paint.resolve(tokens)?;
-                    let width = finite_in("stroke width", s.width, 0.0, limits::MAX_STROKE_WIDTH)?;
-                    Some(Stroke {
-                        paint: s.paint,
-                        width,
-                    })
-                }
-                None => None,
-            };
+            let v = v
+                .as_ref()
+                .map(|s| crate::vector::checked_stroke(s, tokens))
+                .transpose()?;
             Property::Stroke(replace(&mut node.stroke, v))
         }
         Property::CornerRadius(v) => {
@@ -246,6 +333,13 @@ fn apply_property(
             node.grade = Some(grade).filter(|g| !g.is_neutral());
             Property::GradeParam { param, value: old }
         }
+        transform if transform.is_transform() => crate::transform::apply(node, transform, tokens)?,
+        vector_prop @ (Property::Path(_)
+        | Property::ViewBox(_)
+        | Property::FillRule(_)
+        | Property::StrokeWidth(_)
+        | Property::TrimStart(_)
+        | Property::TrimEnd(_)) => crate::vector::apply_property(node, vector_prop)?,
         device_prop => apply_device_property(node, device_prop)?,
     })
 }
@@ -313,6 +407,25 @@ pub struct NewNode {
     pub visible: Option<bool>,
     #[serde(default)]
     pub opacity: Option<f64>,
+    /// Transform and effects (`crate::transform`); omitted means none.
+    #[serde(default)]
+    pub rotation: Option<f64>,
+    #[serde(default)]
+    pub scale_x: Option<f64>,
+    #[serde(default)]
+    pub scale_y: Option<f64>,
+    #[serde(default)]
+    pub pivot_x: Option<f64>,
+    #[serde(default)]
+    pub pivot_y: Option<f64>,
+    #[serde(default)]
+    pub blur: Option<f64>,
+    #[serde(default)]
+    pub shadow: Option<Shadow>,
+    #[serde(default)]
+    pub clip: Option<bool>,
+    #[serde(default)]
+    pub depth: Option<f64>,
     #[serde(default)]
     pub fill: Option<Paint>,
     #[serde(default)]
@@ -338,6 +451,14 @@ pub struct NewNode {
     /// For a `device3d` node: the model and how it is turned and lit (defaults when omitted).
     #[serde(default)]
     pub device3d: Option<Device3d>,
+    /// For a `path` node: SVG path data. Without a width and a height the box takes the size of
+    /// the path's own bounds.
+    #[serde(default)]
+    pub path: Option<String>,
+    #[serde(default)]
+    pub view_box: Option<ViewBox>,
+    #[serde(default)]
+    pub fill_rule: Option<FillRule>,
     #[serde(default)]
     pub children: Vec<NewNode>,
 }
@@ -353,6 +474,15 @@ impl NewNode {
             height: 0.0,
             visible: None,
             opacity: None,
+            rotation: None,
+            scale_x: None,
+            scale_y: None,
+            pivot_x: None,
+            pivot_y: None,
+            blur: None,
+            shadow: None,
+            clip: None,
+            depth: None,
             fill: None,
             stroke: None,
             corner_radius: None,
@@ -365,12 +495,31 @@ impl NewNode {
             image: None,
             image_fit: None,
             device3d: None,
+            path: None,
+            view_box: None,
+            fill_rule: None,
             children: Vec::new(),
         }
     }
 
     fn count(&self) -> usize {
         1 + self.children.iter().map(NewNode::count).sum::<usize>()
+    }
+
+    /// The `set`s that give a fresh node the transform and effects asked for.
+    fn transform_properties(&self) -> Vec<Property> {
+        let numbers = [
+            self.rotation.map(Property::Rotation),
+            self.scale_x.map(Property::ScaleX),
+            self.scale_y.map(Property::ScaleY),
+            self.pivot_x.map(Property::PivotX),
+            self.pivot_y.map(Property::PivotY),
+            self.blur.map(Property::Blur),
+            self.shadow.clone().map(|s| Property::DropShadow(Some(s))),
+            self.clip.map(Property::Clip),
+            self.depth.map(Property::Depth),
+        ];
+        numbers.into_iter().flatten().collect()
     }
 
     fn build(
@@ -401,17 +550,21 @@ impl NewNode {
         set(Property::Name(name))?;
         set(Property::X(self.x))?;
         set(Property::Y(self.y))?;
-        if self.kind != NodeKind::Group || self.width != 0.0 {
-            set(Property::Width(self.width))?;
+        let (width, height) = crate::vector::box_size(self);
+        if self.kind != NodeKind::Group || width != 0.0 {
+            set(Property::Width(width))?;
         }
-        if self.kind != NodeKind::Group || self.height != 0.0 {
-            set(Property::Height(self.height))?;
+        if self.kind != NodeKind::Group || height != 0.0 {
+            set(Property::Height(height))?;
         }
         if let Some(v) = self.visible {
             set(Property::Visible(v))?;
         }
         if let Some(v) = self.opacity {
             set(Property::Opacity(v))?;
+        }
+        for prop in self.transform_properties() {
+            set(prop)?;
         }
         if self.fill.is_some() {
             set(Property::Fill(self.fill.clone()))?;
@@ -450,6 +603,9 @@ impl NewNode {
             for prop in device_properties(d) {
                 set(prop)?;
             }
+        }
+        for prop in crate::vector::path_properties(self)? {
+            set(prop)?;
         }
         for child in &self.children {
             node.children.push(child.build(next, tokens, depth + 1)?);
@@ -586,12 +742,16 @@ pub enum Operation {
     },
     /// Keyframe one number of a node over a video's time: `keys` at `at_ms` from the start of
     /// the video, each reached with its `ease`. The value holds before the first key and after
-    /// the last. Empty `keys` removes the animation.
+    /// the last, or cycles when `repeat` is `loop` or `pingpong`. Empty `keys` removes the
+    /// animation. The camera's properties (`camera_x`, `camera_y`, `camera_zoom`,
+    /// `camera_rotation`) take the video's own id as `node`.
     Animate {
         video: NodeId,
         node: NodeId,
         prop: AnimProp,
         keys: Vec<Key>,
+        #[serde(default, skip_serializing_if = "Repeat::is_once")]
+        repeat: Repeat,
     },
     /// Put back an overlay. Written by the history; front ends cannot issue it.
     RestoreOverlay {
@@ -877,7 +1037,8 @@ pub fn apply(
             node,
             prop,
             keys,
-        } => crate::animation::apply(doc, video, node, *prop, keys, allow_internal),
+            repeat,
+        } => crate::animation::apply(doc, video, node, *prop, keys, *repeat, allow_internal),
         Operation::SetToken { name, value } => set_token(doc, name, value.as_deref()),
         Operation::SetLocalizedText { locale, id, text } => {
             let old = doc.set_locale_text(locale, id, text.as_deref())?;
@@ -988,6 +1149,7 @@ fn current_value(node: &Node, prop: &Property) -> Property {
         Property::Height(_) => Property::Height(node.height),
         Property::Visible(_) => Property::Visible(node.visible),
         Property::Opacity(_) => Property::Opacity(node.opacity),
+        transform if transform.is_transform() => crate::transform::current(node, transform),
         Property::Fill(_) => Property::Fill(node.fill.clone()),
         Property::Stroke(_) => Property::Stroke(node.stroke.clone()),
         Property::CornerRadius(_) => Property::CornerRadius(node.corner_radius),
@@ -1004,6 +1166,12 @@ fn current_value(node: &Node, prop: &Property) -> Property {
             param: *param,
             value: param.get(&node.grade.unwrap_or_default()),
         },
+        Property::Path(_) => Property::Path(node.path.clone().unwrap_or_default()),
+        Property::ViewBox(_) => Property::ViewBox(node.view_box),
+        Property::FillRule(_) => Property::FillRule(node.fill_rule),
+        Property::StrokeWidth(_) | Property::TrimStart(_) | Property::TrimEnd(_) => {
+            crate::vector::current_stroke_value(node, prop)
+        }
         device_prop => {
             let d = node.device3d.clone().unwrap_or_default();
             match device_prop {

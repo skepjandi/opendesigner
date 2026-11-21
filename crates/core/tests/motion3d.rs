@@ -71,6 +71,7 @@ fn animate(video: &NodeId, device: &NodeId, prop: AnimProp, keys: Vec<Key>) -> O
         node: device.clone(),
         prop,
         keys,
+        repeat: od_core::Repeat::Once,
     }
 }
 
@@ -224,6 +225,7 @@ fn animation_keys_are_validated_against_the_node() {
             node: f.frame.clone(),
             prop: AnimProp::RotateY,
             keys: vec![key(0, 1.0, Ease::Linear)],
+            repeat: od_core::Repeat::Once,
         }],
     );
     assert!(matches!(rotate_a_frame, Err(OpError::NotApplicable { .. })));
@@ -371,7 +373,7 @@ fn devices_and_animations_round_trip_through_a_project_folder() {
     let dir = tempfile::tempdir().unwrap();
     project::save(dir.path(), &f.s).unwrap();
     let manifest = std::fs::read_to_string(dir.path().join("od.toml")).unwrap();
-    assert!(manifest.contains("format = 3"));
+    assert!(manifest.contains("format = 4"));
     let loaded = project::load(dir.path()).unwrap();
     assert_eq!(loaded.document(), f.s.document());
 }
@@ -391,7 +393,7 @@ fn a_version_one_project_still_loads() {
     project::save(dir.path(), &f.s).unwrap();
     let manifest = dir.path().join("od.toml");
     let text = std::fs::read_to_string(&manifest).unwrap();
-    std::fs::write(&manifest, text.replace("format = 3", "format = 1")).unwrap();
+    std::fs::write(&manifest, text.replace("format = 4", "format = 1")).unwrap();
     let loaded = project::load(dir.path()).unwrap();
-    assert_eq!(loaded.document().format, 3);
+    assert_eq!(loaded.document().format, 4);
 }

@@ -330,10 +330,7 @@ fn validation_rejects_hostile_values_with_a_reason() {
         try_set(&mut s, Property::Name("a\u{0}b".into())),
         Err(OpError::OutOfBounds { what: "name", .. })
     ));
-    let too_wide_stroke = Stroke {
-        paint: Paint::parse("#000000").unwrap(),
-        width: 1e6,
-    };
+    let too_wide_stroke = Stroke::new(Paint::parse("#000000").unwrap(), 1e6);
     assert!(try_set(&mut s, Property::Stroke(Some(too_wide_stroke))).is_err());
 }
 

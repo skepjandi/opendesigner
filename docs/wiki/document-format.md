@@ -8,7 +8,8 @@
 |-------|-------|-------|
 | Node model | `model.rs` | `Document` (pages, tokens, id counter), `Page` with an immutable `Group` root, `Node` with kind, geometry, `visible`, `opacity`, `fill`, `stroke`, `corner_radius`, text fields (`text`, `font_size`, `font_family`, `font_weight` 100 to 900, `text_align` left/center/right, `line_height` as a multiple of the size; all optional with the defaults Lato, 400, left, 1.2), `image` path, `children`. A text node's `width` wraps its lines (0 means no wrapping); its `height` is not used for layout. Text is one run in one style: per-run styles, tracking and fonts per range are not built. Ids are `n_<counter>` / `p_<counter>` minted by the document and never reused (`next_id` only grows) |
 | Node index | `index.rs` | The id to position index of the node tree: `Document::locate` climbs the recorded parent chain instead of walking every node (a 100-operation transaction on 10,000 nodes: 3.8 ms before, 0.04 ms after). The index is a hint, never an authority: every answer is checked against the tree, a wrong position is repaired by looking at that parent's children, and a node the index does not know is searched for by a plain walk, so a stale index costs time and not correctness. Operations keep it fresh (`note_inserted`, `note_removed`); a copy of a document starts without one. Nothing about it is written to the project |
-| Paint | `paint.rs` | `#rrggbb`, `#rrggbbaa` or `{token.name}` resolved against the document's tokens |
+| Paint | `paint.rs` | `#rrggbb`, `#rrggbbaa` or `{token.name}` resolved against the document's tokens, or a gradient (`Paint::Linear`, `Paint::Radial`; see [Vector shapes](#vector-shapes)). A solid paint is a JSON string, a gradient an object with a `type`. `Paint::normalized` validates and rounds; `Paint::resolve` of a gradient answers with its first stop, the one color that stands for it where a single color is needed |
+| Paths and strokes | `path.rs`, `vector.rs` | `NodeKind::Path`, SVG path data parsed and capped (`Path::parse`), `ViewBox`, `FillRule`, stroke `cap`/`join`/`dash`/`trim_start`/`trim_end`, and the checks that keep them in bounds (see [Vector shapes](#vector-shapes)) |
 | Operations | `ops.rs` | `create`, `set` (one typed `Property`), `move`, `reparent`, `delete`, `set_localized_text` (a translation of a text node in a language; `text: null` removes it, and a language with no translations disappears), `set_token` (define, recolor or, with `value: null`, remove a design token; removal is refused while a node uses it; users of the token are reported as touched), and the history-only `restore`. Each returns the resolved forward operation, its inverse and the touched ids |
 | Template variables | `variables.rs` | `Document.variables`: typed slots bound to node properties, written by `declare_variable`, `set_variable`, `set_variable_value` and `remove_variable` (see [Template variables](#template-variables)). Saved as `[[variables]]` tables in `od.toml`, absent when there are none |
 | History | `history.rs` | `Session`: append-only log of `Transaction`s (actor, optional turn id, kind `edit`/`undo`/`redo`/`restore`), atomic apply with rollback, undo/redo as appended transactions, checkpoints as log positions, `restore(checkpoint)` appends the inverse of everything after it, `changed_since(position)` for the agent-change outline |
@@ -21,7 +22,8 @@
 | Videos | `video.rs` | `Video` and `Clip` (a clip shows a design frame or footage for `duration_ms`, with a transition into it and a zoom, both eased; a clip of footage may also carry `speed` and a `speed_ramp` and any clip may carry a `grade`; overlays with `enter`/`exit`/`ease`; one sound track `audio {file, start_ms, gain, fade_in_ms, fade_out_ms}`), stored in `videos/<id>.json` and listed in `od.toml` (`videos = [...]`); operations `create_video`, `delete_video`, `set_video`, `add_clip`, `remove_clip`, `move_clip`, `set_clip`; limits in `video.rs` (100 videos, 500 clips, 10 minutes). A video file without `audio`, `speed`, `speed_ramp` or `grade` still loads: the fields are optional and missing means no sound, normal speed and no grade. Time is whole milliseconds, snapped to the video's frame grid when an operation is applied (`timebase.rs`). See [Video Editing](./video-editing.md#built-video-v1) |
 | Media | `media.rs` | `media/<plain name>` references (png, jpg, jpeg, webp), import by the user with magic-byte sniffing and unique names, listing and resolving without following symlinks. `Workspace::import_media`, `media`, `media_path` |
 | 3D devices | `device3d.rs` | `Device3d`: the model (`phone`, `phone_punch_hole`, `tablet`, `laptop`, `monitor`), the turn (`rotate_x`, `rotate_y`, `rotate_z`), `zoom`, the lens (`fov`), `light_angle`, `shadow`, `glare`, `screen_scroll` and `screen_footage`. Stored on a `device3d` node as `device3d`; the node's box is the viewport, its `fill` the body's finish and its `image` the capture on the screen. Set with `set` props `model`, `rotate_x`, `rotate_y`, `rotate_z`, `zoom`, `fov`, `light_angle`, `shadow`, `glare`, `screen_scroll`, `screen_footage` |
-| Animations | `animation.rs` | `Video.animations`: keyframes of any number of a node over the video's time (`AnimProp`, `Key`), the operation `animate` (empty keys removes an animation), `Ease::Spring`, `Video.motion_blur` (2 to 16 pictures blended while something moves), `Document::at_time` (the document as it looks at a moment) and the named moves (`Preset`, `preset_ops`) that write ordinary keyframes |
+| Animations | `animation.rs` | `Video.animations`: keyframes of any number of a node over the video's time (`AnimProp`, `Key`), the operation `animate` (empty keys removes an animation), `Ease` (also `elastic`, `bounce`, `ease_out_back`, `ease_in_out_cubic`), `Repeat`, `Video::camera_at`, `Video.motion_blur` (2 to 16 pictures blended while something moves), `Document::at_time` (the document as it looks at a moment) and the named moves (`Preset`, `preset_ops`) that write ordinary keyframes |
+| Transform and effects | `transform.rs` | `Node.rotation`, `scale_x`, `scale_y`, `pivot_x`, `pivot_y`, `blur`, `shadow` (`Shadow {dx, dy, blur, color}`), `clip`, `depth`; `Affine` (2D map, `Node::local_affine`), `Camera` and `Camera::affine`; the `Property` variants `rotation`, `scale_x`, `scale_y`, `scale`, `scale_xy`, `pivot_x`, `pivot_y`, `blur`, `drop_shadow`, `shadow_dx`, `shadow_dy`, `shadow_blur`, `clip`, `depth`; limits ([below](#transform-and-effects)) |
 
 Operation JSON as agents send it (the `opendesigner apply` command and the future MCP `apply_ops` tool take this array):
 
@@ -135,6 +137,39 @@ A `device3d` node is a device drawn in perspective inside its own box. The box i
 
 The screen takes the node's `image` with its `image_fit` (cover by default); a recording plays from its `in_ms` while the frame is on screen, and a still shows the picture at `in_ms`. `render` draws the device with a CPU rasterizer (`od_render::three_d`): depth buffer, supersampled anti-aliasing, a studio environment for the reflections and a soft shadow; the picture is the same in the canvas and in an export because both are `render`'s output.
 
+## Vector shapes
+
+Flat-vector drawing (`crates/core/src/path.rs`, `vector.rs`, `paint.rs`; drawn by `crates/render/src/vector.rs`, `gradient.rs`, `trim.rs`). Every addition is an optional field that is absent from a file while it has its default, so a project written before them loads and saves byte-identically.
+
+**Path nodes.** `kind: "path"` draws SVG path data in its box:
+
+| Field | Meaning |
+|-------|---------|
+| `path` | The `d` string. Commands `M L H V C S Q T A Z`, absolute and relative, implicit repeats, packed numbers and arc flags. At most 4,000 segments (an arc counts as up to four curves) and 64 KB; every number finite, every coordinate within ±1,000,000; it must start with a move. Present exactly on path nodes. It is data: parsed and validated by `Path::parse`, never executed |
+| `view_box` | `{x, y, width, height}` (width and height above 0): the rectangle of path coordinates that maps onto the node's box. Without it the path's own tight bounds (curve extremes, not control points) are stretched over the box, so resizing the node scales the drawing; a flat bound (a straight horizontal or vertical line) keeps its scale along that axis. Imported art uses neither trick: its path is written relative to its own top-left and its box is its bounds |
+| `fill_rule` | `nonzero` (default) or `evenodd`; unset means nonzero |
+
+A path node created with no width and no height takes the size of its view box, or of its path's bounds. Properties for `set`: `path`, `view_box` (`null` clears), `fill_rule` (`null` clears). A path node takes `fill` and `stroke` like a rect; its `corner_radius` does not apply. `Path::to_data` writes absolute data back out (three decimals), `Path::flatten` cuts it into polylines for hit tests and trims.
+
+**Gradients.** A `fill`, or a stroke's `paint`, of a frame, rect, ellipse or path is a color string or a gradient object:
+
+```json
+{"type": "linear", "angle": 90, "stops": [{"offset": 0, "color": "#7ad0ff"}, {"offset": 1, "color": "{sky.low}"}]}
+{"type": "radial", "cx": 0.5, "cy": 0.4, "r": 0.5, "stops": [{"offset": 0, "color": "#ffffffcc"}, {"offset": 1, "color": "#ffffff00"}]}
+```
+
+`angle` is in degrees, 0 runs left to right and 90 top to bottom (default 90); the line passes through the box's center and reaches its corners, so the first and last stop touch the box's far edges at any angle. A radial gradient is a circle around `cx`, `cy` (fractions of the box, default 0.5) of radius `r` (a fraction of the box's longer side, default 0.5); past the last stop the color is held. 2 to 8 stops, offsets 0 to 1, colors `#rrggbb[aa]` or `{token}` (a token used by a stop counts as used and cannot be removed). Stops out of order are drawn sorted (lint `OD071`). The gradient lives in the node's own box, so it moves, resizes and (with the node transform) turns with the shape. Text fills and 3D device bodies use a gradient's first stop. Reflecting and repeating spreads are not offered; every gradient pads.
+
+**Strokes.** `stroke` is `{paint, width, cap?, join?, dash?, trim_start?, trim_end?}`: `cap` is `butt` (default), `round` or `square`; `join` is `miter` (default), `round` or `bevel`; `dash` is up to 16 lengths, dash then gap, an odd count repeating itself, any length 0 to 16,384 and one above 0; `trim_start` and `trim_end` (0 to 1) keep the stretch of the outline between them (the smaller to the larger, as fractions of the whole outline's length, all contours together), so moving `trim_end` from 0 to 1 draws a shape on. A width of 0 draws nothing. Dash and trim work on every shape that has an outline, rounded rects and ellipses included; a dash pattern begins at the start of the trimmed stretch. `set` takes the whole `stroke`, or `stroke_width`, `trim_start`, `trim_end` for the node's existing stroke (an error when it has none).
+
+**Hit tests and bounds.** A path's box is its bounds, as for any node. A click hits a path inside its fill (by the fill rule) or within half the stroke width of its outline, at least 3 document units (`vector::hits`, flattening the path).
+
+**Drawing.** `render` fits the path into the box, then fills and strokes it through the node's transform; fills and strokes of rects, ellipses and frames go through the same function, so a gradient, dash or trim works on all of them. A trimmed outline is cut into pieces of at most half a device pixel before it is stroked.
+
+**Animation.** `trim_start`, `trim_end` and `stroke_width` are `AnimProp`s on any node with a stroke. `fill_color` moves a solid fill from color to color: its keys write the color as `"value": "#rrggbb[aa]"` (stored as the number `0xRRGGBBAA`) and each channel mixes linearly in sRGB. A fill that is a gradient or a token is replaced by the solid color while the animation plays.
+
+**Importing an SVG** is covered in [Agent integration](./agent-integration.md#vector-import).
+
 ## Sound tracks and captions
 
 Two optional fields of a video (`crates/core/src/audio.rs`, `captions.rs`); neither is written while empty, and an old file without them loads unchanged.
@@ -154,9 +189,40 @@ A video may animate any number of a node over its own time. `Video.animations` h
           {"at_ms": 1200, "value": 20}]}
 ```
 
-The value holds before the first key and after the last, and eases in between. The animatable properties are `x`, `y`, `width`, `height`, `opacity`, `corner_radius` and, on a 3D device, `rotate_x`, `rotate_y`, `rotate_z`, `zoom`, `fov`, `light_angle`, `shadow`, `glare` and `screen_scroll`. Keys with no animation (an empty list) remove it; a node with an animation cannot be deleted until the animation is removed. `Video.motion_blur` (2 to 16 pictures) blends the moments across a half-frame shutter while something moves.
+The value holds before the first key and after the last, and eases in between, unless the track `repeat`s: `"repeat": "loop"` starts again from the first key (the cycle is the stretch from the first key to the last) and `"repeat": "pingpong"` plays back and forth, for as long as the video plays. `repeat` is part of the track, not of its keys: `animate` without it sets `once`, it is stored on the track (`Animation.repeat`, left out of the file when `once`) and the undo restores it. Sampling (`Animation::value_at`) folds the time into the cycle, a pure function of the time. The animatable properties are `x`, `y`, `width`, `height`, `opacity`, `corner_radius`, `rotation`, `scale_x`, `scale_y`, `scale`, `blur`, `shadow_dx`, `shadow_dy`, `shadow_blur`, the camera's `camera_x`, `camera_y`, `camera_zoom`, `camera_rotation` ([Camera](#camera)) and, on a 3D device, `rotate_x`, `rotate_y`, `rotate_z`, `zoom`, `fov`, `light_angle`, `shadow`, `glare` and `screen_scroll`. Keys with no animation (an empty list) remove it; a node with an animation cannot be deleted until the animation is removed. `Video.motion_blur` (2 to 16 pictures) blends the moments across a half-frame shutter while something moves.
+The value holds before the first key and after the last, and eases in between. The animatable properties are `x`, `y`, `width`, `height`, `opacity`, `corner_radius`, `trim_start`, `trim_end`, `stroke_width` (a node with a stroke), `fill_color` (a node with a fill; see [Vector shapes](#vector-shapes)) and, on a 3D device, `rotate_x`, `rotate_y`, `rotate_z`, `zoom`, `fov`, `light_angle`, `shadow`, `glare` and `screen_scroll`. Keys with no animation (an empty list) remove it; a node with an animation cannot be deleted until the animation is removed. `Video.motion_blur` (2 to 16 pictures) blends the moments across a half-frame shutter while something moves.
 
 The named moves (`spin`, `turntable`, `swing`, `flip_in`, `hero_reveal`, `rise_in`, `drop_in`, `float`, `push_in`, `pull_back`, `orbit`, `scroll_screen`, `fade_in`, `fade_out`, `slide_in_left`, `slide_in_right`) are not a separate format: they are written as ordinary keyframes, measured from the node's designed pose.
+
+## Transform and effects
+
+> **Status: Implemented** (`crates/core/src/transform.rs`, `od_render::place`, `od_render::layers`). Every field is optional on a node, omitted from the file at its default and means no effect, so a project that uses none of them is unchanged byte for byte.
+
+Any node (frames and groups too) may turn, scale, blur, cast a shadow, clip and sit at a depth; the node and everything in it are drawn under the transform.
+
+| Field (`set` name) | Default | Meaning |
+| --- | --- | --- |
+| `rotation` | 0 | Degrees clockwise about the pivot (at most 36000 either way) |
+| `scale_x`, `scale_y` | 1 | Scale about the pivot along the node's own axes, after the rotation is applied to them (−100 to 100; negative flips). `set scale` sets both; its inverse is `set scale_xy {x, y}` |
+| `pivot_x`, `pivot_y` | 0.5 | The point rotation and scale turn about, as fractions of the node's box (−10 to 10). A group without a width and height uses the box around its children's untransformed boxes, so a spinning child does not move the group's pivot |
+| `blur` | 0 | Gaussian radius in document units (0 to 500) of the node as drawn, children included |
+| `shadow` (`set drop_shadow`) | none | `{dx, dy, blur, color}`, `color` a `#rrggbbaa` or token whose alpha is the shadow's opacity (default `#00000040`). Cast by the node as drawn (blur included), under it, offset in screen space; the node's `opacity` scales it. The name `shadow` already belongs to a 3D device's `set shadow`, so the shadow of a node is set with `drop_shadow`; `shadow_dx`, `shadow_dy`, `shadow_blur` set one number and need an existing shadow |
+| `clip` | false | On a group or frame: children are cut at its box and corner radius. A frame always clips, so the flag changes nothing there. A group may now have a `width` and `height` (until now a group could not); without them its box is the one around its children, which clips nothing |
+| `depth` | 1 | How far the video camera moves the node (0 to 10): 1 with the scene, 0 pinned to the screen. Depths multiply down the tree |
+
+The map from a node's own coordinates to its parent's is `translate(x, y) · translate(pivot) · rotate · scale · translate(−pivot)` (`Node::local_affine`, f64, `Affine`), composed down the tree. The exported or drawn frame sits at the origin and ignores its own `x`, `y`, rotation and scale.
+
+- **Bounds and hit tests** (`geometry::page_bounds`, `bounds_in_frame`, `hit_test`) use the upright rectangle around the transformed box (a clipping group: its own box) and invert the transform to find what a click lands on. `parent_origin` and the arranging commands (`align`, `distribute`, `group`) still work in untransformed parent offsets `[INFERENCE: they were not audited for turned parents]`.
+- **Lint** judges `OD001` to `OD003` by those bounds and adds `OD080` to `OD082` ([Lint rules](./lint-rules.md)).
+- **Limits** are in `transform.rs` (`MAX_ROTATION`, `MAX_SCALE`, `MAX_PIVOT`, `MAX_BLUR`, `MAX_SHADOW_OFFSET`, `MAX_PARALLAX_DEPTH`) and enforced by `set`, `create`, loading and keyframes alike.
+
+### Rendering
+
+`od_render` keeps a camera-free matrix per node (`place::node_chain`, a plain translation unless the node is turned or scaled) and applies the camera and, inside an effect layer, the layer's shift on top (`Ctx::world`), so a document without these fields takes the code path it always took. A node that blurs or casts a shadow is drawn on a layer the size of what it paints (`layers.rs`): the layer is blurred with the grade blur (three box passes), the shadow is the tinted silhouette of the blurred layer, shifted by the offset rounded to whole pixels and blurred, and the pair is laid over the picture through the parent's clip. Text under a turned, flipped or unevenly scaled map is drawn upright on a scratch picture (at most 4096 px a side) and placed with the map; a 3D device's picture is placed with it. `Retained` (incremental tiles) gives up on a frame that holds a node that turns, scales, blurs or casts a shadow and the caller draws the frame whole, because such a node paints outside the rows its box covers.
+
+### Camera
+
+`Video` has no camera field: the camera is four keyframed numbers, `camera_x`, `camera_y`, `camera_zoom`, `camera_rotation`, animated with `animate` using the video's own id as `node` (`Video::camera_at(time_ms)`; still, `x` 0, `y` 0, `zoom` 1, `rotation` 0, when there are none; a single key holds a still camera). A node at effective depth `d` is drawn through `translate(c) · rotate(d·rotation) · scale(zoom^d) · translate(−c) · translate(−d·x, −d·y)`, `c` the frame's center, so depth 0 stays, depth 1 follows the camera and depth 0.5 gets half the pan and the square root of the zoom. The frame's own background is not moved. Only frames shown by a clip go through the camera; overlays stay on the screen.
 
 ## Template variables
 

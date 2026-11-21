@@ -351,6 +351,15 @@ fn new_node_from(node: &Node) -> NewNode {
         height: node.height,
         visible: Some(node.visible),
         opacity: Some(node.opacity),
+        rotation: Some(node.rotation),
+        scale_x: Some(node.scale_x),
+        scale_y: Some(node.scale_y),
+        pivot_x: Some(node.pivot_x),
+        pivot_y: Some(node.pivot_y),
+        blur: Some(node.blur),
+        shadow: node.shadow.clone(),
+        clip: node.kind.is_container().then_some(node.clip),
+        depth: Some(node.depth),
         fill: node.fill.clone(),
         stroke: node.stroke.clone(),
         corner_radius: matches!(
@@ -367,6 +376,9 @@ fn new_node_from(node: &Node) -> NewNode {
         image: node.image.clone(),
         image_fit: node.image_fit,
         device3d: node.device3d.clone(),
+        path: node.path.clone(),
+        view_box: node.view_box,
+        fill_rule: node.fill_rule,
         children: node.children.iter().map(new_node_from).collect(),
     }
 }
