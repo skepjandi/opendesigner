@@ -15,6 +15,7 @@ mod doccmd;
 mod serve;
 mod skillcmd;
 mod sound;
+mod vector;
 
 use od_agent::export::{Plan, export_assets};
 use od_render::RenderError;
@@ -284,6 +285,8 @@ enum Command {
         #[command(subcommand)]
         action: blocks::BlocksAction,
     },
+    /// Bring an SVG illustration in as editable vector nodes, one per shape.
+    ImportSvgVector(vector::ImportSvgVector),
     /// Sound tracks, pauses and waveforms of a video.
     Sound {
         #[command(subcommand)]
@@ -907,6 +910,7 @@ fn run(cli: Cli) -> Result<(), CliError> {
             agent,
         } => serve::run(&dir, port, show_token, rotate_token, &agent)?,
         Command::Blocks { action } => blocks::run(action)?,
+        Command::ImportSvgVector(args) => vector::run(args)?,
         Command::Sound { action } => sound::sound(action)?,
         Command::Captions { action } => sound::captions(action)?,
         Command::Skill { action } => skillcmd::run(action)?,
