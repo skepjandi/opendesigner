@@ -485,10 +485,7 @@ mod tests {
             n.opacity = Some(0.85);
             n.fill = Some(Paint::parse(["#f2ca83", "#33aa77", "#aa3377"][i as usize % 3]).unwrap());
             if i % 4 == 0 {
-                n.stroke = Some(Stroke {
-                    paint: Paint::parse("#ffffff").unwrap(),
-                    width: 4.0,
-                });
+                n.stroke = Some(Stroke::new(Paint::parse("#ffffff").unwrap(), 4.0));
             }
             let parent = if i % 5 == 0 { &inner } else { &frame };
             shapes.push(create(&mut s, parent, n));
@@ -601,10 +598,7 @@ mod tests {
             }],
             vec![Operation::Set {
                 id: shape.clone(),
-                prop: Property::Stroke(Some(Stroke {
-                    paint: Paint::parse("#ff0000").unwrap(),
-                    width: 9.0,
-                })),
+                prop: Property::Stroke(Some(Stroke::new(Paint::parse("#ff0000").unwrap(), 9.0))),
             }],
             vec![Operation::Set {
                 id: text.clone(),

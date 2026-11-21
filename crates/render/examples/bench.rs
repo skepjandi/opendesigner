@@ -196,6 +196,75 @@ fn device_timing(model: DeviceModel, w: u32, h: u32) -> Duration {
     median(runs)
 }
 
+/// A 1080x1920 scene of `shapes` path nodes with gradient fills and dashed, trimmed strokes: the
+/// load of a flat-vector explainer frame. Median render time at scale 1.
+fn vector_timing(shapes: usize) -> Duration {
+    let mut s = Session::new(Document::new("vector bench"));
+    let page = s.add_page("p").unwrap_or_else(|e| panic!("{e}"));
+    let root = s.document().page(&page).map(|p| p.root.id.clone());
+    let root = root.unwrap_or_else(|| panic!("no page"));
+    let mut frame = NewNode::new(NodeKind::Frame);
+    frame.width = 1080.0;
+    frame.height = 1920.0;
+    frame.fill = Some(Paint::Linear {
+        angle: 90.0,
+        stops: vec![
+            od_core::Stop {
+                offset: 0.0,
+                color: Paint::parse("#7ad0ff").unwrap_or_else(|e| panic!("{e}")),
+            },
+            od_core::Stop {
+                offset: 1.0,
+                color: Paint::parse("#e8f7ff").unwrap_or_else(|e| panic!("{e}")),
+            },
+        ],
+    });
+    for i in 0..shapes {
+        let mut n = NewNode::new(NodeKind::Path);
+        n.path = Some("M0 40 C30 0 60 80 90 40 S150 0 180 40 L180 90 Q90 130 0 90 Z".to_string());
+        n.x = (i % 12) as f64 * 88.0;
+        n.y = (i / 12) as f64 * 70.0;
+        n.width = 120.0;
+        n.height = 80.0;
+        n.fill = Paint::parse("#f2ca83").ok();
+        if i % 3 == 0 {
+            let mut stroke = od_core::Stroke::new(
+                Paint::parse("#223344").unwrap_or_else(|e| panic!("{e}")),
+                3.0,
+            );
+            stroke.dash = vec![8.0, 4.0];
+            stroke.trim_end = 0.8;
+            n.stroke = Some(stroke);
+        }
+        frame.children.push(n);
+    }
+    let receipt = s
+        .apply(
+            Actor::User,
+            None,
+            &[Operation::Create {
+                parent: root,
+                index: None,
+                node: frame,
+            }],
+        )
+        .unwrap_or_else(|e| panic!("{e}"));
+    let id = receipt
+        .created
+        .first()
+        .cloned()
+        .unwrap_or_else(|| panic!("no frame"));
+    let mut runs = Vec::new();
+    for _ in 0..7 {
+        let t = Instant::now();
+        let rendered =
+            od_render::render_frame(s.document(), &id, 1.0, None).unwrap_or_else(|e| panic!("{e}"));
+        runs.push(t.elapsed());
+        std::hint::black_box(rendered.pixmap.width());
+    }
+    median(runs)
+}
+
 fn main() {
     println!("render timings, median of 7 runs (milliseconds)");
     println!("nodes   scale   render   png    total");
@@ -232,6 +301,12 @@ fn main() {
             "{nodes:>6}  100-operation transaction + checkpoint: {:.2} ms",
             ms(apply_timing(nodes))
         );
+    }
+
+    println!();
+    println!("vector scene, 1080x1920 at scale 1, median of 7 runs (milliseconds)");
+    for shapes in [100usize, 300] {
+        println!("{shapes:>6} paths: {:.1}", ms(vector_timing(shapes)));
     }
 
     println!();
