@@ -346,7 +346,34 @@ Properties for `set`: `name`, `x`, `y`, `width`, `height`, `visible`, `opacity` 
 (a color or null), `stroke` (`{"paint": "#000000", "width": 2}` or null), `corner_radius`, `text`,
 `font_size`, `font_family` (a name or null), `font_weight` (100 to 900 or null), `text_align`
 (`left`, `center`, `right` or null), `line_height` (a multiple of the font size, 0.5 to 4, or
-null), `image`. Not every property applies to every kind of node; a rejection says which.
+null), `image`, and on paths `path`, `view_box`, `fill_rule`. A stroke's `stroke_width`, `trim_start`
+and `trim_end` are properties too. Not every property applies to every kind of node; a rejection says
+which.
+
+Vector shapes: a `path` node draws SVG path data in its box (the path's own bounds are stretched over
+the box, so resizing scales it), and any shape can be filled or stroked with a gradient. A stroke
+has `cap`, `join`, a `dash` array and `trim_start` / `trim_end` (0 to 1 along the outline), so a line
+draws on when `trim_end` is animated from 0 to 1:
+
+```json
+{"ops": [{"op": "create", "parent": "n_3",
+          "node": {"kind": "path", "name": "Wave", "x": 80, "y": 600,
+                   "path": "M0 40 C60 0 120 80 180 40 S300 0 360 40",
+                   "stroke": {"paint": {"type": "linear", "angle": 0,
+                                        "stops": [{"offset": 0, "color": "#ff7a59"},
+                                                  {"offset": 1, "color": "#ffd166"}]},
+                           "width": 10, "cap": "round", "trim_end": 0}}]}
+```
+
+Then, with the created id:
+
+```json
+{"ops": [{"op": "animate", "video": "v_20", "node": "n_9", "prop": "trim_end",
+          "keys": [{"at_ms": 0, "value": 0}, {"at_ms": 1200, "value": 1, "ease": "ease_out"}]}]}
+```
+
+`import_svg_vector` brings a whole SVG illustration in as one group of shape nodes named after the
+SVG's ids (one undo removes it); `fill_color` keys (`"value": "#rrggbb"`) animate a shape's color.
 
 Transform and effects work on any node and on everything inside it: `rotation` (degrees, clockwise),
 `scale_x` and `scale_y` (negative flips; `scale` sets both), `pivot_x` and `pivot_y` (fractions of the

@@ -51,6 +51,14 @@ pub enum AnimProp {
     GradeTint,
     GradeVignette,
     GradeBlur,
+    /// Where the stroke starts along the outline, 0 to 1 (needs a stroke).
+    TrimStart,
+    /// Where the stroke ends along the outline, 0 to 1: moving it from 0 to 1 draws the shape on.
+    TrimEnd,
+    StrokeWidth,
+    /// The fill as a solid colour. Its keys hold the colour in `value` (written `'#rrggbb[aa]'`,
+    /// stored as the number `0xRRGGBBAA`) and mix channel by channel in sRGB.
+    FillColor,
     Rotation,
     ScaleX,
     ScaleY,
@@ -90,7 +98,7 @@ impl AnimProp {
         })
     }
 
-    pub const ALL: [AnimProp; 34] = [
+    pub const ALL: [AnimProp; 38] = [
         AnimProp::X,
         AnimProp::Y,
         AnimProp::Width,
@@ -113,6 +121,10 @@ impl AnimProp {
         AnimProp::GradeTint,
         AnimProp::GradeVignette,
         AnimProp::GradeBlur,
+        AnimProp::TrimStart,
+        AnimProp::TrimEnd,
+        AnimProp::StrokeWidth,
+        AnimProp::FillColor,
         AnimProp::Rotation,
         AnimProp::ScaleX,
         AnimProp::ScaleY,
@@ -151,6 +163,10 @@ impl AnimProp {
             AnimProp::GradeTint => "grade_tint",
             AnimProp::GradeVignette => "grade_vignette",
             AnimProp::GradeBlur => "grade_blur",
+            AnimProp::TrimStart => "trim_start",
+            AnimProp::TrimEnd => "trim_end",
+            AnimProp::StrokeWidth => "stroke_width",
+            AnimProp::FillColor => "fill_color",
             AnimProp::Rotation => "rotation",
             AnimProp::ScaleX => "scale_x",
             AnimProp::ScaleY => "scale_y",
@@ -193,6 +209,12 @@ impl AnimProp {
             AnimProp::Shadow => Property::Shadow(value),
             AnimProp::Glare => Property::Glare(value),
             AnimProp::ScreenScroll => Property::ScreenScroll(Some(value)),
+            AnimProp::TrimStart => Property::TrimStart(value),
+            AnimProp::TrimEnd => Property::TrimEnd(value),
+            AnimProp::StrokeWidth => Property::StrokeWidth(value),
+            AnimProp::FillColor => Property::Fill(Some(crate::paint::Paint::Color(
+                crate::paint::Rgba::unpack(value),
+            ))),
             grade => Property::GradeParam {
                 param: grade.grade_param().unwrap_or(GradeParam::Exposure),
                 value,
@@ -220,6 +242,13 @@ impl AnimProp {
             AnimProp::Glare => d.map(|d| d.glare),
             // unset means centred, which is halfway down a long capture
             AnimProp::ScreenScroll => d.map(|d| d.screen_scroll.unwrap_or(0.5)),
+            AnimProp::TrimStart => node.stroke.as_ref().map(|s| s.trim_start),
+            AnimProp::TrimEnd => node.stroke.as_ref().map(|s| s.trim_end),
+            AnimProp::StrokeWidth => node.stroke.as_ref().map(|s| s.width),
+            AnimProp::FillColor => match node.fill {
+                Some(crate::paint::Paint::Color(c)) => Some(c.pack()),
+                _ => None,
+            },
             AnimProp::Rotation => Some(node.rotation),
             AnimProp::ScaleX | AnimProp::Scale => Some(node.scale_x),
             AnimProp::ScaleY => Some(node.scale_y),
@@ -246,9 +275,14 @@ impl AnimProp {
         match self {
             AnimProp::X | AnimProp::Y => (-MAX_COORD, MAX_COORD),
             AnimProp::Width | AnimProp::Height | AnimProp::CornerRadius => (0.0, MAX_SIZE),
-            AnimProp::Opacity | AnimProp::Shadow | AnimProp::Glare | AnimProp::ScreenScroll => {
-                (0.0, 1.0)
-            }
+            AnimProp::Opacity
+            | AnimProp::Shadow
+            | AnimProp::Glare
+            | AnimProp::ScreenScroll
+            | AnimProp::TrimStart
+            | AnimProp::TrimEnd => (0.0, 1.0),
+            AnimProp::StrokeWidth => (0.0, crate::limits::MAX_STROKE_WIDTH),
+            AnimProp::FillColor => (0.0, f64::from(u32::MAX)),
             AnimProp::RotateX | AnimProp::RotateY | AnimProp::RotateZ => {
                 (-d::MAX_ROTATION, d::MAX_ROTATION)
             }
@@ -274,6 +308,7 @@ impl AnimProp {
 #[serde(deny_unknown_fields)]
 pub struct Key {
     pub at_ms: u64,
+    #[serde(deserialize_with = "crate::vector::number_or_color")]
     pub value: f64,
     #[serde(default)]
     pub ease: Ease,
@@ -357,6 +392,9 @@ impl Animation {
         let span = (b.at_ms - a.at_ms) as f64;
         let p = b.ease.apply((time_ms - a.at_ms as f64) / span);
         let (lo, hi) = self.prop.range();
+        if self.prop == AnimProp::FillColor {
+            return Some(crate::paint::Rgba::mix_packed(a.value, b.value, p));
+        }
         Some((a.value + (b.value - a.value) * p).clamp(lo, hi))
     }
 

@@ -6,6 +6,17 @@ All notable changes to OpenDesigner are documented here.
 >
 > **Wiki**: the [GitHub Wiki](https://github.com/skepjandi/opendesigner/wiki) is the public-facing main wiki — architecture, document format, agent integration, security model, roadmap. Source-controlled editing surface is `docs/wiki/` in this repo; CI (`.github/workflows/sync-wiki.yml`) mirrors it to the GitHub Wiki on every merge to `main`. New single-PR changes belong here, not as new wiki pages.
 
+## 2026-11-24
+
+### feat(core,render): the engine for flat-vector 2D animation
+
+**Area:** `feat(core)`, `feat(render)`, `feat(agent)`
+
+- **Vector.** A `path` node (SVG path data, validated and capped), linear and radial gradients on every shape, stroke caps, joins, dashes and draw-on trim, `import_svg_vector` (an SVG becomes one undoable group of named shapes).
+- **Transform and motion.** Rotation, scale and pivot on every node, blur, drop shadow, clip masks, a parallax camera, looping and ping-pong keyframes, and more eases (`elastic`, `bounce`, `ease_out_back`, `ease_in_out_cubic`).
+- Animatable: `rotation`, `scale`, `blur`, shadow, camera, `trim_start`, `trim_end`, `stroke_width`, `fill_color`.
+- Project format is now version 4; older projects load unchanged.
+
 ## 2026-11-23
 
 ### feat(agent): four more sound packs

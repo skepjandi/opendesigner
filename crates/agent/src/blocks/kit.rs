@@ -174,7 +174,7 @@ impl Style for NewNode {
     }
 
     fn outline(mut self, paint: Paint, width: f64) -> Self {
-        self.stroke = Some(Stroke { paint, width });
+        self.stroke = Some(Stroke::new(paint, width));
         self
     }
 

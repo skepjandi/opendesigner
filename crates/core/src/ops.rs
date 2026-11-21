@@ -15,6 +15,7 @@ use crate::model::{
 };
 use crate::paint::Paint;
 use crate::transform::Shadow;
+use crate::vector::{FillRule, ViewBox};
 use crate::video::{
     Clip, ClipProperty, Footage, Motion, Overlay, OverlayProperty, Transition, Video, VideoProperty,
 };
@@ -82,6 +83,18 @@ pub enum Property {
         param: crate::grade::GradeParam,
         value: f64,
     },
+    /// SVG path data of a path node.
+    Path(String),
+    /// The rectangle of path coordinates mapped onto the node's box (`null`: the path's own bounds).
+    ViewBox(Option<ViewBox>),
+    /// Which side of a self-crossing path is inside (`null`: nonzero).
+    FillRule(Option<FillRule>),
+    /// The stroke's width (the node must have a stroke); what a stroke-width keyframe moves.
+    StrokeWidth(f64),
+    /// Where along the outline the stroke starts, 0 to 1 (the node must have a stroke).
+    TrimStart(f64),
+    /// Where along the outline the stroke ends, 0 to 1 (the node must have a stroke).
+    TrimEnd(f64),
 }
 
 impl Property {
@@ -154,6 +167,12 @@ impl Property {
             Property::ScreenFootage(_) => "screen_footage",
             Property::Grade(_) => "grade",
             Property::GradeParam { .. } => "grade_param",
+            Property::Path(_) => "path",
+            Property::ViewBox(_) => "view_box",
+            Property::FillRule(_) => "fill_rule",
+            Property::StrokeWidth(_) => "stroke_width",
+            Property::TrimStart(_) => "trim_start",
+            Property::TrimEnd(_) => "trim_end",
         }
     }
 
@@ -181,8 +200,12 @@ impl Property {
             | Property::ShadowBlur(_)
             | Property::Depth(_) => true,
             Property::Clip(_) => kind.is_container(),
-            Property::Fill(_) => matches!(kind, Frame | Rect | Ellipse | Text | Device3d),
-            Property::Stroke(_) => matches!(kind, Frame | Rect | Ellipse),
+            Property::Fill(_) => matches!(kind, Frame | Rect | Ellipse | Text | Device3d | Path),
+            Property::Stroke(_)
+            | Property::StrokeWidth(_)
+            | Property::TrimStart(_)
+            | Property::TrimEnd(_) => matches!(kind, Frame | Rect | Ellipse | Path),
+            Property::Path(_) | Property::ViewBox(_) | Property::FillRule(_) => kind == Path,
             Property::CornerRadius(_) => matches!(kind, Frame | Rect | Image),
             Property::Text(_)
             | Property::FontSize(_)
@@ -236,23 +259,14 @@ fn apply_property(
             Property::Opacity(replace(&mut node.opacity, v))
         }
         Property::Fill(v) => {
-            if let Some(p) = &v {
-                p.resolve(tokens)?;
-            }
+            let v = v.as_ref().map(|p| p.normalized(tokens)).transpose()?;
             Property::Fill(replace(&mut node.fill, v))
         }
         Property::Stroke(v) => {
-            let v = match v {
-                Some(s) => {
-                    s.paint.resolve(tokens)?;
-                    let width = finite_in("stroke width", s.width, 0.0, limits::MAX_STROKE_WIDTH)?;
-                    Some(Stroke {
-                        paint: s.paint,
-                        width,
-                    })
-                }
-                None => None,
-            };
+            let v = v
+                .as_ref()
+                .map(|s| crate::vector::checked_stroke(s, tokens))
+                .transpose()?;
             Property::Stroke(replace(&mut node.stroke, v))
         }
         Property::CornerRadius(v) => {
@@ -320,6 +334,12 @@ fn apply_property(
             Property::GradeParam { param, value: old }
         }
         transform if transform.is_transform() => crate::transform::apply(node, transform, tokens)?,
+        vector_prop @ (Property::Path(_)
+        | Property::ViewBox(_)
+        | Property::FillRule(_)
+        | Property::StrokeWidth(_)
+        | Property::TrimStart(_)
+        | Property::TrimEnd(_)) => crate::vector::apply_property(node, vector_prop)?,
         device_prop => apply_device_property(node, device_prop)?,
     })
 }
@@ -431,6 +451,14 @@ pub struct NewNode {
     /// For a `device3d` node: the model and how it is turned and lit (defaults when omitted).
     #[serde(default)]
     pub device3d: Option<Device3d>,
+    /// For a `path` node: SVG path data. Without a width and a height the box takes the size of
+    /// the path's own bounds.
+    #[serde(default)]
+    pub path: Option<String>,
+    #[serde(default)]
+    pub view_box: Option<ViewBox>,
+    #[serde(default)]
+    pub fill_rule: Option<FillRule>,
     #[serde(default)]
     pub children: Vec<NewNode>,
 }
@@ -467,6 +495,9 @@ impl NewNode {
             image: None,
             image_fit: None,
             device3d: None,
+            path: None,
+            view_box: None,
+            fill_rule: None,
             children: Vec::new(),
         }
     }
@@ -519,11 +550,12 @@ impl NewNode {
         set(Property::Name(name))?;
         set(Property::X(self.x))?;
         set(Property::Y(self.y))?;
-        if self.kind != NodeKind::Group || self.width != 0.0 {
-            set(Property::Width(self.width))?;
+        let (width, height) = crate::vector::box_size(self);
+        if self.kind != NodeKind::Group || width != 0.0 {
+            set(Property::Width(width))?;
         }
-        if self.kind != NodeKind::Group || self.height != 0.0 {
-            set(Property::Height(self.height))?;
+        if self.kind != NodeKind::Group || height != 0.0 {
+            set(Property::Height(height))?;
         }
         if let Some(v) = self.visible {
             set(Property::Visible(v))?;
@@ -571,6 +603,9 @@ impl NewNode {
             for prop in device_properties(d) {
                 set(prop)?;
             }
+        }
+        for prop in crate::vector::path_properties(self)? {
+            set(prop)?;
         }
         for child in &self.children {
             node.children.push(child.build(next, tokens, depth + 1)?);
@@ -1131,6 +1166,12 @@ fn current_value(node: &Node, prop: &Property) -> Property {
             param: *param,
             value: param.get(&node.grade.unwrap_or_default()),
         },
+        Property::Path(_) => Property::Path(node.path.clone().unwrap_or_default()),
+        Property::ViewBox(_) => Property::ViewBox(node.view_box),
+        Property::FillRule(_) => Property::FillRule(node.fill_rule),
+        Property::StrokeWidth(_) | Property::TrimStart(_) | Property::TrimEnd(_) => {
+            crate::vector::current_stroke_value(node, prop)
+        }
         device_prop => {
             let d = node.device3d.clone().unwrap_or_default();
             match device_prop {

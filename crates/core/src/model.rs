@@ -6,12 +6,14 @@ use serde::{Deserialize, Serialize};
 use crate::error::OpError;
 use crate::limits::{self, finite_in, text_within};
 use crate::paint::{Paint, valid_token_name};
+use crate::vector::{FillRule, LineCap, LineJoin, ViewBox};
 
 /// Version of the on-disk project format. A loader refuses a newer one. Version 2 added 3D
 /// devices and keyframe animations; version 3 added sound tracks, captions, clip speed and grades,
-/// transitions and template variables. Every older project is a valid version 3 project, because
+/// transitions and template variables; version 4 added vector paths, gradients, 2D transforms,
+/// effects, looping keyframes and the camera. Every older project is a valid version 4 project, because
 /// each addition is an optional field.
-pub const FORMAT_VERSION: u32 = 3;
+pub const FORMAT_VERSION: u32 = 4;
 
 /// Stable identifier of a node or page. Never reused within a document.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
@@ -78,6 +80,8 @@ pub enum NodeKind {
     Image,
     /// A device in 3D (phone, tablet, laptop, monitor) drawn in the node's box.
     Device3d,
+    /// A vector path (SVG path data) drawn in the node's box.
+    Path,
 }
 
 impl NodeKind {
@@ -90,6 +94,7 @@ impl NodeKind {
             NodeKind::Text => "text",
             NodeKind::Image => "image",
             NodeKind::Device3d => "device3d",
+            NodeKind::Path => "path",
         }
     }
 
@@ -103,6 +108,34 @@ impl NodeKind {
 pub struct Stroke {
     pub paint: Paint,
     pub width: f64,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub cap: LineCap,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub join: LineJoin,
+    /// Lengths of dash and gap, alternating (an odd count repeats itself); empty is solid.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dash: Vec<f64>,
+    /// The part of the outline that is drawn, as fractions of its length: from `trim_start` to
+    /// `trim_end` (the smaller to the larger). Moving `trim_end` from 0 to 1 draws the shape on.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub trim_start: f64,
+    #[serde(default = "default_one", skip_serializing_if = "is_one")]
+    pub trim_end: f64,
+}
+
+impl Stroke {
+    /// A plain stroke: butt caps, mitered corners, solid, the whole outline.
+    pub fn new(paint: Paint, width: f64) -> Stroke {
+        Stroke {
+            paint,
+            width,
+            cap: LineCap::default(),
+            join: LineJoin::default(),
+            dash: Vec::new(),
+            trim_start: 0.0,
+            trim_end: 1.0,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -198,6 +231,15 @@ pub struct Node {
     /// Colour grading and effects on an image node (`crate::grade`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grade: Option<crate::grade::Grade>,
+    /// SVG path data of a `path` node (present exactly on those nodes); its bounds, or the
+    /// `view_box`, are stretched over the node's box.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub view_box: Option<ViewBox>,
+    /// Unset means nonzero.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fill_rule: Option<FillRule>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub children: Vec<Node>,
 }
@@ -216,6 +258,9 @@ fn is_one(v: &f64) -> bool {
 }
 fn is_zero(v: &f64) -> bool {
     *v == 0.0
+}
+fn is_default<T: Default + PartialEq>(v: &T) -> bool {
+    *v == T::default()
 }
 fn default_half() -> f64 {
     0.5
@@ -252,6 +297,9 @@ impl Node {
             image_fit: None,
             device3d: (kind == NodeKind::Device3d).then(crate::device3d::Device3d::default),
             grade: None,
+            path: None,
+            view_box: None,
+            fill_rule: None,
             rotation: 0.0,
             scale_x: 1.0,
             scale_y: 1.0,
@@ -444,7 +492,7 @@ impl Document {
     /// Ids of the nodes whose fill or stroke refers to the token `name`.
     pub fn token_users(&self, name: &str) -> Vec<NodeId> {
         fn uses(p: &crate::paint::Paint, name: &str) -> bool {
-            matches!(p, crate::paint::Paint::Token(t) if t == name)
+            p.uses_token(name)
         }
         fn walk(n: &Node, name: &str, out: &mut Vec<NodeId>) {
             let fill = n.fill.as_ref().is_some_and(|p| uses(p, name));
@@ -644,12 +692,12 @@ pub(crate) fn validate_node_fields(
         crate::media::reference_name(path)?;
     }
     if let Some(fill) = &node.fill {
-        fill.resolve(tokens)?;
+        fill.normalized(tokens)?;
     }
     if let Some(stroke) = &node.stroke {
-        stroke.paint.resolve(tokens)?;
-        finite_in("stroke width", stroke.width, 0.0, limits::MAX_STROKE_WIDTH)?;
+        crate::vector::checked_stroke(stroke, tokens)?;
     }
+    crate::vector::check_node(node)?;
     match (&node.device3d, node.kind) {
         (Some(d), NodeKind::Device3d) => d.check()?,
         (None, NodeKind::Device3d) => {

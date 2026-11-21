@@ -6,6 +6,7 @@ pub mod captions;
 mod device;
 pub mod export;
 pub mod grade;
+mod gradient;
 mod images;
 mod incremental;
 mod layers;
@@ -13,6 +14,8 @@ mod place;
 mod text;
 pub mod three_d;
 pub mod transitions;
+mod trim;
+mod vector;
 pub mod video;
 
 pub use device::Media;
@@ -28,7 +31,7 @@ use od_core::{Camera, Document, Node, NodeId, NodeKind, OpError, limits};
 use thiserror::Error;
 use tiny_skia::{
     Color, FillRule, FilterQuality, Mask, Paint as SkPaint, Path, PathBuilder, PixmapPaint, Rect,
-    Stroke as SkStroke, Transform,
+    Transform,
 };
 
 /// Largest exported image, in pixels per side and in total (about 256 MB of RGBA).
@@ -508,6 +511,7 @@ fn draw_node(
                 rounded_rect(w, h, (node.corner_radius as f32).min(w.min(h) / 2.0))
             }
             NodeKind::Ellipse => Rect::from_xywh(0.0, 0.0, w, h).and_then(PathBuilder::from_oval),
+            NodeKind::Path => vector::path_shape(node),
             NodeKind::Group => None,
             NodeKind::Text => {
                 let color = match &node.fill {
@@ -545,24 +549,7 @@ fn draw_node(
     };
 
     if let Some(path) = &shape {
-        if let Some(fill) = &node.fill {
-            let color = fill.resolve(ctx.tokens)?;
-            pixmap.fill_path(
-                path,
-                &solid(color, opacity),
-                FillRule::Winding,
-                transform,
-                mask,
-            );
-        }
-        if let Some(stroke) = &node.stroke {
-            let color = stroke.paint.resolve(ctx.tokens)?;
-            let style = SkStroke {
-                width: stroke.width as f32,
-                ..SkStroke::default()
-            };
-            pixmap.stroke_path(path, &solid(color, opacity), &style, transform, mask);
-        }
+        vector::paint_shape(pixmap, mask, path, node, ctx.tokens, transform, opacity)?;
     }
 
     if node.children.is_empty() {
@@ -904,10 +891,7 @@ mod tests {
         let (mut s, frame) = frame_session();
         let mut card = rect(0.0, 0.0, 100.0, 50.0, "#00ff00");
         card.corner_radius = Some(25.0);
-        card.stroke = Some(Stroke {
-            paint: Paint::parse("#000000").unwrap(),
-            width: 4.0,
-        });
+        card.stroke = Some(Stroke::new(Paint::parse("#000000").unwrap(), 4.0));
         add(&mut s, &frame, card);
         let r = render_frame(s.document(), &frame, 1.0, None).unwrap();
         assert_eq!(
@@ -1463,10 +1447,7 @@ mod tests {
             n.opacity = Some(0.8);
             n.fill = Some(Paint::parse(["#f2ca83", "#33aa77", "#aa3377"][i as usize % 3]).unwrap());
             if i % 5 == 0 {
-                n.stroke = Some(Stroke {
-                    paint: Paint::parse("#ffffff").unwrap(),
-                    width: 3.0,
-                });
+                n.stroke = Some(Stroke::new(Paint::parse("#ffffff").unwrap(), 3.0));
             }
             add(&mut s, if i % 4 == 0 { &inner } else { &frame }, n);
         }

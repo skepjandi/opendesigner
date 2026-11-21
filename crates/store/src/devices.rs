@@ -125,7 +125,7 @@ pub fn template(device: Device, screen_width: f64, screen_image: Option<&str>) -
 
     let mut body = rect("Body", NodeKind::Rect, 0.0, 0.0, bw, bh, outer);
     body.fill = color("#17171a");
-    body.stroke = color("#3b3b42").map(|paint| Stroke { paint, width: 2.0 });
+    body.stroke = color("#3b3b42").map(|paint| Stroke::new(paint, 2.0));
     group.children.push(body);
 
     let screen = match screen_image {

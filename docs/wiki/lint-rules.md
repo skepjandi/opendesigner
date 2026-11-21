@@ -47,6 +47,9 @@ Each finding is `{code, severity, node?, frame?, video?, message, hint}`. `sever
 
 `OD001` to `OD003` judge a turned or scaled node by the upright box around it after its transform and its
 parents' (`geometry::bounds_in_frame`), not by its untransformed box.
+| `OD070` | path-invisible | warn | A path has no fill and no visible stroke, so nothing of it is drawn. |
+| `OD071` | gradient-stops-unsorted | warn | A gradient's stops are not in increasing offset order; they are drawn sorted, which is rarely what was meant. |
+| `OD072` | trim-hides-stroke | warn | A stroke's trim start and end are equal, so none of the outline is drawn and nothing animates it. |
 
 ## What the linter does not know
 
