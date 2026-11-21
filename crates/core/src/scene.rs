@@ -46,6 +46,12 @@ impl SceneStats {
     }
 }
 
+/// A full-frame texture laid over the scene (the `paper_grain` block's grain pictures) is
+/// finish, not a backdrop, so it is not counted as the picture the scene is made of.
+fn is_texture_overlay(node: &Node) -> bool {
+    node.name.starts_with("block:paper_grain")
+}
+
 fn is_shape(kind: NodeKind) -> bool {
     matches!(kind, NodeKind::Path | NodeKind::Rect | NodeKind::Ellipse)
 }
@@ -99,6 +105,7 @@ fn coverage(doc: &Document, frame: &Node, nodes: &[&Node]) -> Coverage {
             continue;
         };
         match n.kind {
+            NodeKind::Image if is_texture_overlay(n) => {}
             NodeKind::Image => {
                 mark(&mut raster, b, frame);
                 if area > 0.0 {

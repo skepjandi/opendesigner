@@ -583,6 +583,22 @@ fn a_picture_with_animated_text_is_not_an_animated_scene() {
 }
 
 #[test]
+fn a_paper_grain_overlay_is_not_the_backdrop() {
+    let (mut f, frame, video) = scene_fixture(1000, 1000);
+    f.create(
+        &frame,
+        json!({"kind": "image", "name": "block:paper_grain#1/grain_a", "x": 0, "y": 0, "width": 1000, "height": 1000, "image": "media/grain.png"}),
+    );
+    let star = f.create(
+        &frame,
+        json!({"kind": "ellipse", "name": "Star", "x": 800, "y": 100, "width": 40, "height": 40, "fill": "#ffcc00"}),
+    );
+    fade(&mut f, &video, &star);
+    let found = run(&f.doc());
+    assert!(!codes(&found).contains(&"OD090"), "{found:?}");
+}
+
+#[test]
 fn a_scene_where_only_text_and_rectangles_move_is_flagged() {
     let (mut f, frame, video) = scene_fixture(1920, 1080);
     let title = f.create(&frame, text(100.0, 100.0, 600.0, 100.0, "Hello", 80.0));
