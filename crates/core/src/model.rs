@@ -139,6 +139,32 @@ pub struct Node {
     pub visible: bool,
     #[serde(default = "default_one", skip_serializing_if = "is_one")]
     pub opacity: f64,
+    /// Degrees clockwise about the pivot, applied with the scale to the node and everything in it.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub rotation: f64,
+    /// Scale about the pivot along the node's own axes; negative flips.
+    #[serde(default = "default_one", skip_serializing_if = "is_one")]
+    pub scale_x: f64,
+    #[serde(default = "default_one", skip_serializing_if = "is_one")]
+    pub scale_y: f64,
+    /// The point rotation and scale turn about, as fractions of the node's box (a group without
+    /// a size uses the box around its children).
+    #[serde(default = "default_half", skip_serializing_if = "is_half")]
+    pub pivot_x: f64,
+    #[serde(default = "default_half", skip_serializing_if = "is_half")]
+    pub pivot_y: f64,
+    /// Gaussian blur radius of the node and everything in it, in document units.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub blur: f64,
+    /// A drop shadow cast by the node as drawn.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shadow: Option<crate::transform::Shadow>,
+    /// On a group or frame: children are clipped to its box and corner radius. A frame always is.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub clip: bool,
+    /// How far the video camera moves the node: 1 with the scene, 0 pinned to the screen.
+    #[serde(default = "default_one", skip_serializing_if = "is_one")]
+    pub depth: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fill: Option<Paint>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -191,6 +217,15 @@ fn is_one(v: &f64) -> bool {
 fn is_zero(v: &f64) -> bool {
     *v == 0.0
 }
+fn default_half() -> f64 {
+    0.5
+}
+fn is_half(v: &f64) -> bool {
+    *v == 0.5
+}
+fn is_false(v: &bool) -> bool {
+    !*v
+}
 
 impl Node {
     pub(crate) fn blank(id: NodeId, kind: NodeKind, name: String) -> Node {
@@ -217,6 +252,15 @@ impl Node {
             image_fit: None,
             device3d: (kind == NodeKind::Device3d).then(crate::device3d::Device3d::default),
             grade: None,
+            rotation: 0.0,
+            scale_x: 1.0,
+            scale_y: 1.0,
+            pivot_x: 0.5,
+            pivot_y: 0.5,
+            blur: 0.0,
+            shadow: None,
+            clip: false,
+            depth: 1.0,
             children: Vec::new(),
         }
     }
@@ -405,7 +449,8 @@ impl Document {
         fn walk(n: &Node, name: &str, out: &mut Vec<NodeId>) {
             let fill = n.fill.as_ref().is_some_and(|p| uses(p, name));
             let stroke = n.stroke.as_ref().is_some_and(|s| uses(&s.paint, name));
-            if fill || stroke {
+            let shadow = n.shadow.as_ref().is_some_and(|s| uses(&s.color, name));
+            if fill || stroke || shadow {
                 out.push(n.id.clone());
             }
             for c in &n.children {
@@ -629,6 +674,29 @@ pub(crate) fn validate_node_fields(
             });
         }
         grade.checked()?;
+    }
+    check_transform_fields(node, tokens)?;
+    Ok(())
+}
+
+/// Checks of the transform, blur, shadow, clip and depth fields (`crate::transform`).
+fn check_transform_fields(node: &Node, tokens: &BTreeMap<String, String>) -> Result<(), OpError> {
+    use crate::transform as t;
+    t::rotation(node.rotation)?;
+    t::scale("scale_x", node.scale_x)?;
+    t::scale("scale_y", node.scale_y)?;
+    t::pivot("pivot_x", node.pivot_x)?;
+    t::pivot("pivot_y", node.pivot_y)?;
+    t::blur(node.blur)?;
+    t::depth(node.depth)?;
+    if let Some(shadow) = &node.shadow {
+        shadow.checked(tokens)?;
+    }
+    if node.clip && !node.kind.is_container() {
+        return Err(OpError::NotApplicable {
+            property: "clip",
+            kind: node.kind.as_str(),
+        });
     }
     Ok(())
 }

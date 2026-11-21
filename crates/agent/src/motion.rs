@@ -35,6 +35,10 @@ pub fn definitions() -> Vec<Value> {
         Ease::EaseInOut,
         Ease::Back,
         Ease::Spring,
+        Ease::EaseInOutCubic,
+        Ease::EaseOutBack,
+        Ease::Elastic,
+        Ease::Bounce,
     ];
     vec![
         tool(

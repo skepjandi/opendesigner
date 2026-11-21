@@ -192,6 +192,61 @@ Rectangle {
                     onCommitted: v => root.setNum("corner_radius", v)
                 }
             }
+            Row2 {
+                visible: root.node && root.node.kind !== "frame"
+                label: "Rotate"
+                Field {
+                    Layout.fillWidth: true
+                    text: root.node ? root.num(root.node.rotation || 0) : ""
+                    onCommitted: v => root.setNum("rotation", v)
+                }
+            }
+            Row2 {
+                visible: root.node && root.node.kind !== "frame"
+                label: "Scale"
+                Field {
+                    Layout.fillWidth: true
+                    text: root.node ? root.num(root.node.scale_x === undefined ? 1 : root.node.scale_x) : ""
+                    onCommitted: v => root.setNum("scale_x", v)
+                }
+                Field {
+                    Layout.fillWidth: true
+                    text: root.node ? root.num(root.node.scale_y === undefined ? 1 : root.node.scale_y) : ""
+                    onCommitted: v => root.setNum("scale_y", v)
+                }
+            }
+            Row2 {
+                visible: root.node && root.node.kind !== "frame"
+                label: "Pivot"
+                Field {
+                    Layout.fillWidth: true
+                    text: root.node ? root.num(root.node.pivot_x === undefined ? 0.5 : root.node.pivot_x) : ""
+                    onCommitted: v => root.setNum("pivot_x", v)
+                }
+                Field {
+                    Layout.fillWidth: true
+                    text: root.node ? root.num(root.node.pivot_y === undefined ? 0.5 : root.node.pivot_y) : ""
+                    onCommitted: v => root.setNum("pivot_y", v)
+                }
+            }
+            Row2 {
+                visible: root.node && root.node.kind !== "frame"
+                label: "Blur"
+                Field {
+                    Layout.fillWidth: true
+                    text: root.node ? root.num(root.node.blur || 0) : ""
+                    onCommitted: v => root.setNum("blur", v)
+                }
+            }
+            Row2 {
+                visible: root.node && root.node.kind !== "frame"
+                label: "Depth"
+                Field {
+                    Layout.fillWidth: true
+                    text: root.node ? root.num(root.node.depth === undefined ? 1 : root.node.depth) : ""
+                    onCommitted: v => root.setNum("depth", v)
+                }
+            }
             Label {
                 Layout.fillWidth: true
                 visible: root.overflow !== null

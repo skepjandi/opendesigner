@@ -196,6 +196,59 @@ fn device_timing(model: DeviceModel, w: u32, h: u32) -> Duration {
     median(runs)
 }
 
+/// A 1080x1920 frame of 300 plain shapes in which `count` are given `style`: what a scene that
+/// turns, shadows or blurs its nodes costs against the same scene without.
+fn effects_timing(count: usize, style: impl Fn(&mut NewNode)) -> Duration {
+    let mut s = Session::new(Document::new("effects"));
+    let page = s.add_page("p").unwrap_or_else(|e| panic!("{e}"));
+    let root = s
+        .document()
+        .page(&page)
+        .map(|p| p.root.id.clone())
+        .unwrap_or_else(|| panic!("no page"));
+    let mut frame = NewNode::new(NodeKind::Frame);
+    frame.width = 1080.0;
+    frame.height = 1920.0;
+    frame.fill = Paint::parse("#0b1020").ok();
+    for i in 0..300usize {
+        let mut r = NewNode::new(NodeKind::Rect);
+        (r.width, r.height) = (120.0, 80.0);
+        r.x = (i % 8) as f64 * 130.0;
+        r.y = (i / 8) as f64 * 50.0;
+        r.corner_radius = Some(10.0);
+        r.fill = Paint::parse("#f2ca83").ok();
+        if i < count {
+            style(&mut r);
+        }
+        frame.children.push(r);
+    }
+    let made = s
+        .apply(
+            Actor::User,
+            None,
+            &[Operation::Create {
+                parent: root,
+                index: None,
+                node: frame,
+            }],
+        )
+        .unwrap_or_else(|e| panic!("{e}"));
+    let id = made
+        .created
+        .first()
+        .cloned()
+        .unwrap_or_else(|| panic!("no frame"));
+    let mut runs = Vec::new();
+    for _ in 0..7 {
+        let t = Instant::now();
+        let rendered =
+            od_render::render_frame(s.document(), &id, 1.0, None).unwrap_or_else(|e| panic!("{e}"));
+        runs.push(t.elapsed());
+        std::hint::black_box(rendered.pixmap.data().len());
+    }
+    median(runs)
+}
+
 fn main() {
     println!("render timings, median of 7 runs (milliseconds)");
     println!("nodes   scale   render   png    total");
@@ -234,6 +287,29 @@ fn main() {
         );
     }
 
+    println!();
+    println!("node effects, 1080x1920 at scale 1, 300 shapes, median of 7 runs (milliseconds)");
+    let shadow = od_core::Shadow {
+        dx: 0.0,
+        dy: 10.0,
+        blur: 16.0,
+        color: Paint::Color(Rgba {
+            r: 0,
+            g: 0,
+            b: 0,
+            a: 100,
+        }),
+    };
+    type Style<'a> = &'a dyn Fn(&mut NewNode);
+    let styles: [(&str, usize, Style); 4] = [
+        ("none", 0, &|_| {}),
+        ("rotated x300", 300, &|n| n.rotation = Some(17.0)),
+        ("shadowed x30", 30, &|n| n.shadow = Some(shadow.clone())),
+        ("blurred x30", 30, &|n| n.blur = Some(6.0)),
+    ];
+    for (name, count, style) in &styles {
+        println!("{name:<16} {:>7.1}", ms(effects_timing(*count, style)));
+    }
     println!();
     println!("3D device timings, median of 7 runs (milliseconds)");
     println!("model          size         render   budget");

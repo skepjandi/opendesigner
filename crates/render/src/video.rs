@@ -17,7 +17,7 @@ use tiny_skia::{FilterQuality, Pixmap, PixmapPaint, Transform};
 
 use crate::grade;
 use crate::transitions::{self, Reveal};
-use crate::{Media, RenderError, Warning, render_frame_with};
+use crate::{Media, RenderError, Warning, render_frame_camera};
 
 /// Frames kept drawn: a transition shows two clips and a second transition may start under it.
 const KEPT: usize = 3;
@@ -45,8 +45,19 @@ pub struct DrawnFrame {
 struct Liveness {
     /// Indices into `video.animations` of nodes inside the frame.
     animations: Vec<usize>,
+    /// Indices of the camera's animations, which move a frame shown by a clip but not an overlay.
+    camera: Vec<usize>,
     /// The frame holds a device whose screen plays a recording.
     plays: bool,
+}
+
+impl Liveness {
+    /// The animations that change the picture: the frame's nodes', and the camera's when the
+    /// frame is drawn through it.
+    fn moving_indices(&self, through_camera: bool) -> impl Iterator<Item = usize> + '_ {
+        let camera: &[usize] = if through_camera { &self.camera } else { &[] };
+        self.animations.iter().chain(camera).copied()
+    }
 }
 
 /// One moment being drawn: the time that places clips and overlays, the time animations are
@@ -190,7 +201,7 @@ impl<'a> VideoRenderer<'a> {
                 sig.push(time as i64);
             }
             if let Some(frame) = &clip.frame {
-                self.live_signature(frame, time, footage_moves, &mut sig)?;
+                self.live_signature(frame, time, footage_moves, true, &mut sig)?;
             }
         }
         for (n, o) in self.video.overlays.iter().enumerate() {
@@ -203,7 +214,7 @@ impl<'a> VideoRenderer<'a> {
                 if fading {
                     sig.push(time as i64);
                 }
-                self.live_signature(&o.frame, time, footage_moves, &mut sig)?;
+                self.live_signature(&o.frame, time, footage_moves, false, &mut sig)?;
             }
         }
         if let Some((cue, word)) = crate::captions::signature(self.video, time) {
@@ -219,6 +230,7 @@ impl<'a> VideoRenderer<'a> {
         frame: &NodeId,
         time: u64,
         footage_moves: bool,
+        through_camera: bool,
         sig: &mut Vec<i64>,
     ) -> Option<()> {
         let Some(live) = self.live.get(frame) else {
@@ -228,9 +240,8 @@ impl<'a> VideoRenderer<'a> {
             return None;
         }
         let moving = live
-            .animations
-            .iter()
-            .any(|&i| self.video.animations[i].moving_at(time as f64));
+            .moving_indices(through_camera)
+            .any(|i| self.video.animations[i].moving_at(time as f64));
         if moving {
             sig.push(time as i64);
         }
@@ -250,11 +261,10 @@ impl<'a> VideoRenderer<'a> {
             return false;
         };
         let time = time_ms.min(last.end_ms.saturating_sub(1));
-        let animated = |frame: &NodeId| {
+        let animated = |frame: &NodeId, through_camera: bool| {
             self.live.get(frame).is_some_and(|l| {
-                l.animations
-                    .iter()
-                    .any(|&i| self.video.animations[i].moving_at(time as f64))
+                l.moving_indices(through_camera)
+                    .any(|i| self.video.animations[i].moving_at(time as f64))
             })
         };
         let clips = placed
@@ -264,7 +274,7 @@ impl<'a> VideoRenderer<'a> {
                 let clip = &self.video.clips[p.index];
                 time - p.start_ms < u64::from(p.overlap_ms)
                     || (clip.motion.scale_to - clip.motion.scale_from).abs() > f64::EPSILON
-                    || clip.frame.as_ref().is_some_and(animated)
+                    || clip.frame.as_ref().is_some_and(|f| animated(f, true))
             });
         let overlays = self.video.overlays.iter().any(|o| {
             let end = o.start_ms + u64::from(o.duration_ms);
@@ -273,7 +283,7 @@ impl<'a> VideoRenderer<'a> {
                 && ((o.fade_ms > 0
                     && (time - o.start_ms < u64::from(o.fade_ms)
                         || end - time <= u64::from(o.fade_ms)))
-                    || animated(&o.frame))
+                    || animated(&o.frame, false))
         });
         clips || overlays
     }
@@ -338,8 +348,9 @@ impl<'a> VideoRenderer<'a> {
             return Ok(canvas);
         };
         let end = last.end_ms.saturating_sub(1);
+        let anim_ms = anim_ms.min(end as f64);
         let time = (anim_ms.floor() as u64).min(end);
-        let animated = self.doc.at_time(self.video, anim_ms.min(end as f64));
+        let animated = self.doc.at_time(self.video, anim_ms);
         let moment = Moment {
             time,
             anim_ms,
@@ -454,7 +465,7 @@ impl<'a> VideoRenderer<'a> {
             .node(frame)
             .ok_or_else(|| RenderError::NoSuchNode(frame.to_string()))?;
         let cover = (w / node.width as f32).max(h / node.height as f32);
-        let drawn = self.drawn_frame(frame, cover, moment, played_ms)?;
+        let drawn = self.drawn_frame(frame, cover, moment, played_ms, false)?;
         let (pw, ph) = (drawn.width() as f32, drawn.height() as f32);
         let moved = pose.dx != 0.0 || pose.dy != 0.0 || (pose.scale - 1.0).abs() > 1e-4;
         let paint = PixmapPaint {
@@ -509,7 +520,7 @@ impl<'a> VideoRenderer<'a> {
                     .node(frame)
                     .ok_or_else(|| RenderError::NoSuchNode(frame.to_string()))?;
                 let cover = (w / node.width as f32).max(h / node.height as f32);
-                self.drawn_frame(frame, cover * widest, moment, played)?
+                self.drawn_frame(frame, cover * widest, moment, played, true)?
             }
             (None, Some(f)) => {
                 let at = f.in_ms + self.speeds[index].source_ms(played);
@@ -598,14 +609,19 @@ impl<'a> VideoRenderer<'a> {
 
     /// What a live frame shows at the moment, as numbers: its animated values and, when a
     /// screen in it plays, the recording's time. Empty for a frame that never changes.
-    fn state_of(&self, frame: &NodeId, moment: &Moment, played_ms: u64) -> Vec<u64> {
+    fn state_of(
+        &self,
+        frame: &NodeId,
+        moment: &Moment,
+        played_ms: u64,
+        through_camera: bool,
+    ) -> Vec<u64> {
         let Some(live) = self.live.get(frame) else {
             return Vec::new();
         };
         let mut state: Vec<u64> = live
-            .animations
-            .iter()
-            .filter_map(|&i| self.video.animations[i].value_at(moment.anim_ms))
+            .moving_indices(through_camera)
+            .filter_map(|i| self.video.animations[i].value_at(moment.anim_ms))
             .map(f64::to_bits)
             .collect();
         if live.plays {
@@ -623,9 +639,10 @@ impl<'a> VideoRenderer<'a> {
         scale: f32,
         moment: &Moment,
         played_ms: u64,
+        through_camera: bool,
     ) -> Result<Cow<'_, Pixmap>, RenderError> {
         let bits = scale.to_bits();
-        let state = self.state_of(frame, moment, played_ms);
+        let state = self.state_of(frame, moment, played_ms, through_camera);
         if let Some(shared) = self.shared.clone() {
             {
                 let cache = shared.lock().unwrap_or_else(PoisonError::into_inner);
@@ -636,7 +653,7 @@ impl<'a> VideoRenderer<'a> {
                     return Ok(Cow::Owned(d.pixmap.clone()));
                 }
             }
-            let pixmap = self.render_drawn(frame, scale, moment, played_ms)?;
+            let pixmap = self.render_drawn(frame, scale, moment, played_ms, through_camera)?;
             let mut cache = shared.lock().unwrap_or_else(PoisonError::into_inner);
             if cache.len() >= KEPT {
                 cache.remove(0);
@@ -658,7 +675,7 @@ impl<'a> VideoRenderer<'a> {
             let d = self.drawn.remove(at);
             self.drawn.push(d);
         } else {
-            let pixmap = self.render_drawn(frame, scale, moment, played_ms)?;
+            let pixmap = self.render_drawn(frame, scale, moment, played_ms, through_camera)?;
             if self.drawn.len() >= KEPT {
                 self.drawn.remove(0);
             }
@@ -682,7 +699,13 @@ impl<'a> VideoRenderer<'a> {
         scale: f32,
         moment: &Moment,
         played_ms: u64,
+        through_camera: bool,
     ) -> Result<Pixmap, RenderError> {
+        let camera = if through_camera {
+            self.video.camera_at(moment.anim_ms)
+        } else {
+            od_core::Camera::default()
+        };
         let doc = match moment.doc {
             Some(animated) if self.live.contains_key(frame) => animated,
             _ => self.doc,
@@ -694,12 +717,13 @@ impl<'a> VideoRenderer<'a> {
                 .map(|f| f as &mut dyn FootageSource),
             played_ms,
         };
-        let rendered = render_frame_with(
+        let rendered = render_frame_camera(
             doc,
             frame,
             scale.clamp(0.01, 16.0),
             self.project_dir,
             &mut media,
+            camera,
         )?;
         for warning in rendered.warnings {
             if !self.warnings.contains(&warning) {
@@ -712,10 +736,14 @@ impl<'a> VideoRenderer<'a> {
 
 /// The frames a video shows whose picture changes over time, and what changes them.
 fn live_frames(doc: &Document, video: &Video) -> HashMap<NodeId, Liveness> {
-    let shown: HashSet<&NodeId> = video
+    let in_clips: HashSet<&NodeId> = video
         .clips
         .iter()
         .filter_map(|c| c.frame.as_ref())
+        .collect();
+    let shown: HashSet<&NodeId> = in_clips
+        .iter()
+        .copied()
         .chain(video.overlays.iter().map(|o| &o.frame))
         .collect();
     let mut out = HashMap::new();
@@ -734,9 +762,16 @@ fn live_frames(doc: &Document, video: &Video) -> HashMap<NodeId, Liveness> {
                 .filter(|(_, a)| ids.contains(&a.node))
                 .map(|(i, _)| i)
                 .collect(),
+            camera: video
+                .animations
+                .iter()
+                .enumerate()
+                .filter(|(_, a)| a.prop.is_camera() && in_clips.contains(frame))
+                .map(|(i, _)| i)
+                .collect(),
             plays: plays_recording(node),
         };
-        if live.plays || !live.animations.is_empty() {
+        if live.plays || !live.animations.is_empty() || !live.camera.is_empty() {
             out.insert(frame.clone(), live);
         }
     }
@@ -1496,6 +1531,7 @@ mod tests {
                     node: square,
                     prop: od_core::AnimProp::X,
                     keys: vec![key(0, 0.0), key(1000, 80.0)],
+                    repeat: od_core::Repeat::Once,
                 },
                 Operation::SetVideo {
                     id: v.clone(),

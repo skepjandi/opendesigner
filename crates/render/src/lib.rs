@@ -8,6 +8,8 @@ pub mod export;
 pub mod grade;
 mod images;
 mod incremental;
+mod layers;
+mod place;
 mod text;
 pub mod three_d;
 pub mod transitions;
@@ -22,7 +24,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::Path as FsPath;
 use std::sync::Arc;
 
-use od_core::{Document, Node, NodeId, NodeKind, OpError, limits};
+use od_core::{Camera, Document, Node, NodeId, NodeKind, OpError, limits};
 use thiserror::Error;
 use tiny_skia::{
     Color, FillRule, FilterQuality, Mask, Paint as SkPaint, Path, PathBuilder, PixmapPaint, Rect,
@@ -105,6 +107,26 @@ struct Ctx<'a> {
     view: View,
     /// The frame's 3D devices, drawn before the bands at the frame's scale.
     devices: &'a HashMap<NodeId, Arc<Pixmap>>,
+    /// Pixels per document unit.
+    scale: f32,
+    /// The video camera, when it is not at rest.
+    camera: Option<place::CameraView>,
+}
+
+impl Ctx<'_> {
+    /// Maps a node's coordinates to pixels: `chain` (camera aside), moved by the camera as far as
+    /// `depth` says (the frame itself stays put), then into the layer being drawn.
+    fn world(&self, chain: Transform, shift: Transform, depth: f32, moved: bool) -> Transform {
+        let moved = match &self.camera {
+            Some(camera) if moved => camera.transform(depth).pre_concat(chain),
+            _ => chain,
+        };
+        if shift.is_identity() {
+            moved
+        } else {
+            shift.pre_concat(moved)
+        }
+    }
 }
 
 /// The widest line and the height of all lines of `node`'s text, in document units (a box with
@@ -161,7 +183,28 @@ pub fn render_frame_with(
     project_dir: Option<&FsPath>,
     media: &mut Media,
 ) -> Result<Rendered, RenderError> {
-    render_frame_in_bands(doc, frame, scale, project_dir, media, None)
+    render_frame_in_bands(
+        doc,
+        frame,
+        scale,
+        project_dir,
+        media,
+        None,
+        Camera::default(),
+    )
+}
+
+/// [`render_frame_with`] seen through a video's `camera`: every node moves, turns and grows by
+/// the camera as far as its `depth` says; the frame's own background stays.
+pub fn render_frame_camera(
+    doc: &Document,
+    frame: &NodeId,
+    scale: f32,
+    project_dir: Option<&FsPath>,
+    media: &mut Media,
+    camera: Camera,
+) -> Result<Rendered, RenderError> {
+    render_frame_in_bands(doc, frame, scale, project_dir, media, None, camera)
 }
 
 /// The frame node and its size in pixels at `scale`, or why it cannot be drawn.
@@ -201,12 +244,22 @@ fn render_frame_in_bands(
     project_dir: Option<&FsPath>,
     media: &mut Media,
     bands: Option<usize>,
+    camera: Camera,
 ) -> Result<Rendered, RenderError> {
     let (node, (w, h)) = frame_geometry(doc, frame, scale)?;
     let bands = bands.unwrap_or_else(|| band_count(node, h));
     let mut warnings = Vec::new();
     let devices = device::prepare(node, scale, &doc.tokens, project_dir, media, &mut warnings)?;
-    let mut rendered = render_bands(doc, node, scale, (w, h), project_dir, &devices, bands)?;
+    let mut rendered = render_bands(
+        doc,
+        node,
+        scale,
+        (w, h),
+        project_dir,
+        &devices,
+        bands,
+        camera,
+    )?;
     for warning in warnings {
         if !rendered.warnings.contains(&warning) {
             rendered.warnings.push(warning);
@@ -249,6 +302,7 @@ fn band_count(node: &Node, height: u32) -> usize {
 /// Draws the top-left `size` pixels of the frame in `bands` slices of rows. Slices are
 /// independent pixmaps (each skips what lies outside it), so they run in parallel and are then
 /// copied side by side; layering inside a slice is unchanged.
+#[allow(clippy::too_many_arguments)]
 fn render_bands(
     doc: &Document,
     node: &Node,
@@ -257,6 +311,7 @@ fn render_bands(
     project_dir: Option<&FsPath>,
     devices: &HashMap<NodeId, Arc<Pixmap>>,
     bands: usize,
+    camera: Camera,
 ) -> Result<Rendered, RenderError> {
     let too_large = || RenderError::TooLarge {
         width: u64::from(w),
@@ -265,7 +320,17 @@ fn render_bands(
     let rows = h.div_ceil(bands.max(1) as u32).max(1);
     let starts: Vec<u32> = (0..h).step_by(rows as usize).collect();
     let draw_band = |top: u32| -> Result<Band, RenderError> {
-        draw_rows(doc, node, scale, (w, h), project_dir, devices, top, rows)
+        draw_rows(
+            doc,
+            node,
+            scale,
+            (w, h),
+            project_dir,
+            devices,
+            top,
+            rows,
+            camera,
+        )
     };
     let parts: Vec<Result<Band, RenderError>> = if starts.len() == 1 {
         vec![draw_band(0)]
@@ -314,6 +379,7 @@ fn draw_rows(
     devices: &HashMap<NodeId, Arc<Pixmap>>,
     top: u32,
     rows: u32,
+    camera: Camera,
 ) -> Result<Band, RenderError> {
     let too_large = || RenderError::TooLarge {
         width: u64::from(w),
@@ -323,6 +389,7 @@ fn draw_rows(
     let last = (top + rows).min(h);
     let band_h = (last + BAND_OVERLAP).min(h) - first;
     let mut pixmap = Pixmap::new(w, band_h).ok_or_else(too_large)?;
+    let base = Transform::from_row(scale, 0.0, 0.0, scale, 0.0, -(first as f32));
     let mut ctx = Ctx {
         tokens: &doc.tokens,
         project_dir,
@@ -332,9 +399,16 @@ fn draw_rows(
             height: band_h as f32,
         },
         devices,
+        scale,
+        camera: place::CameraView::new(camera, base, node.width, node.height),
     };
-    let base = Transform::from_row(scale, 0.0, 0.0, scale, 0.0, -(first as f32));
-    draw(&mut ctx, &mut pixmap, node, base, 1.0, None, true)?;
+    let start = Place {
+        parent: base,
+        shift: Transform::identity(),
+        depth: 1.0,
+        opacity: 1.0,
+    };
+    draw(&mut ctx, &mut pixmap, node, start, None, true)?;
     let skip = (top - first) as usize * w as usize * 4;
     let keep = (last - top) as usize * w as usize * 4;
     Ok((pixmap.data()[skip..skip + keep].to_vec(), ctx.warnings))
@@ -350,26 +424,59 @@ struct View {
     height: f32,
 }
 
+/// Where a node's parent is drawn and what the node inherits from it.
+#[derive(Clone, Copy)]
+struct Place {
+    /// Maps the parent's coordinates to pixels, camera aside.
+    parent: Transform,
+    /// Moves the drawing into an effect layer's pixmap (the identity outside one).
+    shift: Transform,
+    /// The depths of the ancestors multiplied: how far the camera moves what is drawn.
+    depth: f32,
+    opacity: f32,
+}
+
 fn draw(
     ctx: &mut Ctx,
     pixmap: &mut Pixmap,
     node: &Node,
-    parent: Transform,
-    parent_opacity: f32,
+    place: Place,
     mask: Option<&Mask>,
     is_root: bool,
+) -> Result<(), RenderError> {
+    draw_node(ctx, pixmap, node, place, mask, is_root, true)
+}
+
+/// Draws `node` and what is below it. With `layers` off the node is drawn straight onto
+/// `pixmap` even when it blurs or casts a shadow (the layer that does those is being drawn).
+fn draw_node(
+    ctx: &mut Ctx,
+    pixmap: &mut Pixmap,
+    node: &Node,
+    place: Place,
+    mask: Option<&Mask>,
+    is_root: bool,
+    layers: bool,
 ) -> Result<(), RenderError> {
     if !node.visible {
         return Ok(());
     }
-    // The exported frame sits at the origin whatever its position on the page.
-    let (x, y) = if is_root {
-        (0.0, 0.0)
+    // The exported frame sits at the origin and ignores its own transform.
+    let chain = if is_root {
+        place.parent
     } else {
-        (node.x as f32, node.y as f32)
+        place::node_chain(place.parent, node)
     };
-    let transform = parent.pre_translate(x, y);
-    let opacity = parent_opacity * node.opacity as f32;
+    let depth = if is_root {
+        place.depth
+    } else {
+        place.depth * node.depth as f32
+    };
+    let transform = ctx.world(chain, place.shift, depth, !is_root);
+    if layers && !is_root && layers::needs_layer(node) {
+        return layers::draw_layered(ctx, pixmap, node, place, mask);
+    }
+    let opacity = place.opacity * node.opacity as f32;
     let (w, h) = (node.width as f32, node.height as f32);
 
     // Anything wholly outside the band is not drawn. A frame clips its children, so its subtree
@@ -378,12 +485,11 @@ fn draw(
     let margin = node
         .stroke
         .as_ref()
-        .map_or(0.0, |s| s.width as f32 * transform.sx / 2.0)
+        .map_or(0.0, |s| s.width as f32 * place::scale_of(transform) / 2.0)
         + 1.0;
-    let (left, top) = (transform.tx, transform.ty);
-    let (right, bottom) = (left + w * transform.sx, top + h * transform.sy);
+    let (left, top, right, bottom) = place::device_rect(transform, 0.0, 0.0, w, h);
     let outside = if node.kind == NodeKind::Text {
-        top - margin > ctx.view.height
+        place::is_upright(transform) && top - margin > ctx.view.height
     } else {
         right + margin < 0.0
             || bottom + margin < 0.0
@@ -413,7 +519,7 @@ fn draw(
                         a: 255,
                     },
                 };
-                text::draw_text(pixmap, mask, node, transform, color, opacity);
+                text::draw_placed(pixmap, mask, node, transform, color, opacity);
                 None
             }
             NodeKind::Image => {
@@ -431,7 +537,7 @@ fn draw(
             }
             NodeKind::Device3d => {
                 if let Some(drawn) = ctx.devices.get(&node.id) {
-                    draw_device(pixmap, mask, drawn, transform, opacity);
+                    draw_device(pixmap, mask, drawn, transform, opacity, ctx.scale);
                 }
                 None
             }
@@ -462,14 +568,24 @@ fn draw(
     if node.children.is_empty() {
         return Ok(());
     }
-    // Frames clip their children to their own (rounded) bounds.
+    // Frames, and groups that ask for it, clip their children to their own (rounded) bounds.
     let clip = match (node.kind, &shape) {
         (NodeKind::Frame, Some(path)) => Some(clip_mask(pixmap, mask, path, transform)?),
+        (NodeKind::Group, _) if node.clip => match layers::group_clip(node) {
+            Some(path) => Some(clip_mask(pixmap, mask, &path, transform)?),
+            None => None,
+        },
         _ => None,
     };
     let child_mask = clip.as_ref().or(mask);
+    let inner = Place {
+        parent: chain,
+        depth,
+        opacity,
+        ..place
+    };
     for child in &node.children {
-        draw(ctx, pixmap, child, transform, opacity, child_mask, false)?;
+        draw(ctx, pixmap, child, inner, child_mask, false)?;
     }
     Ok(())
 }
@@ -481,16 +597,32 @@ fn draw_device(
     drawn: &Pixmap,
     transform: Transform,
     opacity: f32,
+    scale: f32,
 ) {
-    let at = Transform::from_translate(transform.tx, transform.ty);
-    let aligned = transform.tx.fract() == 0.0 && transform.ty.fract() == 0.0;
-    let paint = PixmapPaint {
-        opacity,
-        quality: if aligned {
+    let plain = transform.kx == 0.0
+        && transform.ky == 0.0
+        && transform.sx == scale
+        && transform.sy == scale;
+    let (at, quality) = if plain {
+        let aligned = transform.tx.fract() == 0.0 && transform.ty.fract() == 0.0;
+        let quality = if aligned {
             FilterQuality::Nearest
         } else {
             FilterQuality::Bilinear
-        },
+        };
+        (
+            Transform::from_translate(transform.tx, transform.ty),
+            quality,
+        )
+    } else {
+        (
+            transform.pre_scale(1.0 / scale, 1.0 / scale),
+            FilterQuality::Bilinear,
+        )
+    };
+    let paint = PixmapPaint {
+        opacity,
+        quality,
         ..PixmapPaint::default()
     };
     pixmap.draw_pixmap(0, 0, drawn.as_ref(), &paint, at, mask);
@@ -1361,6 +1493,7 @@ mod tests {
                 None,
                 &mut Media::default(),
                 Some(1),
+                Camera::default(),
             )
             .unwrap();
             for bands in [2, 3, 8] {
@@ -1371,6 +1504,7 @@ mod tests {
                     None,
                     &mut Media::default(),
                     Some(bands),
+                    Camera::default(),
                 )
                 .unwrap();
                 assert_eq!(one.pixmap.width(), many.pixmap.width());
