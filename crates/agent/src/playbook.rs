@@ -86,7 +86,7 @@ pub const TOPICS: &[(&str, &str, &str)] = &[
     ),
     (
         "characters",
-        "flat-vector characters, speech and thought bubbles and animated props (rocket, bulb, atom, planet, tree, house, laptop, gear, cell, DNA): the rig, actions, timing",
+        "flat-vector characters (18 expressions, expression changes, looks, reactions), emote marks (exclamation, sweat, hearts, lightbulb, zzz), speech and thought bubbles and animated props (rocket, bulb, atom, planet, tree, house, laptop, gear, cell, DNA): the rig, acting, actions, timing",
         include_str!("../skill/characters-playbook.md"),
     ),
     (

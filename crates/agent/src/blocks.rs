@@ -9,9 +9,12 @@ mod args;
 mod art;
 mod backdrops;
 mod bubbles;
+mod character_acting;
 mod character_motion;
 mod characters;
 mod data;
+mod emotes;
+mod faces;
 mod files;
 mod guides;
 mod kit;
@@ -30,6 +33,8 @@ mod wrappers;
 
 #[cfg(test)]
 mod character_tests;
+#[cfg(test)]
+mod emote_tests;
 #[cfg(test)]
 mod scenery_tests;
 #[cfg(test)]
@@ -75,7 +80,7 @@ pub fn definitions() -> Vec<Value> {
         tool(
             "list_blocks",
             "The block catalog: ready-made titles, lower thirds, overlays, backgrounds, charts, store \
-             headlines, motion wrappers, rigged flat-vector characters, speech and thought bubbles and animated props that expand into ordinary nodes (and keyframes on a video). \
+             headlines, motion wrappers, rigged flat-vector characters (eighteen expressions, expression changes, reactions), emote marks (exclamation, sweat drops, hearts, lightbulb, zzz), speech and thought bubbles and animated props that expand into ordinary nodes (and keyframes on a video). \
              Search by what you need (`query`: words matched against names, tags and descriptions) \
              and/or `category`. Each result has the block id, its category and what it is for. Then \
              get_block for its parameters and add_block to use it. Scenery blocks (sky_gradient, \

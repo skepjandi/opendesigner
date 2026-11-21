@@ -10,7 +10,9 @@ use serde_json::Value;
 use super::BlockError;
 use super::args::Args;
 use super::art::{Key, Rng, Tracks, ms, sway};
-use super::characters::{Cfg, Expr, Geo};
+use super::character_acting::{self, Acting, Reaction};
+use super::characters::{Cfg, Geo, read_expr};
+use super::faces::{self, FaceRig, part};
 use super::kit::Kit;
 
 const MAX_WALK_MS: u64 = 40_000;
@@ -35,9 +37,10 @@ pub enum Action {
 pub struct Rest {
     pub rig_x: f64,
     pub rig_y: f64,
+    pub head_x: f64,
     pub head_y: f64,
     pub arm_y: [f64; 2],
-    pub pupil: [(f64, f64); 2],
+    pub faces: Vec<FaceRig>,
 }
 
 /// What the caller asked the character to do.
@@ -51,6 +54,7 @@ pub struct Script {
     pub target: Option<(f64, f64)>,
     pub loops: u32,
     pub seed: u64,
+    pub acting: Acting,
     center: f64,
 }
 
@@ -139,6 +143,10 @@ impl Script {
         if action == Action::Talk && talk.is_empty() && end > start {
             talk.push((start, end));
         }
+        let acting = Acting::read(a, read_expr(a), action)?;
+        if acting.reaction == Reaction::Laugh && talk.is_empty() && action != Action::Talk {
+            talk.push((acting.reaction_at, acting.reaction_at + acting.reaction_ms));
+        }
         let mut script = Script {
             action,
             start,
@@ -149,6 +157,7 @@ impl Script {
             target,
             loops: a.num("loops") as u32,
             seed: a.num("seed") as u64,
+            acting,
             center,
         };
         if action == Action::Walk {
@@ -186,7 +195,8 @@ pub fn animate(k: &mut Kit, s: &Script, g: &Geo, rest: &Rest, cfg: &Cfg) -> Resu
         Action::Point => point(&mut t, s, g)?,
         Action::Talk | Action::Idle => {}
     }
-    mouth(&mut t, s, cfg);
+    character_acting::animate(&mut t, s, g, rest);
+    mouth(&mut t, s, rest);
     t.emit(k)
 }
 
@@ -214,13 +224,14 @@ fn idle(t: &mut Tracks, s: &Script, g: &Geo, rest: &Rest, cfg: &Cfg) {
             sway(sign * 3.0, sign * 10.0, rng.range(1900.0, 3100.0)),
         );
     }
-    blink(t, &mut rng);
+    blink(t, &mut rng, rest);
     drift(t, s, g, rest, cfg, &mut rng);
     antennae(t, cfg, &mut rng);
+    face_life(t, g, rest, &mut rng);
 }
 
 /// Both eyes close and open once per cycle, 2 to 4 seconds apart.
-fn blink(t: &mut Tracks, rng: &mut Rng) {
+fn blink(t: &mut Tracks, rng: &mut Rng, rest: &Rest) {
     let p = rng.range(2000.0, 4000.0);
     let close = ms(p - 150.0);
     let keys: Vec<Key> = vec![
@@ -230,8 +241,15 @@ fn blink(t: &mut Tracks, rng: &mut Rng) {
         (close + 90, 1.0, Ease::EaseOut),
         (ms(p), 1.0, Ease::Linear),
     ];
-    for name in ["eye_l", "eye_r"] {
-        t.set(name, AnimProp::ScaleY, keys.clone(), Repeat::Loop);
+    for face in &rest.faces {
+        for tag in ["eye_l", "eye_r"] {
+            t.set(
+                &part(&face.prefix, tag),
+                AnimProp::ScaleY,
+                keys.clone(),
+                Repeat::Loop,
+            );
+        }
     }
 }
 
@@ -242,10 +260,77 @@ fn drift(t: &mut Tracks, s: &Script, g: &Geo, rest: &Rest, cfg: &Cfg, rng: &mut 
     }
     let span = rng.range(2600.0, 4200.0);
     let reach = g.s * 0.45;
-    for (side, name) in ["pupil_l", "pupil_r"].into_iter().enumerate() {
-        let (x, y) = rest.pupil[side];
-        t.looping(name, AnimProp::X, sway(x - reach, x + reach, span));
-        t.looping(name, AnimProp::Y, sway(y, y + reach * 0.3, span * 1.3));
+    for face in &rest.faces {
+        for (side, tag) in ["l", "r"].into_iter().enumerate() {
+            let name = part(&face.prefix, &format!("pupil_{tag}"));
+            let (x, y) = face.pupils[side].start;
+            t.looping(&name, AnimProp::X, sway(x - reach, x + reach, span));
+            t.looping(&name, AnimProp::Y, sway(y, y + reach * 0.3, span * 1.3));
+        }
+    }
+}
+
+/// Everything the faces do by themselves: tears run, a scared face shivers, love beats.
+fn face_life(t: &mut Tracks, g: &Geo, rest: &Rest, rng: &mut Rng) {
+    for face in &rest.faces {
+        if face.tears {
+            tears(t, g, face, rng);
+        }
+        if face.heart {
+            for tag in ["l", "r"] {
+                let name = part(&face.prefix, &format!("pupil_{tag}"));
+                t.set(&name, AnimProp::Scale, heartbeat(), Repeat::Loop);
+            }
+        }
+        if face.trembles {
+            t.set(
+                &part(&face.prefix, "face"),
+                AnimProp::Rotation,
+                shiver(),
+                Repeat::Loop,
+            );
+        }
+    }
+}
+
+fn heartbeat() -> Vec<Key> {
+    vec![
+        (0, 1.0, Ease::Linear),
+        (150, 1.14, Ease::EaseOut),
+        (320, 1.0, Ease::EaseInOut),
+        (430, 1.08, Ease::EaseOut),
+        (560, 1.0, Ease::EaseInOut),
+        (1000, 1.0, Ease::Linear),
+    ]
+}
+
+fn shiver() -> Vec<Key> {
+    vec![
+        (0, 0.0, Ease::Linear),
+        (70, 1.3, Ease::EaseInOut),
+        (140, -1.3, Ease::EaseInOut),
+        (210, 0.0, Ease::EaseInOut),
+    ]
+}
+
+/// Each tear slips down the cheek and fades, again and again, the two out of step.
+fn tears(t: &mut Tracks, g: &Geo, face: &FaceRig, rng: &mut Rng) {
+    let fall = g.head.height * 0.2;
+    for (tag, rest_y) in [("l", face.tears_y[0]), ("r", face.tears_y[1])] {
+        let name = part(&face.prefix, &format!("tear_{tag}"));
+        let period = ms(rng.range(900.0, 1200.0));
+        let slide: Vec<Key> = vec![
+            (0, rest_y, Ease::Linear),
+            (period, rest_y + fall, Ease::EaseIn),
+        ];
+        let fade: Vec<Key> = vec![
+            (0, 0.0, Ease::Linear),
+            (period / 5, 1.0, Ease::EaseOut),
+            (period * 3 / 4, 1.0, Ease::Linear),
+            (period, 0.0, Ease::EaseIn),
+        ];
+        t.set(&name, AnimProp::Y, slide, Repeat::Loop);
+        t.set(&name, AnimProp::Opacity, fade, Repeat::Loop);
     }
 }
 
@@ -275,7 +360,13 @@ fn antennae(t: &mut Tracks, cfg: &Cfg, rng: &mut Rng) {
 
 /// `cycle` (times from its own start, the first key at the rest value) played `loops` times from
 /// `start`, preceded by a hold at `rest_value` until it starts.
-fn play(start: u64, rest_value: f64, cycle: &[Key], period: u64, loops: u32) -> Vec<Key> {
+pub(super) fn play(
+    start: u64,
+    rest_value: f64,
+    cycle: &[Key],
+    period: u64,
+    loops: u32,
+) -> Vec<Key> {
     let mut keys = Vec::new();
     if start > 0 {
         keys.push((0, rest_value, Ease::Linear));
@@ -545,7 +636,7 @@ fn syllables(rng: &mut Rng, from: u64, to: u64) -> Vec<(u64, f64)> {
     out
 }
 
-fn mouth(t: &mut Tracks, s: &Script, cfg: &Cfg) {
+fn mouth(t: &mut Tracks, s: &Script, rest: &Rest) {
     let forever = s.action == Action::Talk && s.talk.is_empty();
     if s.talk.is_empty() && !forever {
         return;
@@ -562,7 +653,15 @@ fn mouth(t: &mut Tracks, s: &Script, cfg: &Cfg) {
             beats.extend(syllables(&mut rng, *a, *b));
         }
     }
-    let visible = matches!(cfg.expr, Expr::Happy | Expr::Surprised);
+    let mode = if forever { Repeat::Loop } else { Repeat::Once };
+    for face in &rest.faces {
+        talk_face(t, face, &beats, mode);
+    }
+}
+
+/// The mouth of one face opens on each beat; a closed mouth shows its open shape only then.
+fn talk_face(t: &mut Tracks, face: &FaceRig, beats: &[(u64, f64)], mode: Repeat) {
+    let visible = faces::open_visible(face.expr);
     let closed_scale = if visible { 0.45 } else { 0.3 };
     let scale: Vec<Key> = beats
         .iter()
@@ -574,23 +673,13 @@ fn mouth(t: &mut Tracks, s: &Script, cfg: &Cfg) {
             )
         })
         .collect();
-    let opacity: Vec<Key> = beats
-        .iter()
-        .map(|(at, amount)| {
-            (
-                *at,
-                if visible {
-                    1.0
-                } else {
-                    f64::from(*amount > 0.0)
-                },
-                Ease::Linear,
-            )
-        })
-        .collect();
-    let mode = if forever { Repeat::Loop } else { Repeat::Once };
-    t.set("mouth_open", AnimProp::ScaleY, scale, mode);
+    let name = part(&face.prefix, "mouth_open");
+    t.set(&name, AnimProp::ScaleY, scale, mode);
     if !visible {
-        t.set("mouth_open", AnimProp::Opacity, opacity, mode);
+        let opacity: Vec<Key> = beats
+            .iter()
+            .map(|(at, amount)| (*at, f64::from(*amount > 0.0), Ease::Linear))
+            .collect();
+        t.set(&name, AnimProp::Opacity, opacity, mode);
     }
 }
