@@ -6,10 +6,10 @@ carry the idea, speech that appears when someone speaks. Never answer such a bri
 background picture and animated text; build the scene from shapes and let things move.
 
 Blocks (all in the `characters` category; `list_blocks` with `category: "characters"`):
-`character`, `speech_bubble`, `thought_bubble`, `prop_rocket`, `prop_lightbulb`, `prop_atom`,
-`prop_planet`, `prop_tree`, `prop_house`, `prop_laptop_2d` (a flat drawing, not the 3D device),
-`prop_gear`, `prop_cell`, `prop_dna`. Backdrops, particles and camera moves are other blocks
-(scenery); this page is about what stands in front of them.
+`character`, `emote`, `speech_bubble`, `thought_bubble`, `prop_rocket`, `prop_lightbulb`,
+`prop_atom`, `prop_planet`, `prop_tree`, `prop_house`, `prop_laptop_2d` (a flat drawing, not the
+3D device), `prop_gear`, `prop_cell`, `prop_dna`. Backdrops, particles and camera moves are other
+blocks (scenery); this page is about what stands in front of them.
 
 ## The loop
 
@@ -28,9 +28,9 @@ Blocks (all in the `characters` category; `list_blocks` with `category: "charact
 ## character
 
 Styles: `blob` (big round head, the friendliest), `bean` (tall, a person), `robot` (boxy, glowing
-eyes), `creature` (blob with antennae). Expressions: `neutral`, `happy`, `surprised`, `sad`,
-`angry`, `thinking`. Flags: `hat`, `glasses`, `backpack`. `facing` turns the face toward `left` or
-`right`; `auto` follows a walk. `look_at` (a node id or point) sends the pupils there.
+eyes), `creature` (blob with antennae). Expressions: see Acting below (18 of them). Flags: `hat`,
+`glasses`, `backpack`. `facing` turns the face toward `left` or `right`; `auto` follows a walk.
+`look_at` (a node id or point) sends the pupils there and turns the face a little toward it.
 
 The result names the parts. The root is `block:character#<n>`; its parts, by name, are `shadow`,
 `rig` and, inside the rig, `body`, `head`, `eyes`, `eye_l`, `eye_r`, `pupil_l`, `pupil_r`,
@@ -64,6 +64,52 @@ An action replaces the idle motion of the parts it uses, so a walking character'
 instead of sway. One action per block: for a sequence (wave, then walk away) add the character
 once, and re-time the parts with `animate`, or add a second block with the same box and hide it.
 
+## Acting: make the character feel played
+
+A face that never changes is a mascot, not an actor. Eighteen expressions, each its own drawing
+(eyes, lids, brows, mouth, cheeks), so the silhouette of the face changes and not just a brow:
+`neutral`, `happy`, `excited` (sparkle eyes, wide grin), `surprised`, `shocked` (huge eyes, tiny
+pupils, gaping mouth), `sad`, `crying` (tears run), `angry`, `annoyed` (side-eye, flat mouth),
+`thinking`, `confused` (one brow up, wavy mouth), `sleepy` (heavy lids, yawn), `bored`, `smug`
+(half lids, one brow, smirk), `worried`, `scared` (tiny pupils, zigzag mouth, a shiver), `love`
+(heart eyes that beat) and `determined` (set teeth, level glare).
+
+`expression_changes: [{"at_ms": 2400, "expression": "surprised"}, ...]` lets one character act
+through several faces on one video (the first change at 200 ms or later, 500 ms apart or more, up
+to 40 changes through 6 different faces). Each change anticipates: the old face squints, the face
+swaps with a short cross-fade, the new one overshoots and settles, all as ordinary keyframes on
+the `face` groups (the first face is `face`, the others `<expression>_face`, and their parts carry
+the same prefix: `sad_eye_l`, `sad_mouth_open`). Blinking, talking, looking and tears work on every
+face. Check the timing with `render_video_frame` just before, at and 300 ms after a change.
+
+`looks: [{"at_ms": 1000, "x": 400, "y": 300}, ...]` sends the eyes to a point at each time: the
+pupils jump at once and the face turns a beat later (400 ms apart or more). `look_at` is the
+still version: pupils and face turn toward a node or point for the whole video.
+
+`reaction` (with `reaction_at_ms`): `take` (a startle, a look away, then a squashed and stretched
+snap back: the double-take), `shrug` (shoulders up, palms out, head sinking), `nod`, `shake_head`
+and `laugh` (the body hops for `reaction_ms`, the mouth flaps). `loops` repeats the others. A
+reaction moves parts an action may own: `take` and `laugh` not with `walk`, `jump` or
+`celebrate`, `shrug` also not with `wave` or `point`.
+
+Acting rules (the difference between a puppet and a character):
+
+- Never twin. Two characters on screen get different `seed`s, different timing for the same beat
+  (one reacts 150 to 300 ms after the other) and different faces and sizes. Never mirror a pose
+  or a motion; offset arm and eye timing instead.
+- Anticipate. Every reaction starts with a small move the other way (the squint, the squash, the
+  glance away) before the big one. The changes and reactions already do; do not cut the lead-in
+  by putting a change at 200 ms when the story beat is at 200 ms: start it earlier.
+- Eyes lead. Look first (`looks`, or the pupils of a `look_at`), then react: put the look 300 to
+  500 ms before the expression change or the reaction, in the direction of what causes it.
+- Show the thought. Whatever the character feels or knows appears as a mark (an `emote`: a
+  lightbulb, a question, a sweat drop, hearts), not only as words in a bubble.
+- Hold the beat. A reaction needs to be seen: keep the new face (and its emote) on screen for at
+  least 800 ms, one second if the line is long, before the next change.
+- Tie every change to a story beat (a line of the voice-over, a prop arriving, a result): if you
+  cannot say what happened, the face should not change. Three to five faces in thirty seconds
+  is plenty; a character that changes every second is jittery, not alive.
+
 ## speech_bubble and thought_bubble
 
 A bubble hugs its text (up to four lines, fitted to the box: too long a line is refused, so shorten
@@ -74,6 +120,22 @@ with overshoot (`pop_ms`; the thought bubble's circles follow one by one) and fl
 (`float`). Time it with `start_ms` to the moment the line is spoken and use `hold_ms` to fade it
 out after; give the speaker a `talk` range for the same moment. Colors default to the foreground
 role for the bubble and whichever of foreground or background reads better for the text.
+
+## emote
+
+A painted mark instead of words, placed beside a character. `mark`: `exclamation`, `question`,
+`sweat` (drops that slide down), `heart` (rising hearts, or one beating), `lightbulb` (glow and
+rays pulse), `zzz` (letters drifting up), `anger` (a pulsing vein cross), `steam` (puffs), `sparkle`
+(twinkling stars), `music` (notes bobbing), `rain_cloud` (cloud and falling rain), `dizzy` (turning
+spirals), `stars` (stars orbiting). `target` is the character's `head` part id (or `{x, y}`): the
+mark sits where that mark usually sits (`side: auto`) or at `above`, `upper_left`, `upper_right`,
+`left`, `right`, sized from the target's width (`scale` 0.4 to 3), kept inside the frame's safe
+area. Without a `target` it fills its `box`. `count` sets how many drops, hearts, notes and so on.
+Time it with `start_ms` (it pops in with overshoot over `pop_ms`) and `hold_ms` (it fades out after
+that; at least `pop_ms`). Its idle motion loops for as long as it is there. Colors come from a
+fitting hue (blue drops, red hearts, yellow bulbs) eased toward the `accent` token; pass `color` to
+decide. Put it where the viewer is already looking, at the same time as the expression it
+illustrates, and never two marks on one head at once.
 
 ## Props
 
@@ -100,10 +162,12 @@ the planet). Put a prop's ground shadow where its feet are, not in the air.
 
 - Explainer opening: backdrop block, a `prop_planet` or `prop_house` in the middle ground, a
   `character` (`happy`, `wave`) in front, a `speech_bubble` at the voice-over's first line.
-- Idea beat: character `thinking` with a `thought_bubble` whose text is a few words, then a
-  `prop_lightbulb` above it at the moment the idea lands, the character switching to `surprised`
-  (add a second character block at the same box, or set the face parts with `apply_ops` at a
-  checkpoint).
+- Idea beat: character `thinking` with a `thought_bubble` whose text is a few words and a `looks`
+  entry toward the thing it noticed; 400 ms later, as the idea lands, an `expression_changes` entry
+  to `excited` (or `surprised`), a `reaction: take` and an `emote` lightbulb on its head, all at
+  the same time. Keep that face and the mark for a full second.
+- Mood beat: `emote` sweat drops (`worried`), zzz (`sleepy`), a rain cloud (`sad`), anger (`angry`),
+  hearts (`love`), a question (`confused`): the mark carries the feeling, the face agrees.
 - Journey: a `character` with `action: walk` across the frame while a scenery block scrolls, or a
   `prop_rocket` moved with `animate` (`x`, `y`, `rotation`) along an arc.
 - Science: `prop_atom`, `prop_cell`, `prop_dna` large in the middle with a `character` small at

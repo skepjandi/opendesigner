@@ -502,7 +502,7 @@ Arguments:
 
 ## `list_blocks`
 
-The block catalog: ready-made titles, lower thirds, overlays, backgrounds, charts, store headlines, motion wrappers, rigged flat-vector characters, speech and thought bubbles and animated props that expand into ordinary nodes (and keyframes on a video). Search by what you need (`query`: words matched against names, tags and descriptions) and/or `category`. Each result has the block id, its category and what it is for. Then get_block for its parameters and add_block to use it. Scenery blocks (sky_gradient, parallax_hills, starfield, clouds, sun_glow, ocean_waves, city_skyline, cells_backdrop, particles, grid_floor, connector, highlight_ring) build layered, always-moving flat-vector scenes: read get_playbook `scenery` first.
+The block catalog: ready-made titles, lower thirds, overlays, backgrounds, charts, store headlines, motion wrappers, rigged flat-vector characters (eighteen expressions, expression changes, reactions), emote marks (exclamation, sweat drops, hearts, lightbulb, zzz), speech and thought bubbles and animated props that expand into ordinary nodes (and keyframes on a video). Search by what you need (`query`: words matched against names, tags and descriptions) and/or `category`. Each result has the block id, its category and what it is for. Then get_block for its parameters and add_block to use it. Scenery blocks (sky_gradient, parallax_hills, starfield, clouds, sun_glow, ocean_waves, city_skyline, cells_backdrop, particles, grid_floor, connector, highlight_ring) build layered, always-moving flat-vector scenes: read get_playbook `scenery` first.
 
 Read-only.
 
