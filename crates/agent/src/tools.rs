@@ -134,6 +134,7 @@ pub fn definitions() -> Vec<Value> {
     all.extend(crate::assets::logo::definitions());
     all.extend(crate::vector_tools::definitions());
     all.extend(crate::review_video::definitions());
+    all.extend(crate::external_tools::definitions());
     all.extend(showcase_definitions());
     all
 }
@@ -735,6 +736,7 @@ pub fn call(ctx: &mut CallCtx, name: &str, args: Value) -> Result<Output, ToolEr
         }
         n if crate::vector_tools::NAMES.contains(&n) => crate::vector_tools::call(ctx, n, args),
         n if crate::review_video::NAMES.contains(&n) => crate::review_video::call(ctx, n, args),
+        n if crate::external_tools::NAMES.contains(&n) => crate::external_tools::call(ctx, n, args),
         n if crate::assets::tools::handles(n) => {
             let dir = ctx.ws.dir().map(std::path::Path::to_path_buf);
             crate::assets::tools::call(dir.as_deref(), n, args)
@@ -1041,6 +1043,9 @@ fn get_guidance(ctx: &mut CallCtx) -> Result<Output, ToolError> {
     v["memory"] = memory_index(ctx);
     v["extra_mcp_servers"] = crate::mcp_servers::describe(ctx.extra_servers);
     v["sound"] = json!(crate::mcp_servers::SOUND_NOTE);
+    if let Some(note) = crate::external_tools::missing_note() {
+        v["optional_programs"] = json!(note);
+    }
     Ok(Output::json(&v))
 }
 

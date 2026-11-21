@@ -12,6 +12,7 @@ pub mod direction;
 pub mod doctools;
 pub mod error;
 pub mod export;
+pub mod external_tools;
 pub mod formats;
 pub mod freesound;
 pub mod http;

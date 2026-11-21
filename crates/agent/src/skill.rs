@@ -462,8 +462,11 @@ shows them all. Then set the track. For more than one (music, a voice-over, effe
 `add_sound_track` (role `music`, `voice` or `sfx`, up to 8; start, trim, gain, fades, pan; music can
 `duck` under the voice), `set_sound_track` and `remove_sound_track`. Captions are data: bring a
 transcript from the user's own speech server with `import_captions` (`srt`, `vtt`, `words_json`;
-OpenDesigner does no speech recognition), or estimate from a script with `captions_from_script`,
-then `set_caption_style`. `detect_pauses`, `remove_pauses` and `get_waveform` need ffmpeg. A Freesound sound keeps its
+OpenDesigner has no speech recognition built in), run the user's own whisper with `transcribe` (word
+timings, `apply: true` sets the captions), or estimate from a script with `captions_from_script`,
+then `set_caption_style`. Programs the user installs (ffmpeg, whisper, rembg for `remove_background`)
+may be missing: call `get_capabilities` before using them and, when one is missing, ask the user to
+install it (the report has the command) instead of failing mid-task. `detect_pauses`, `remove_pauses` and `get_waveform` need ffmpeg. A Freesound sound keeps its
 author's license: show the attribution the tool gives you (title, author, license, link) wherever
 the sound is used, and prefer CC0.
 

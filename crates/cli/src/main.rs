@@ -12,6 +12,7 @@ use od_core::{
 };
 mod blocks;
 mod doccmd;
+mod external;
 mod review_video;
 mod serve;
 mod skillcmd;
@@ -335,6 +336,12 @@ enum Command {
     ImportSvgVector(vector::ImportSvgVector),
     /// Review a video for animation quality: motion, layers, sound, a score and the top fixes.
     ReviewVideo(review_video::ReviewVideo),
+    /// Speech to text with the user's whisper program; optionally sets the words as captions.
+    Transcribe(external::Transcribe),
+    /// Cut a subject out of a project image with the user's rembg.
+    RemoveBackground(external::RemoveBackground),
+    /// Which external programs (ffmpeg, whisper, rembg) are installed, and how to install the rest.
+    Doctor(external::Doctor),
     /// Sound tracks, pauses and waveforms of a video.
     Sound {
         #[command(subcommand)]
@@ -1021,6 +1028,9 @@ fn run(cli: Cli) -> Result<(), CliError> {
         Command::Blocks { action } => blocks::run(action)?,
         Command::ImportSvgVector(args) => vector::run(args)?,
         Command::ReviewVideo(args) => review_video::run(args)?,
+        Command::Transcribe(args) => external::transcribe(args)?,
+        Command::RemoveBackground(args) => external::remove_background(args)?,
+        Command::Doctor(args) => external::doctor(args),
         Command::Sound { action } => sound::sound(action)?,
         Command::Captions { action } => sound::captions(action)?,
         Command::Skill { action } => skillcmd::run(action)?,

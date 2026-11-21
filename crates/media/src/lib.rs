@@ -16,7 +16,10 @@ use std::thread::JoinHandle;
 use thiserror::Error;
 
 pub mod analysis;
+pub mod cutout;
+pub mod external;
 pub mod mix;
+pub mod speech;
 
 pub use analysis::Pause;
 pub use mix::{AudioPiece, DuckSettings, PieceRole};

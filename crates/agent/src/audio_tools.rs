@@ -176,7 +176,7 @@ pub fn definitions() -> Vec<Value> {
              `words_json`: a list of {text|word, start_ms|start (seconds), end_ms|end}, which is what a \
              speech-to-text server gives, grouped into cues at sentence ends and pauses. This tool does \
              not recognize speech: OpenDesigner has no speech-to-text built in, so a transcript must come \
-             from the user's own speech server. Replaces every cue; keeps the style. `offset_ms` shifts \
+             from the user's own speech server (or `transcribe`, which runs the user's whisper). Replaces every cue; keeps the style. `offset_ms` shifts \
              all times; cues outside the video are dropped and counted. Captions are drawn in the preview \
              and burned into export_video.",
             turn_props(json!({
