@@ -6,7 +6,10 @@ use serde_json::{Value, json};
 use super::BlockError;
 use super::args::{Args, Param};
 use super::kit::Kit;
-use super::{backdrops, data, overlays, social, titles, wrappers};
+use super::{
+    backdrops, bubbles, characters, data, guides, land, micro, overlays, props, sky, social,
+    titles, wrappers,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Category {
@@ -16,16 +19,18 @@ pub enum Category {
     Data,
     Store,
     Motion,
+    Characters,
 }
 
 impl Category {
-    pub const ALL: [Category; 6] = [
+    pub const ALL: [Category; 7] = [
         Category::Titles,
         Category::Overlays,
         Category::Backgrounds,
         Category::Data,
         Category::Store,
         Category::Motion,
+        Category::Characters,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -36,6 +41,7 @@ impl Category {
             Category::Data => "data",
             Category::Store => "store",
             Category::Motion => "motion",
+            Category::Characters => "characters",
         }
     }
 
@@ -47,6 +53,7 @@ impl Category {
             Category::Data => "Data",
             Category::Store => "Social and store",
             Category::Motion => "Motion wrappers",
+            Category::Characters => "Characters, bubbles and props",
         }
     }
 
@@ -60,6 +67,9 @@ impl Category {
 pub enum Layer {
     Front,
     Back,
+    /// Behind the content, in a fixed order among the scenery blocks whatever order they are
+    /// added in: a lower rank sits further back (sky 0, then stars, sun, clouds, hills, water).
+    Scenery(u8),
 }
 
 /// Where a block lays itself out when the caller gives no box.
@@ -106,7 +116,7 @@ impl Block {
             "category_label": self.category.label(),
             "about": self.about,
             "tags": self.tags,
-            "layer": match self.layer { Layer::Front => "in front of the frame's content", Layer::Back => "behind the frame's content" },
+            "layer": match self.layer { Layer::Front => "in front of the frame's content", Layer::Back => "behind the frame's content", Layer::Scenery(_) => "behind the frame's content, stacked with other scenery from far to near" },
             "default_box": match self.place {
                 Place::Safe => "the frame inside its safe margin",
                 Place::Frame => "the whole frame",
@@ -135,6 +145,13 @@ pub fn all() -> impl Iterator<Item = &'static Block> {
         data::BLOCKS,
         social::BLOCKS,
         wrappers::BLOCKS,
+        characters::BLOCKS,
+        bubbles::BLOCKS,
+        props::BLOCKS,
+        sky::BLOCKS,
+        land::BLOCKS,
+        micro::BLOCKS,
+        guides::BLOCKS,
     ]
     .into_iter()
     .flat_map(|b| b.iter())

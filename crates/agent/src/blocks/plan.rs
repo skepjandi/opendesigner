@@ -260,6 +260,17 @@ fn box_of(
     Ok(b)
 }
 
+/// The groups below `node` (a rig's head, eyes, pupils), by name, so they can be animated further.
+fn nested_groups(node: &Node, out: &mut Vec<(String, NodeId)>) {
+    for c in &node.children {
+        if c.kind == NodeKind::Group {
+            let short = c.name.rsplit('/').next().unwrap_or(&c.name);
+            out.push((short.to_string(), c.id.clone()));
+        }
+        nested_groups(c, out);
+    }
+}
+
 fn index_parts(node: &Node, out: &mut HashMap<String, NodeId>) {
     out.insert(node.name.clone(), node.id.clone());
     for c in &node.children {
@@ -314,7 +325,12 @@ fn move_ops(
                 scratch, video, &node, request,
             )?)
         }
-        Move::Keys { target, prop, keys } => {
+        Move::Keys {
+            target,
+            prop,
+            keys,
+            repeat,
+        } => {
             let node = target_id(target, root, names)?;
             Ok(vec![Operation::Animate {
                 video: video.clone(),
@@ -328,8 +344,33 @@ fn move_ops(
                         ease,
                     })
                     .collect(),
-                repeat: od_core::Repeat::Once,
+                repeat: *repeat,
             }])
+        }
+    }
+}
+
+/// The scenery rank of a block's group (`block:<id>#<n>`), when it is a scenery block.
+fn scenery_rank(node: &Node) -> Option<u8> {
+    let id = node.name.strip_prefix("block:")?.split('#').next()?;
+    match find(id).ok()?.layer {
+        Layer::Scenery(rank) => Some(rank),
+        _ => None,
+    }
+}
+
+/// Where in the frame's children a block's group goes.
+fn insert_index(doc: &Document, frame: &NodeId, layer: Layer) -> Option<usize> {
+    match layer {
+        Layer::Front => None,
+        Layer::Back => Some(0),
+        Layer::Scenery(rank) => {
+            let kids = doc.node(frame).map_or(&[][..], |f| &f.children[..]);
+            Some(
+                kids.iter()
+                    .take_while(|c| scenery_rank(c).is_some_and(|r| r <= rank))
+                    .count(),
+            )
         }
     }
 }
@@ -418,7 +459,7 @@ pub fn plan(doc: &Document, req: &Request) -> Result<Plan, BlockError> {
     if makes_nodes {
         ops.push(Operation::Create {
             parent: frame_id.clone(),
-            index: (block.layer == Layer::Back).then_some(0),
+            index: insert_index(doc, &frame_id, block.layer),
             node: built.root,
         });
     }
@@ -444,6 +485,9 @@ pub fn plan(doc: &Document, req: &Request) -> Result<Plan, BlockError> {
             let short = c.name.rsplit('/').next().unwrap_or(&c.name);
             (short.to_string(), c.id.clone())
         }));
+        for c in &made.children {
+            nested_groups(c, &mut parts);
+        }
     }
 
     let animate = video.is_some() && !moves.is_empty();

@@ -57,6 +57,9 @@ const fn rule(
     }
 }
 
+/// One image covering more of a scene than this makes it a picture, not an animation.
+const MAX_IMAGE_SHARE: f64 = 0.6;
+
 pub const RULES: &[Rule] = &[
     rule(
         "OD001",
@@ -231,6 +234,18 @@ pub const RULES: &[Rule] = &[
         "trim-hides-stroke",
         Severity::Warn,
         "A stroke's trim start and end are equal, so none of the outline is drawn and nothing animates it.",
+    ),
+    rule(
+        "OD090",
+        "image-backdrop-scene",
+        Severity::Warn,
+        "A clip's frame is mostly one raster image and nothing vector in it is animated, so the scene is a picture with text on it, not an animation.",
+    ),
+    rule(
+        "OD091",
+        "text-only-motion",
+        Severity::Warn,
+        "The only things animated in a clip's frame are text and rectangles; shapes, characters and scenery do not move.",
     ),
 ];
 
@@ -843,6 +858,7 @@ impl Linter<'_> {
             let duration = v.duration_ms();
             for c in &v.clips {
                 self.clip(v.id.clone(), c);
+                self.scene(v, c);
             }
             for o in &v.overlays {
                 self.shown_frame(&v.id, &o.frame);
@@ -867,6 +883,37 @@ impl Linter<'_> {
                 At::video(&video),
                 format!("clip {} plays {}, which is not in media/", c.id, f.file),
                 "Choose footage from list_footage, or import the file first.",
+            );
+        }
+    }
+
+    /// A scene that is a picture with text on it, or whose only motion is text.
+    fn scene(&mut self, v: &crate::video::Video, c: &crate::video::Clip) {
+        let Some(frame) = &c.frame else { return };
+        let Some(stats) = crate::scene::scene_stats(self.doc, v, frame) else {
+            return;
+        };
+        let at = At::node(frame, None);
+        if stats.coverage.biggest_image > MAX_IMAGE_SHARE && stats.vector_animated == 0 {
+            self.add(
+                "OD090",
+                at.clone(),
+                format!(
+                    "one image covers {:.0}% of frame {frame} (clip {}) and no vector shape in it is animated",
+                    stats.coverage.biggest_image * 100.0,
+                    c.id
+                ),
+                "Build the scene from vector shapes (add_block backgrounds and props, path nodes, import_svg_vector) and animate them; read get_playbook explainer.",
+            );
+        } else if stats.text_only_motion() {
+            self.add(
+                "OD091",
+                at,
+                format!(
+                    "only text and rectangles are animated in frame {frame} (clip {})",
+                    c.id
+                ),
+                "Animate the scenery and the hero too: ambient loops (animate_preset float, breathe), a camera move, shapes drawing on.",
             );
         }
     }

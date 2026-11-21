@@ -24,6 +24,7 @@ pub mod paint;
 pub mod path;
 pub mod pauses;
 pub mod project;
+pub mod scene;
 mod snap;
 pub mod speed;
 pub mod timebase;

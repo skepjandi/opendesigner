@@ -108,6 +108,10 @@ All three are 3D, which OpenDesigner cannot place yet, so they are recommended f
 
 **Size accounting** (measured): the repository gains 149,898 bytes of data (+3,208 of licence text); a release CLI binary grew by 1,382,400 bytes (646,246 gzip-compressed) with the bundled set and `resvg`, measured by building `main` and this branch; `list_asset_packs` reports each pack's size on disk, `installed_bytes` and the cap, and the test checks that the reported size is the file's length.
 
+## Animated app previews and promo films
+
+An app preview is footage of the app; a promo or an explainer around it is built from the vector engine, not from a stock picture. The `explainer` playbook (`get_playbook explainer`) is the guide for any animated, illustrated or Kurzgesagt-style piece, and `review_video` (also `opendesigner review-video`) scores it before `export_video`. A store screenshot or a still keeps using the image playbooks; an image backdrop is fine there, never as the world of an animated scene. Status: **Built** ([Agent Integration](./agent-integration.md#animation-review-review_video), [Video Editing](./video-editing.md#animated-explainers)).
+
 ## Blocks: a catalog of ready-made designs
 
 > **Status: Built** (`crates/agent/src/blocks/`; read on 2026-11-20). A block is a named, parameterized, deterministic generator: it expands into ordinary nodes (frames, rectangles, ellipses, text, images, groups) and, where it has motion, ordinary `animate` keyframes on the video. Everything is applied as **one attributed, undoable transaction through the same path as `apply_ops`**: no new operation, no way around the history.
@@ -122,6 +126,15 @@ All three are 3D, which OpenDesigner cannot place yet, so they are recommended f
 | Data | `bar_chart`, `line_chart`, `donut_chart`, `progress_bar`, `comparison_table` |
 | Social and store | `app_store_headline_pair`, `feature_list`, `rating_stars`, `review_card` |
 | Motion | `stagger_in`, `logo_sting`, `end_card` |
+| Characters, bubbles and props | `character`, `speech_bubble`, `thought_bubble`, `prop_rocket`, `prop_lightbulb`, `prop_atom`, `prop_planet`, `prop_tree`, `prop_house`, `prop_laptop_2d`, `prop_gear`, `prop_cell`, `prop_dna` (see below) |
+
+**Characters, bubbles and props** (`blocks/characters.rs`, `character_motion.rs`, `bubbles.rs`, `props.rs`, `props_science.rs`, drawing helpers in `art.rs`; playbook `get_playbook characters`). Flat-vector art built from `path` nodes with two- and three-stop gradients lit from the upper left, soft drop shadows and highlight ellipses; every size is a share of the target box, so it scales to any frame.
+
+- `character` (styles `blob`, `bean`, `robot`, `creature`; expressions `neutral`, `happy`, `surprised`, `sad`, `angry`, `thinking`; `hat`, `glasses`, `backpack`; `facing`, `look_at`, `seed`, `loops`) is a rig of named groups: `shadow`, then `rig` holding `body` (pivot at its base), `head` (pivot at the neck), `eyes` > `eye_l`/`eye_r` (each a group with `pupil_l`/`pupil_r`), `brows`, `mouth` > `mouth_open`, `arm_l`/`arm_r` (pivot at the shoulder; named by screen side), `leg_l`/`leg_r` (pivot at the hip), `hat`, `glasses`, `backpack`, `antenna_*`. Groups have an explicit box so their pivot fractions are exact. With a video it always writes looping tracks (`loop` or `pingpong`, lengths drawn from `seed`): breathing (`body` `scale_y`/`scale_x`), head bob and sway, a blink every 2 to 4 s (`eye_l`/`eye_r` `scale_y`), arm sway, drifting pupils, antennae. `action` adds `wave` (elastic overshoot), `talk` (`mouth_open` `scale_y`/`opacity`; `talk: [[start_ms, end_ms], ...]` keeps the mouth shut outside the ranges), `walk` (`from_x` to `to_x` over `action_start_ms..action_end_ms`, written as explicit keys, root `x` track), `jump` (anticipation squash, stretch, landing squash, elastic settle on `rig`), `point` (the arm turns about the shoulder to aim at `target`) and `celebrate`; an action replaces the idle track of the same part and property.
+- `speech_bubble` / `thought_bubble`: a bubble hugging its text (fitted with the renderer's text measurement; too long is refused), a curved tail or a trail of three circles toward `target` (node id or point), a pop-in with `ease_out_back` from the tail's tip and a gentle float.
+- Props take `color`, `accent_color`, `loops` (0 repeats for ever, n writes n cycles out) and `seed`: `prop_rocket` (flame flicker, puffs, hover), `prop_lightbulb` (glow pulse), `prop_atom` (electrons travel their ellipses as `x`/`y` loops while the orbits turn at different speeds), `prop_planet` (sphere, craters, drifting clouds, a ring split into a back and a front half), `prop_tree` (round or pine, sway), `prop_house` (windows glow, smoke), `prop_laptop_2d`, `prop_gear` (`teeth` path, spin), `prop_cell` (wobbling organelles), `prop_dna` (a turning double helix of beads and rungs).
+- **Reporting.** The result of `add_block` lists the root's direct parts and, new with these blocks, every group below them by name (`head`, `eyes`, `pupil_l`, ...), so an agent can keep animating them. Looping tracks need `Move::Keys.repeat` and `Kit::track`; keys are kept a frame (34 ms) apart because a video snaps keys to its frame grid.
+- **Known limits.** A circular clip (the planet's surface) is a nested `frame` with a corner radius, because groups cannot take one. The character has one action per block. Facing is a shift of the face, not a turned body. `[INFERENCE]` The look on screen is judged by rendering frames to PNG and reading them; golden images are not committed.
 
 **How a block is used.** `add_block {block, frame?, video?, start_ms?, hold_ms?, box?, colors?, font?, params?, dry_run?}`: the frame and the video are optional when the document has one of each; `params` are the block's own typed, bounded parameters (from `get_block`, each with a type, a range or options and a default); `box` places the block in `{x, y, width, height}` in frame coordinates (a side that is left out keeps the block's default); `start_ms` and `hold_ms` time it in the video. The result lists the group it made, its parts by name and a one-sentence description, so the agent can keep editing them as ordinary nodes.
 
@@ -133,10 +146,37 @@ All three are 3D, which OpenDesigner cannot place yet, so they are recommended f
 
 **Pictures.** Backdrops and icons are written to the project's `media/` folder (the file name is the hash of the recipe, so the same block asks for the same file): the backdrops come from the procedural generators (`gradient`, `aurora`, `pattern`/`grid`, `grain`) and the icons from the bundled Lucide set, which asks for its credit line (returned in the result). A block that needs a picture needs a project folder; without one the call says so.
 
-**Shapes.** The document has no path node, so a line or a ring is a chain of small ellipses (a dot every 0.45 of the stroke width), and a block never uses more than one font family.
+**Shapes.** The first blocks were written before the document had a `path` node, so their lines and rings are chains of small ellipses (a dot every 0.45 of the stroke width); the scenery blocks below draw with `path` nodes, gradients and strokes. A block never uses more than one font family.
 
 **Data.** The data blocks take JSON and check it: 12 bars, 24 points, 3 series, 6 slices, 6 columns by 8 rows; a negative value, a missing label or a value outside the bounds is refused with the reason.
 
+
+### Scenery blocks
+
+> **Status: Built** (`crates/agent/src/blocks/{scene,sky,land,micro,guides}.rs`, 2026-11-24). Twelve blocks build layered flat-vector scenes (the Kurzgesagt look) out of `path` nodes, linear and radial gradients, soft shadows, blur and keyframed loops, instead of a picture behind the content. Playbook: `get_playbook` `scenery`.
+
+| Block | What it makes |
+|-------|---------------|
+| `sky_gradient` | A 2 to 4 stop sky (vertical or at an `angle`), a horizon glow that breathes, and optionally a sun or moon (`light`) with halos |
+| `sun_glow` | A sun (disc, halos that breathe, slowly turning rays), a moon (craters) or a bare glow, placed by `x`, `y` |
+| `starfield` | Up to 220 stars of three sizes in twinkle groups with their own periods and phases, 0 to 3 nebulae (radial gradients), 0 to 3 shooting stars (translate plus `trim_start`/`trim_end`, one streak every `loop_ms` or so) |
+| `clouds` | Up to three layers of path clouds (flat base, three bumps, soft shadow) drifting right; each layer is a group with a `depth` and four copies of its tile so it scrolls one tile and starts over with no seam |
+| `parallax_hills` | 3 to 5 ridges (`hills` smooth, `mountains` softened peaks), each a group with `depth` rising from `min_depth` to `max_depth`, paler and hazier far away, an optional soft shadow on the ridge behind and an optional sway |
+| `ocean_waves` | 3 to 6 wave paths with whole cycles per tile that scroll one tile per loop (slower far away), with foam on the crests and a slow bob |
+| `city_skyline` | 2 or 3 layers of flat-shaded buildings; windows are three `path` nodes per layer (subpaths) whose opacity dips out of step |
+| `cells_backdrop` | Translucent cells (organic body path, membrane stroke, nucleus, glint) in 2 or 3 depth planes, the far and near planes blurred, each cell with its own drift and turn loops |
+| `particles` | `kind` bubbles, dust, confetti, snow, embers or sparkles in three depth planes; the planes scroll a whole screen height per cycle, with two copies so the loop is exact; at most about 150 nodes |
+| `grid_floor` | A perspective grid: converging columns (one stroked path) and rows whose y, thickness and opacity follow a perspective curve and wrap invisibly at the horizon and at the viewer |
+| `connector` | A straight, arc or S curve between two points or nodes that draws on (`trim_end`), pops an arrowhead (scale with `ease_out_back`), streams dots along it and shows an optional label on a pill |
+| `highlight_ring` | A ring or rounded box drawn on around a target with `trim_end`, then breathing, with an echo ring spreading outward |
+
+**Layer order.** Scenery blocks use `Layer::Scenery(rank)`: the group is inserted behind the frame's content and among the other scenery by rank (sky 0, stars and cells 1, sun 2, clouds 3, hills 4, water, skyline and grid 5, particles 6), so the order they are added in does not matter. `connector` and `highlight_ring` are in front like the overlays.
+
+**Depth and the camera.** Layers that should parallax are groups with a `depth` (`min_depth` to `max_depth`); the sky and glows are at depth 0 (pinned) and far layers at 0.1 to 0.4. A layer's width grows by `depth * 25 percent` on each side (at most 45) so a camera pan never shows its edge; the frame cuts what bleeds. With a custom `box` smaller than the frame the block draws inside a clipping group at the box instead, so nothing leaves it (it then moves with the camera as a whole). `BLEEDS` in the block tests lists the blocks allowed to reach past the frame.
+
+**Loops.** Every ambient track repeats (`repeat: loop`) and either ends on the value it starts from (sine and sample loops) or is a straight run over a tile or a turn (scrolls and spins), whose copy stands where the layer began. Periods are whole seconds, so keys keep their spacing after they snap to the video's frames at any frame rate. A scene of scrolling layers repeats exactly every four times `loop_ms` (the layers are 1, 2 or 4 times slower than the nearest) when `loop_ms` is a multiple of two seconds; `particles` repeat every `loop_ms` (rounded to a multiple of four seconds). The tests compare rendered frames one loop apart.
+
+**Palette.** Colors are mixed from the four roles (tokens first, created tokens when none), never hard-coded: skies run from the background toward the accent and the light, hills and water darken and desaturate toward the viewer, and windows, stars and glows take the foreground tinted with the accent.
 
 ## The studio (intended)
 

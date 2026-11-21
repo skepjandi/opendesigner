@@ -53,6 +53,48 @@ Where we deliberately differ: local-only and open files (Kino stores footage in 
 
 Nodes turn, scale, blur, cast shadows and clip, tracks repeat, and a video has a camera ([Document Format](./document-format.md#transform-and-effects)). Eases added: `ease_in_out_cubic` (the curve of `ease_in_out`), `ease_out_back` (the curve of `back`), `elastic` and `bounce`. The renderer treats a frame as live while a camera animation or a repeating track is under way (`VideoRenderer::signature`, `moving_at`), so an export redraws it for every moment and reuses a picture only while nothing moves; `Animation::value_at` folds a repeating track's time into its cycle, so frames are a pure function of the time and a parallel export is unchanged. The camera is applied to frames shown by clips, not to overlays.
 
+## Scene motion
+
+> **Status: Built** (`crates/agent/src/scene_motion.rs`, `scene_tool.rs`, 2026-11-24). `animate_preset` takes named moves that work on any node (not only 3D devices) and on the video's camera. They are pure functions from the pose a node has where the move starts to ordinary keyframes, so a move can be read, edited and undone like any other `animate`: one tool call is one undoable step, keys inside the move's time range replace the old ones and the rest are kept, so moves chain. The same builders give the scenery blocks their loops.
+
+Arguments: `video`, `node` (not for camera moves), `preset`, `start_ms`, `duration_ms` (a scene move has a default; the older moves need it), `ease`, `intensity` (the older `strength`, 0.1 to 4), `repeat` (`once|loop|pingpong`), `seed`, and per move `direction`, `amount`, `center_x`/`center_y`/`radius`, `path`/`orient`, `of`/`nodes`/`step_ms`/`from`.
+
+| Move | What it writes |
+|------|----------------|
+| `float` | y and x sine drift (3 and 1.2 percent of the node's size), loops |
+| `bob` | y (6 percent) and a little rotation, loops |
+| `breathe` | scale_y up and scale_x down by 3.5 and 1.75 percent, loops |
+| `pulse` | one beat of scale (up to +10 percent), loops |
+| `spin` | rotation, `intensity` turns, linear, loops (ends a turn on, which looks the same) |
+| `wobble` | two small rotation swings and a jelly squash per cycle, loops |
+| `swing` | rotation 14 degrees either way, loops |
+| `shake` | x and rotation that die away (decaying sine), once |
+| `pop_in` | scale 0 to 1 with `ease_out_back` (about 10 percent overshoot) and a quick fade in |
+| `bounce_in` | y from above (0.45 of the stage height) with `bounce`, plus a fade |
+| `elastic_in` | scale 0 to 1 with `elastic` |
+| `slide_in_left\|right\|up\|down` | x or y from a distance, 6 percent past home, back; plus a fade |
+| `fade_up` | opacity 0 to 1 while rising |
+| `zoom_in` | scale from 0.6 to 1 with a fade |
+| `draw_on` | `trim_end` 0 to 1 (the node needs a stroke) |
+| `orbit` | x and y around `center_x`/`center_y` (default a point one radius to the left), sampled about every 33 ms, loops |
+| `animate_along_path` | x and y (and with `orient` rotation) sampled from a `path` node's flattened curve at equal arc length, shaped by `ease`; a two-point path with a plain ease is two keys |
+| `stagger` | any other move on every id of `nodes`, `step_ms` apart, `from` first, last, center or random (seeded) |
+| `camera_push_in`, `camera_pull_back` | `camera_zoom` 20 percent (pull back from rest starts 20 percent in) |
+| `camera_pan` | `camera_x` or `camera_y` by `amount` (default an eighth of the video size) toward `direction` |
+| `camera_drift` | slow looping `camera_x`, `camera_y`, `camera_rotation` |
+| `camera_shake` | decaying `camera_x`, `camera_y`, `camera_rotation` |
+| `camera_whip` | a fast pan with `ease_in_out_cubic` and a tilt |
+
+From the command line: `opendesigner animate <project> --video <id> [--node <id>] --preset <move> [--start-ms --duration-ms --intensity --ease --repeat --seed --direction --amount --center-x --center-y --radius --path --orient --of --nodes a,b,c --step-ms --from]`.
+
+Ambient loops are sampled sines (12 to 40 straight pieces a cycle, never closer than a frame), end exactly where they start, and take their start phase from `seed`; the keys of every move are put on the video's frame grid before they are merged with the keys a node already has. Following a path uses the node's parent coordinates and the path's offset in the tree, ignoring turned or scaled ancestors `[INFERENCE: not audited for rotated parents]`.
+
+## Animated explainers
+
+> **Status: Built** (`crates/agent/skill/illustrated-explainer.md`, `crates/agent/src/review_video.rs`).
+
+A flat-vector explainer (the Kurzgesagt look) is made only of what is above: `path` nodes and gradients for the art, groups with `depth` for parallax layers, looping `animate` tracks for ambient life, `camera_*` tracks for the moves, clip transitions chosen by continuity, and sound tracks. The `explainer` playbook is the process (script and storyboard, a 4 to 6 token palette, five layers per scene, entrances, loops, camera, sound, a final gate); `add_block` supplies the scenery, characters and props. An image backdrop with animated text is never an acceptable animated scene: `review_video` flags it (`RV001`) along with text-only motion, still stretches, missing loops, no camera and no sound, and the lint rules `OD090` and `OD091` catch the first two from the document alone. Agents run `review_video` before `export_video`. See [Agent Integration](./agent-integration.md#animation-review-review_video).
+
 ## Sound tracks
 
 `Video.tracks`: up to 8 `SoundTrack`s besides `audio` (`crates/core/src/audio.rs`; fields and bounds in [Document Format](./document-format.md#sound-tracks-and-captions)): `role` (`music`, `voice`, `sfx`), `file`, `start_ms`, trim `in_ms`/`out_ms`, `gain`, `fade_in_ms`/`fade_out_ms`, `pan` and, on music, `duck {depth, attack_ms, release_ms}`. They change as a whole list through `set_video` `tracks`; `add_sound_track`, `set_sound_track` and `remove_sound_track` (MCP and `opendesigner sound add|set|remove`) compute the new list for one change. Files are plain names in `media/` with the audio extension rules and, for the tools, must exist.

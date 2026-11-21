@@ -536,6 +536,29 @@ fn the_block_catalog_lists_describes_and_adds_a_block_to_a_project() {
             .status
             .success()
     );
+    let placed = od(&[
+        "blocks",
+        "add",
+        dir_s,
+        "badge_pill",
+        "--frame",
+        &frame,
+        "--box",
+        "100,200,300,80",
+    ]);
+    assert!(placed.status.success(), "{placed:?}");
+    let refused = od(&[
+        "blocks",
+        "add",
+        dir_s,
+        "badge_pill",
+        "--frame",
+        &frame,
+        "--box",
+        "1,2,3",
+    ]);
+    assert!(!refused.status.success());
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("--box takes four numbers"));
 }
 
 /// Sound tracks, captions and the sound tools, headless: the same tools the MCP server offers.
@@ -666,4 +689,63 @@ fn sound_tracks_captions_and_pauses_work_from_the_command_line() {
     ]);
     assert!(!out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains("missing.wav"));
+}
+
+/// The scene moves from the command line: a node that pops in, a path to follow, the camera.
+#[test]
+fn scene_moves_animate_nodes_and_the_camera_from_the_command_line() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("scene.od");
+    let dir_s = s(&dir);
+    ok(&["new", dir_s, "--name", "Scene"]);
+    let page = fs::read_to_string(dir.join("pages/p_1.json")).unwrap();
+    let root: serde_json::Value = serde_json::from_str(&page).unwrap();
+    let root_id = root["root"]["id"].as_str().unwrap().to_string();
+    let ops = tmp.path().join("ops.json");
+    fs::write(
+        &ops,
+        serde_json::json!([
+            {"op": "create", "parent": root_id, "node": {"kind": "rect", "name": "Box", "x": 10, "y": 10, "width": 100, "height": 100, "fill": "#ff0000"}},
+            {"op": "create_video", "name": "Promo", "fps": 30, "width": 600, "height": 1000}
+        ])
+        .to_string(),
+    )
+    .unwrap();
+    let receipt: serde_json::Value = serde_json::from_str(&ok(&["apply", dir_s, s(&ops)])).unwrap();
+    let node = receipt["created"][0].as_str().unwrap().to_string();
+    let video = receipt["created"][1].as_str().unwrap().to_string();
+
+    ok(&[
+        "animate",
+        dir_s,
+        "--video",
+        &video,
+        "--node",
+        &node,
+        "--preset",
+        "pop_in",
+        "--start-ms",
+        "200",
+    ]);
+    ok(&[
+        "animate",
+        dir_s,
+        "--video",
+        &video,
+        "--preset",
+        "camera_pan",
+        "--direction",
+        "left",
+        "--amount",
+        "80",
+        "--duration-ms",
+        "1500",
+    ]);
+    let listing = ok(&["videos", dir_s]);
+    assert!(listing.contains("scale_x"), "{listing}");
+    assert!(listing.contains("camera_x"), "{listing}");
+
+    let out = od(&["animate", dir_s, "--video", &video, "--preset", "float"]);
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("node"));
 }

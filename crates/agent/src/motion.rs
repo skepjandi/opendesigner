@@ -40,10 +40,27 @@ pub fn definitions() -> Vec<Value> {
         Ease::Elastic,
         Ease::Bounce,
     ];
-    vec![
-        tool(
-            "animate_preset",
-            "Animate a node with a named move, measured from its designed pose, as keyframes you can \
+    let preset_names: Vec<Value> = names(&Preset::ALL)
+        .into_iter()
+        .chain(crate::scene_tool::names().into_iter().map(Value::from))
+        .collect();
+    let mut preset_props = json!({
+        "video": id("Id of a video from list_videos."),
+        "node": id("Id of the node to move (a device3d for the 3D moves); the video's camera moves need none."),
+        "preset": {"type": "string", "enum": preset_names},
+        "start_ms": {"type": "integer", "minimum": 0},
+        "duration_ms": {"type": "integer", "minimum": 100, "maximum": 600000, "description": "Needed by the older moves; a scene move has its own default (one cycle, for a loop)."},
+        "strength": {"type": "number", "minimum": animation::MIN_STRENGTH, "maximum": animation::MAX_STRENGTH, "description": "How far the move goes; 1 is as designed."},
+        "ease": {"type": "string", "enum": names(&eases), "description": "Overrides the preset's own ease."},
+        "turn": id("Groups related calls into one turn; omit and each call is its own turn."),
+        "summary": id("One line, in the user's terms, naming what this turn does.")
+    });
+    if let Some(o) = preset_props.as_object_mut() {
+        o.extend(crate::scene_tool::extra_properties());
+    }
+    let preset_text = format!(
+        "{} {}",
+        "Animate a node with a named move, measured from its designed pose, as keyframes you can \
              then inspect in list_videos and change with apply_ops animate. 3D device moves: spin (a \
              full turn; strength 2 is two), turntable (slow side to side), swing (away one way, then \
              the other, back), flip_in (turns from its back to face the viewer, springing), \
@@ -54,18 +71,14 @@ pub fn definitions() -> Vec<Value> {
              slide_in_left, slide_in_right. Keys already inside start_ms..start_ms+duration_ms for \
              the same properties are replaced and the rest kept, so moves chain. Times are from the \
              start of the video; the node should be in a frame the video shows at that time.",
-            json!({
-                "video": id("Id of a video from list_videos."),
-                "node": id("Id of the node to move (a device3d for the 3D moves)."),
-                "preset": {"type": "string", "enum": names(&Preset::ALL)},
-                "start_ms": {"type": "integer", "minimum": 0},
-                "duration_ms": {"type": "integer", "minimum": 100, "maximum": 600000},
-                "strength": {"type": "number", "minimum": animation::MIN_STRENGTH, "maximum": animation::MAX_STRENGTH, "description": "How far the move goes; 1 is as designed."},
-                "ease": {"type": "string", "enum": names(&eases), "description": "Overrides the preset's own ease."},
-                "turn": id("Groups related calls into one turn; omit and each call is its own turn."),
-                "summary": id("One line, in the user's terms, naming what this turn does.")
-            }),
-            &["video", "node", "preset", "start_ms", "duration_ms"],
+        crate::scene_tool::description()
+    );
+    vec![
+        tool(
+            "animate_preset",
+            &preset_text,
+            preset_props,
+            &["video", "preset", "start_ms"],
             false,
         ),
         tool(
@@ -109,6 +122,9 @@ pub fn definitions() -> Vec<Value> {
 
 pub fn call(ctx: &mut CallCtx, name: &str, args: Value) -> Result<Output, ToolError> {
     match name {
+        "animate_preset" if is_scene_move(ctx, &args) => {
+            crate::scene_tool::animate(ctx, parse(args)?)
+        }
         "animate_preset" => animate_preset(ctx, parse(args)?),
         "video_contact_sheet" => contact_sheet(ctx, parse(args)?),
         "device3d_template" => device3d_template(parse(args)?),
@@ -174,16 +190,25 @@ fn device3d_template(a: DeviceArgs) -> Result<Output, ToolError> {
     })))
 }
 
+fn is_scene_move(ctx: &CallCtx, args: &Value) -> bool {
+    args["preset"].as_str().is_some_and(|preset| {
+        crate::scene_tool::takes(ctx.ws.session.document(), preset, args["node"].as_str())
+    })
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PresetArgs {
     video: String,
-    node: String,
+    #[serde(default)]
+    node: Option<String>,
     preset: Preset,
     start_ms: u64,
     duration_ms: u64,
     #[serde(default)]
     strength: Option<f64>,
+    #[serde(default)]
+    intensity: Option<f64>,
     #[serde(default)]
     ease: Option<Ease>,
     #[serde(default)]
@@ -193,7 +218,11 @@ struct PresetArgs {
 }
 
 fn animate_preset(ctx: &mut CallCtx, a: PresetArgs) -> Result<Output, ToolError> {
-    let (video, node) = (node_id(&a.video)?, node_id(&a.node)?);
+    let node_arg = a
+        .node
+        .as_deref()
+        .ok_or_else(|| ToolError("this move needs `node`".into()))?;
+    let (video, node) = (node_id(&a.video)?, node_id(node_arg)?);
     let ops: Vec<Operation> = animation::preset_ops(
         ctx.ws.session.document(),
         &video,
@@ -202,7 +231,7 @@ fn animate_preset(ctx: &mut CallCtx, a: PresetArgs) -> Result<Output, ToolError>
             preset: a.preset,
             start_ms: a.start_ms,
             duration_ms: a.duration_ms,
-            strength: a.strength.unwrap_or(1.0),
+            strength: a.intensity.or(a.strength).unwrap_or(1.0),
             ease: a.ease,
         },
     )?;
@@ -210,7 +239,7 @@ fn animate_preset(ctx: &mut CallCtx, a: PresetArgs) -> Result<Output, ToolError>
         return Err(ToolError(format!(
             "{} would not move {} from where it is; give a strength or pick another move",
             a.preset.as_str(),
-            a.node
+            node_arg
         )));
     }
     apply_ops(
@@ -313,7 +342,11 @@ mod tests {
     fn every_preset_and_ease_is_offered_by_name() {
         let defs = definitions();
         let presets = &defs[0]["inputSchema"]["properties"]["preset"]["enum"];
-        assert_eq!(presets.as_array().map(Vec::len), Some(Preset::ALL.len()));
+        let offered = presets.as_array().map_or(0, Vec::len);
+        assert_eq!(
+            offered,
+            Preset::ALL.len() + crate::scene_tool::names().len()
+        );
         assert!(
             presets
                 .as_array()
