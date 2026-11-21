@@ -12,6 +12,7 @@ use od_core::{
 };
 mod blocks;
 mod doccmd;
+mod inspect;
 mod review_video;
 mod serve;
 mod skillcmd;
@@ -335,6 +336,8 @@ enum Command {
     ImportSvgVector(vector::ImportSvgVector),
     /// Review a video for animation quality: motion, layers, sound, a score and the top fixes.
     ReviewVideo(review_video::ReviewVideo),
+    /// Look closely at a video: a strip of frames, a crop at full size, a coordinate grid, a diff. Writes a PNG to exports/.
+    Inspect(inspect::Inspect),
     /// Sound tracks, pauses and waveforms of a video.
     Sound {
         #[command(subcommand)]
@@ -1021,6 +1024,7 @@ fn run(cli: Cli) -> Result<(), CliError> {
         Command::Blocks { action } => blocks::run(action)?,
         Command::ImportSvgVector(args) => vector::run(args)?,
         Command::ReviewVideo(args) => review_video::run(args)?,
+        Command::Inspect(args) => inspect::run(args)?,
         Command::Sound { action } => sound::sound(action)?,
         Command::Captions { action } => sound::captions(action)?,
         Command::Skill { action } => skillcmd::run(action)?,

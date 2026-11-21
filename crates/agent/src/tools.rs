@@ -134,6 +134,7 @@ pub fn definitions() -> Vec<Value> {
     all.extend(crate::assets::logo::definitions());
     all.extend(crate::vector_tools::definitions());
     all.extend(crate::review_video::definitions());
+    all.extend(crate::inspect::definitions());
     all.extend(showcase_definitions());
     all
 }
@@ -164,9 +165,10 @@ fn core_definitions() -> Vec<Value> {
              safe zones), logo (identity design), blocks (the catalog of ready-made titles, overlays, backgrounds, \
              charts and motion, and when to use one), scenery (layered flat-vector scenes: scenery blocks, parallax, idle loops, scene moves and the camera), characters (flat-vector characters, bubbles and animated props), explainer (anything animated: animation, scenes, \
              explainers, motion graphics, cartoons, 2D illustration, Kurzgesagt or In a Nutshell style; read it \
-             FIRST, a jpg backdrop with moving text is never an animated scene). Call it with no topic for the \
+             FIRST, a jpg backdrop with moving text is never an animated scene), review (look at your own video \
+             harshly: strips, crops, grids, diffs, the checklist). Call it with no topic for the \
              list; read the ones that apply before you build, not after.",
-            json!({"topic": {"type": "string", "enum": ["design", "style", "video", "motion", "3d", "formats", "logo", "blocks", "scenery", "characters", "explainer"]}}),
+            json!({"topic": {"type": "string", "enum": ["design", "style", "video", "motion", "3d", "formats", "logo", "blocks", "scenery", "characters", "explainer", "review"]}}),
             &[],
             true,
         ),
@@ -735,6 +737,7 @@ pub fn call(ctx: &mut CallCtx, name: &str, args: Value) -> Result<Output, ToolEr
         }
         n if crate::vector_tools::NAMES.contains(&n) => crate::vector_tools::call(ctx, n, args),
         n if crate::review_video::NAMES.contains(&n) => crate::review_video::call(ctx, n, args),
+        n if crate::inspect::NAMES.contains(&n) => crate::inspect::call(ctx, n, args),
         n if crate::assets::tools::handles(n) => {
             let dir = ctx.ws.dir().map(std::path::Path::to_path_buf);
             crate::assets::tools::call(dir.as_deref(), n, args)

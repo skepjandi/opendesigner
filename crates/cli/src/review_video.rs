@@ -20,6 +20,9 @@ pub struct ReviewVideo {
     /// How many moments to render, 8 to 16.
     #[arg(long)]
     samples: Option<usize>,
+    /// The music's tempo in beats a minute (30 to 300), to check that cuts land on a beat.
+    #[arg(long)]
+    bpm: Option<f64>,
     /// Print the report as JSON.
     #[arg(long)]
     json: bool,
@@ -27,8 +30,13 @@ pub struct ReviewVideo {
 
 pub fn run(args: ReviewVideo) -> Result<(), CliError> {
     let ws = Workspace::open(&args.dir)?;
-    let report = review_video::review(&Source::of(&ws), args.video.as_deref(), args.samples)
-        .map_err(|e| CliError::Invalid(e.0))?;
+    let report = review_video::review_at_tempo(
+        &Source::of(&ws),
+        args.video.as_deref(),
+        args.samples,
+        args.bpm,
+    )
+    .map_err(|e| CliError::Invalid(e.0))?;
     if args.json {
         println!("{}", report.to_json());
     } else {

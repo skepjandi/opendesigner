@@ -15,6 +15,7 @@ pub mod export;
 pub mod formats;
 pub mod freesound;
 pub mod http;
+pub mod inspect;
 pub mod mcp;
 pub mod mcp_servers;
 pub mod memory;
