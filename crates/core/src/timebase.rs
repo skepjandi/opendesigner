@@ -22,6 +22,14 @@ pub fn frame_at(ms: u64, fps: u32) -> u64 {
     ms * u64::from(fps.max(1)) / 1000
 }
 
+/// The frame that is showing at `ms`: the last one whose [`frame_ms`] is at or before it, so
+/// `frame_containing(frame_ms(n, fps), fps) == n` for every frame.
+pub fn frame_containing(ms: u64, fps: u32) -> u64 {
+    let fps = u64::from(fps.max(1));
+    let shifted = (ms + 1) * fps;
+    (shifted - fps / 2 - 1) / 1000
+}
+
 /// The frame boundary nearest `ms` (ties go later).
 pub fn snap(ms: u64, fps: u32) -> u64 {
     let fps = u64::from(fps.max(1));
@@ -66,6 +74,18 @@ mod tests {
                 last = ms;
             }
             assert_eq!(frame_ms(frames, fps), TEN_MINUTES_MS, "{fps} fps");
+        }
+    }
+
+    #[test]
+    fn frame_containing_inverts_frame_ms() {
+        for fps in RATES {
+            for n in 0..u64::from(fps) * 5 {
+                let start = frame_ms(n, fps);
+                assert_eq!(frame_containing(start, fps), n, "{fps} fps frame {n}");
+                let next = frame_ms(n + 1, fps);
+                assert_eq!(frame_containing(next - 1, fps), n, "{fps} fps frame {n}");
+            }
         }
     }
 

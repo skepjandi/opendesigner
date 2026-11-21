@@ -16,8 +16,12 @@ use od_core::Ease;
 use od_core::animation::{AnimProp, Key, MAX_KEYS, Repeat};
 use od_core::transform::{MAX_CAMERA_PAN, MAX_CAMERA_ZOOM, MIN_CAMERA_ZOOM};
 
+mod burst;
+mod grid;
 #[cfg(test)]
 mod tests;
+
+pub use grid::{Metric, grid_delays};
 
 /// A small deterministic generator (SplitMix64): the same seed always gives the same numbers, so
 /// every move and every block built from a seed is byte-identical from run to run.
@@ -129,11 +133,12 @@ pub enum Named {
     CameraDrift,
     CameraShake,
     CameraWhip,
+    CameraBurst,
 }
 
 impl Named {
     /// Every name the tool offers, in the order it lists them.
-    pub const NAMES: [&'static str; 25] = [
+    pub const NAMES: [&'static str; 26] = [
         "float",
         "bob",
         "breathe",
@@ -159,6 +164,7 @@ impl Named {
         "camera_drift",
         "camera_shake",
         "camera_whip",
+        "camera_burst",
     ];
 
     pub fn parse(name: &str) -> Option<Named> {
@@ -188,6 +194,7 @@ impl Named {
             "camera_drift" => Named::CameraDrift,
             "camera_shake" => Named::CameraShake,
             "camera_whip" => Named::CameraWhip,
+            "camera_burst" => Named::CameraBurst,
             _ => return None,
         })
     }
@@ -201,6 +208,7 @@ impl Named {
                 | Named::CameraDrift
                 | Named::CameraShake
                 | Named::CameraWhip
+                | Named::CameraBurst
         )
     }
 
@@ -243,6 +251,7 @@ impl Named {
             Named::CameraDrift => 12_000,
             Named::CameraShake => 600,
             Named::CameraWhip => 450,
+            Named::CameraBurst => 600,
         }
     }
 
@@ -255,6 +264,7 @@ impl Named {
             Named::SlideIn(_) | Named::FadeUp | Named::ZoomIn => Ease::EaseOut,
             Named::Spin | Named::Orbit => Ease::Linear,
             Named::CameraWhip => Ease::EaseInOutCubic,
+            Named::CameraBurst => Ease::Power4Out,
             _ => Ease::EaseInOut,
         }
     }
@@ -887,6 +897,7 @@ pub fn camera_tracks(named: Named, spec: &Spec, cam: &CameraPose) -> Vec<Track> 
             decaying(spec, P::CameraRotation, cam.rotation, 0.6 * a, 0.5),
         ],
         Named::CameraWhip => whip(spec, cam, side, ease),
+        Named::CameraBurst => burst::burst(spec, cam, side),
         _ => Vec::new(),
     };
     tracks.retain(|t| t.keys.len() >= 2);
@@ -946,6 +957,8 @@ pub enum Origin {
     First,
     Last,
     Center,
+    /// The first and last go together, then inward.
+    Edges,
     Random,
 }
 
@@ -955,6 +968,7 @@ impl Origin {
             "first" => Origin::First,
             "last" => Origin::Last,
             "center" => Origin::Center,
+            "edges" => Origin::Edges,
             "random" => Origin::Random,
             _ => return None,
         })
@@ -971,6 +985,7 @@ pub fn stagger_delays(count: usize, step_ms: u64, from: Origin, seed: u64) -> Ve
             let mid = (count as f64 - 1.0) / 2.0;
             (0..count).map(|i| (i as f64 - mid).abs()).collect()
         }
+        Origin::Edges => (0..count).map(|i| i.min(count - 1 - i) as f64).collect(),
         Origin::Random => {
             let mut order: Vec<f64> = (0..count).map(|i| i as f64).collect();
             Rng::new(seed).shuffle(&mut order);

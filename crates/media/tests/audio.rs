@@ -4,7 +4,7 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use od_media::{AudioPiece, DuckSettings, Ffmpeg, PieceRole, add_audio};
+use od_media::{AudioPiece, DuckSettings, Ffmpeg, Loudness, PieceRole, add_audio};
 
 fn ffmpeg() -> Option<Ffmpeg> {
     Ffmpeg::locate().ok()
@@ -98,7 +98,7 @@ fn mix_with_voice(ff: &Ffmpeg, dir: &Path, name: &str, duck: Option<DuckSettings
     m.duck = duck;
     let v = piece(voice, PieceRole::Voice, 2000, 2000);
     let out = dir.join(name);
-    add_audio(ff, &picture(ff, dir, 6), &[m, v], &out).unwrap();
+    add_audio(ff, &picture(ff, dir, 6), &[m, v], None, &out).unwrap();
     out
 }
 
@@ -145,7 +145,7 @@ fn the_picture_is_copied_and_the_mix_survives_pan_trim_and_fades() {
     let mut p = piece(sound, PieceRole::Sfx, 500, 2000);
     (p.in_ms, p.pan, p.gain, p.fade_in_ms, p.fade_out_ms) = (1000, -0.5, 0.7, 200, 200);
     let out = dir.path().join("out.mp4");
-    add_audio(&ff, &pic, &[p], &out).unwrap();
+    add_audio(&ff, &pic, &[p], None, &out).unwrap();
     let info = ff.probe_file(&out).unwrap();
     assert!(info.has_audio);
     assert_eq!((info.width, info.height), (64, 64));
@@ -202,4 +202,43 @@ fn pauses_are_found_between_sounds() {
         (peaks[50], peaks[150], peaks[250])
     );
     assert!(ff.waveform(&path, 10).is_err());
+}
+
+fn measured_after(ff: &Ffmpeg, dir: &Path, level: f32, target: Loudness) -> f64 {
+    let pic = picture(ff, dir, 6);
+    let source = tone(ff, dir, "level.wav", 440, 5, level);
+    let out = dir.join(format!("loud{level}.mp4"));
+    let p = piece(source, PieceRole::Music, 0, 5000);
+    add_audio(ff, &pic, &[p], Some(target), &out).unwrap();
+    ff.measure_loudness(&out).unwrap()
+}
+
+#[test]
+fn each_loudness_target_is_reached_within_one_and_a_half_lu() {
+    let Some(ff) = ffmpeg() else { return };
+    let d = tempfile::tempdir().unwrap();
+    for (target, level) in [
+        (Loudness::Social, 0.05),
+        (Loudness::Social, 0.9),
+        (Loudness::Podcast, 0.2),
+        (Loudness::Broadcast, 0.5),
+    ] {
+        let got = measured_after(&ff, d.path(), level, target);
+        assert!(
+            (got - target.lufs()).abs() <= 1.5,
+            "{target:?} from level {level}: measured {got} LUFS"
+        );
+    }
+}
+
+#[test]
+fn without_a_target_the_level_is_left_as_mixed() {
+    let Some(ff) = ffmpeg() else { return };
+    let d = tempfile::tempdir().unwrap();
+    let pic = picture(&ff, d.path(), 6);
+    let source = tone(&ff, d.path(), "quiet.wav", 440, 5, 0.05);
+    let out = d.path().join("plain.mp4");
+    let p = piece(source, PieceRole::Music, 0, 5000);
+    add_audio(&ff, &pic, &[p], None, &out).unwrap();
+    assert!(ff.measure_loudness(&out).unwrap() < -25.0);
 }
