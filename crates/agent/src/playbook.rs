@@ -94,6 +94,11 @@ pub const TOPICS: &[(&str, &str, &str)] = &[
         "animated 2D scenes and explainers (Kurzgesagt look): script, palette, depth layers, blocks, motion, camera, sound, review_video gate",
         include_str!("../skill/illustrated-explainer.md"),
     ),
+    (
+        "scenery",
+        "flat-vector scenes: layered scenery blocks, parallax, idle loops, scene moves and camera presets",
+        include_str!("../skill/scenery-playbook.md"),
+    ),
 ];
 
 pub fn topic(name: &str) -> Option<&'static str> {

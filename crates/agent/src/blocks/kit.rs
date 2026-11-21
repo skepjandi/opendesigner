@@ -114,7 +114,10 @@ impl Move {
     pub fn end(&self) -> u64 {
         match self {
             Move::Preset { at, duration, .. } => at + duration,
-            Move::Keys { keys, .. } => keys.last().map_or(0, |k| k.0),
+            Move::Keys { keys, repeat, .. } if *repeat == Repeat::Once => {
+                keys.last().map_or(0, |k| k.0)
+            }
+            Move::Keys { .. } => 0,
         }
     }
 }
@@ -451,6 +454,12 @@ impl<'a> Kit<'a> {
     }
 
     pub fn end(&mut self) {
+        self.end_with(|_| {});
+    }
+
+    /// Ends the current group after `style` has set what a group can have: a box, a clip, a
+    /// depth, a turn or an effect.
+    pub fn end_with(&mut self, style: impl FnOnce(&mut NewNode)) {
         if self.stack.len() < 2 {
             return;
         }
@@ -458,6 +467,7 @@ impl<'a> Kit<'a> {
             let mut g = NewNode::new(NodeKind::Group);
             g.name = Some(name);
             g.children = children;
+            style(&mut g);
             if let Some((_, nodes)) = self.stack.last_mut() {
                 nodes.push(g);
             }

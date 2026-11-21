@@ -198,7 +198,10 @@ fn every_block_expands_at_three_sizes_without_overflow_or_review_errors() {
 #[test]
 fn every_block_stays_inside_the_frame() {
     for (w, h) in SIZES {
-        for id in every_block() {
+        for id in every_block()
+            .into_iter()
+            .filter(|id| !scenery_tests::BLEEDS.contains(id))
+        {
             let mut f = fixture(w, h);
             let p = f.add(id, None);
             let doc = f.doc();

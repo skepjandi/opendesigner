@@ -350,6 +350,31 @@ fn move_ops(
     }
 }
 
+/// The scenery rank of a block's group (`block:<id>#<n>`), when it is a scenery block.
+fn scenery_rank(node: &Node) -> Option<u8> {
+    let id = node.name.strip_prefix("block:")?.split('#').next()?;
+    match find(id).ok()?.layer {
+        Layer::Scenery(rank) => Some(rank),
+        _ => None,
+    }
+}
+
+/// Where in the frame's children a block's group goes.
+fn insert_index(doc: &Document, frame: &NodeId, layer: Layer) -> Option<usize> {
+    match layer {
+        Layer::Front => None,
+        Layer::Back => Some(0),
+        Layer::Scenery(rank) => {
+            let kids = doc.node(frame).map_or(&[][..], |f| &f.children[..]);
+            Some(
+                kids.iter()
+                    .take_while(|c| scenery_rank(c).is_some_and(|r| r <= rank))
+                    .count(),
+            )
+        }
+    }
+}
+
 /// Everything a request needs, checked, as one list of operations that apply together.
 pub fn plan(doc: &Document, req: &Request) -> Result<Plan, BlockError> {
     let block = find(&req.block)?;
@@ -434,7 +459,7 @@ pub fn plan(doc: &Document, req: &Request) -> Result<Plan, BlockError> {
     if makes_nodes {
         ops.push(Operation::Create {
             parent: frame_id.clone(),
-            index: (block.layer == Layer::Back).then_some(0),
+            index: insert_index(doc, &frame_id, block.layer),
             node: built.root,
         });
     }

@@ -151,6 +151,10 @@ pub fn generate() -> Vec<SkillFile> {
             path: "references/illustrated-explainer.md",
             contents: playbook::topic("explainer").unwrap_or_default().to_string(),
         },
+        SkillFile {
+            path: "references/scenery-playbook.md",
+            contents: playbook::topic("scenery").unwrap_or_default().to_string(),
+        },
     ]
 }
 
