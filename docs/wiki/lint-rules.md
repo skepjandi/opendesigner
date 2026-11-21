@@ -44,12 +44,18 @@ Each finding is `{code, severity, node?, frame?, video?, message, hint}`. `sever
 | `OD080` | node-scaled-flat | warn | A node's scale_x or scale_y is 0 and nothing animates it, so the node is never visible. |
 | `OD081` | clip-without-area | warn | A group clips its children but has no size and no children to take a box from, so it shows nothing. |
 | `OD082` | loop-jumps | info | A looping animation ends on a different value than it starts with, so it jumps once per cycle. |
+| `OD090` | image-backdrop-scene | warn | A clip's frame is mostly one raster image (over 60% of it) and no vector shape in it is animated: a picture with text on it, not an animation. |
+| `OD091` | text-only-motion | warn | The only things animated in a clip's frame are text and rectangles; shapes, characters and scenery do not move. |
 
 `OD001` to `OD003` judge a turned or scaled node by the upright box around it after its transform and its
 parents' (`geometry::bounds_in_frame`), not by its untransformed box.
 | `OD070` | path-invisible | warn | A path has no fill and no visible stroke, so nothing of it is drawn. |
 | `OD071` | gradient-stops-unsorted | warn | A gradient's stops are not in increasing offset order; they are drawn sorted, which is rarely what was meant. |
 | `OD072` | trim-hides-stroke | warn | A stroke's trim start and end are equal, so none of the outline is drawn and nothing animates it. |
+
+## Animation rules
+
+`OD090` and `OD091` judge a clip's frame from the document alone (`od_core::scene::scene_stats`), the same facts `review_video` uses. `OD090` fires when one `image` node covers more than 60% of the frame (by its bounds) and no `path` or `ellipse` (or group holding one) of the frame is animated: a picture with text on it. `OD091` fires when something in the frame is animated but only text, rectangles and groups of them are; it does not fire together with `OD090`. Neither looks at pixels: `review_video` does, and adds what the document cannot say (still stretches, camera, sound). `[INFERENCE]` A full-bleed screenshot in a plain app preview will trigger `OD090`; it is a warning, not an error.
 
 ## What the linter does not know
 

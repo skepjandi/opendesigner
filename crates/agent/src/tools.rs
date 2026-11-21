@@ -133,6 +133,7 @@ pub fn definitions() -> Vec<Value> {
     all.extend(crate::assets::tools::definitions());
     all.extend(crate::assets::logo::definitions());
     all.extend(crate::vector_tools::definitions());
+    all.extend(crate::review_video::definitions());
     all.extend(showcase_definitions());
     all
 }
@@ -161,9 +162,11 @@ fn core_definitions() -> Vec<Value> {
              assets), motion (timings, easing, recipes), 3d (devices in 3D, captures from a \
              simulator, moves), formats (sizes and \
              safe zones), logo (identity design), blocks (the catalog of ready-made titles, overlays, backgrounds, \
-             charts and motion, and when to use one). Call it with no topic for the list; read the ones that apply \
-             before you build, not after.",
-            json!({"topic": {"type": "string", "enum": ["design", "style", "video", "motion", "3d", "formats", "logo", "blocks"]}}),
+             charts and motion, and when to use one), explainer (anything animated: animation, scenes, \
+             explainers, motion graphics, cartoons, 2D illustration, Kurzgesagt or In a Nutshell style; read it \
+             FIRST, a jpg backdrop with moving text is never an animated scene). Call it with no topic for the \
+             list; read the ones that apply before you build, not after.",
+            json!({"topic": {"type": "string", "enum": ["design", "style", "video", "motion", "3d", "formats", "logo", "blocks", "explainer"]}}),
             &[],
             true,
         ),
@@ -686,7 +689,8 @@ fn core_definitions() -> Vec<Value> {
         tool(
             "export_video",
             "Draw every frame of a video and write it as an H.264 MP4 to exports/<file>. Needs ffmpeg \
-             on the user's computer (the error says what to install). This can take a while.",
+             on the user's computer (the error says what to install). This can take a while. For an animated \
+             or illustrated video, run review_video first and fix its findings.",
             json!({
                 "video": id("Id of a video from list_videos."),
                 "file": id("File name ending in .mp4, for example preview.mp4."),
@@ -730,6 +734,7 @@ pub fn call(ctx: &mut CallCtx, name: &str, args: Value) -> Result<Output, ToolEr
             crate::assets::logo::call(dir.as_deref(), n, args)
         }
         n if crate::vector_tools::NAMES.contains(&n) => crate::vector_tools::call(ctx, n, args),
+        n if crate::review_video::NAMES.contains(&n) => crate::review_video::call(ctx, n, args),
         n if crate::assets::tools::handles(n) => {
             let dir = ctx.ws.dir().map(std::path::Path::to_path_buf);
             crate::assets::tools::call(dir.as_deref(), n, args)
@@ -1029,7 +1034,7 @@ fn get_guidance(ctx: &mut CallCtx) -> Result<Output, ToolError> {
     let brief = brief_of(ctx);
     v["brief"] = brief.to_json();
     v["before_you_build"] = json!(
-        "Call get_playbook: design (images), style (pick a named look), video and motion (video), \
+        "Call get_playbook: design (images), style (pick a named look), video and motion (video), explainer (anything animated), \
          3d (devices in 3D with captures and moves), \
          formats (sizes). Review your work with review_frame and render_preview before you say it is done."
     );

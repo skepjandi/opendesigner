@@ -27,6 +27,7 @@ mod preview_key;
 pub mod preview_tier;
 pub mod program;
 pub mod review;
+pub mod review_video;
 pub mod server;
 pub mod showcase;
 pub mod skill;

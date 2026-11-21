@@ -12,6 +12,7 @@ use od_core::{
 };
 mod blocks;
 mod doccmd;
+mod review_video;
 mod serve;
 mod skillcmd;
 mod sound;
@@ -287,6 +288,8 @@ enum Command {
     },
     /// Bring an SVG illustration in as editable vector nodes, one per shape.
     ImportSvgVector(vector::ImportSvgVector),
+    /// Review a video for animation quality: motion, layers, sound, a score and the top fixes.
+    ReviewVideo(review_video::ReviewVideo),
     /// Sound tracks, pauses and waveforms of a video.
     Sound {
         #[command(subcommand)]
@@ -911,6 +914,7 @@ fn run(cli: Cli) -> Result<(), CliError> {
         } => serve::run(&dir, port, show_token, rotate_token, &agent)?,
         Command::Blocks { action } => blocks::run(action)?,
         Command::ImportSvgVector(args) => vector::run(args)?,
+        Command::ReviewVideo(args) => review_video::run(args)?,
         Command::Sound { action } => sound::sound(action)?,
         Command::Captions { action } => sound::captions(action)?,
         Command::Skill { action } => skillcmd::run(action)?,

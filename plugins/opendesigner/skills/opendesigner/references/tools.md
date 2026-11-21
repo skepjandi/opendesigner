@@ -12,7 +12,7 @@ No arguments.
 
 ## `get_playbook`
 
-Craft guidance for making work that is not mediocre. Topics: design (images), style (named looks with rules), video (start with the inventory of media, footage, sounds and assets), motion (timings, easing, recipes), 3d (devices in 3D, captures from a simulator, moves), formats (sizes and safe zones), logo (identity design), blocks (the catalog of ready-made titles, overlays, backgrounds, charts and motion, and when to use one). Call it with no topic for the list; read the ones that apply before you build, not after.
+Craft guidance for making work that is not mediocre. Topics: design (images), style (named looks with rules), video (start with the inventory of media, footage, sounds and assets), motion (timings, easing, recipes), 3d (devices in 3D, captures from a simulator, moves), formats (sizes and safe zones), logo (identity design), blocks (the catalog of ready-made titles, overlays, backgrounds, charts and motion, and when to use one), explainer (anything animated: animation, scenes, explainers, motion graphics, cartoons, 2D illustration, Kurzgesagt or In a Nutshell style; read it FIRST, a jpg backdrop with moving text is never an animated scene). Call it with no topic for the list; read the ones that apply before you build, not after.
 
 Read-only.
 
@@ -416,7 +416,7 @@ Arguments:
 
 ## `export_video`
 
-Draw every frame of a video and write it as an H.264 MP4 to exports/<file>. Needs ffmpeg on the user's computer (the error says what to install). This can take a while.
+Draw every frame of a video and write it as an H.264 MP4 to exports/<file>. Needs ffmpeg on the user's computer (the error says what to install). This can take a while. For an animated or illustrated video, run review_video first and fix its findings.
 
 Arguments:
 
@@ -839,6 +839,17 @@ Arguments:
 - `width` (number) Width of the whole drawing in document units; the height follows (default: the SVG's own size).
 - `x` (number) Where the drawing's top-left goes in the parent (default 0).
 - `y` (number) Where the drawing's top-left goes in the parent (default 0).
+
+## `review_video`
+
+An animation director's check of a whole video, in numbers, without changing anything. Call it before export_video on any animated or illustrated video and fix what it finds. It reads each scene's nodes and tracks and renders a few small pictures across the video to measure motion. Findings have stable codes: RV001 a scene is one image with text on it, RV002 only text and rectangles move, RV003 a still stretch over 2.5 s, RV004 no looping ambient motion, RV005 no camera move in a video over 15 s, RV006 too few vector shapes, RV007 repeated scene compositions, RV008 captions cover too much, RV009 no sound, RV010 the sound is the same in every scene, RV011 colors are not from tokens, RV012 too few layers moving. It returns per-scene and whole-video numbers, a score from 0 to 100 and the three fixes that would help most. A score under 70 is not ready.
+
+Read-only.
+
+Arguments:
+
+- `samples` (integer) How many moments to render (default 12).
+- `video` (string) Id of a video from list_videos; defaults to the first.
 
 ## `show_preview`
 
