@@ -6,6 +6,17 @@ All notable changes to OpenDesigner are documented here.
 >
 > **Wiki**: the [GitHub Wiki](https://github.com/skepjandi/opendesigner/wiki) is the public-facing main wiki — architecture, document format, agent integration, security model, roadmap. Source-controlled editing surface is `docs/wiki/` in this repo; CI (`.github/workflows/sync-wiki.yml`) mirrors it to the GitHub Wiki on every merge to `main`. New single-PR changes belong here, not as new wiki pages.
 
+## 2026-11-25
+
+### feat(agent): flat-vector scenes: characters, scenery, motion presets, an explainer playbook and review_video
+
+**Area:** `feat(agent)`, `feat(cli)`
+
+- **Blocks.** 13 character and prop blocks (`character` with a named rig, idle loops and actions wave, talk, walk, jump, point and celebrate; speech and thought bubbles; rocket, lightbulb, atom, planet, tree, house, 2D laptop, gear, cell, DNA) and 12 scenery blocks (`sky_gradient`, `parallax_hills`, `starfield`, `clouds`, `sun_glow`, `ocean_waves`, `city_skyline`, `cells_backdrop`, `particles`, `grid_floor`, `connector`, `highlight_ring`).
+- **Motion presets.** `animate_preset` takes scene moves on any node (`float`, `pop_in`, `bounce_in`, `draw_on`, `orbit`, `stagger`, `animate_along_path`, ...) and camera moves (`camera_push_in`, `camera_pan`, `camera_drift`, `camera_shake`, `camera_whip`).
+- **Direction.** The `explainer` playbook, routing that sends any animation request to it, and a read-only `review_video` tool (score, findings RV001 to RV012) with lint rules OD090 and OD091 for image-backdrop and text-only scenes.
+- CLI: `opendesigner blocks add --box x,y,w,h`.
+
 ## 2026-11-24
 
 ### feat(core,render): the engine for flat-vector 2D animation

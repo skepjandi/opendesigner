@@ -39,6 +39,9 @@ pub enum BlocksAction {
         /// Fade it out this long after start_ms.
         #[arg(long)]
         hold_ms: Option<u64>,
+        /// Where it lays itself out, in frame coordinates: `x,y,width,height`.
+        #[arg(long = "box", value_name = "X,Y,W,H")]
+        region: Option<String>,
         /// A JSON file with the block's own parameters.
         #[arg(long)]
         params: Option<PathBuf>,
@@ -46,6 +49,21 @@ pub enum BlocksAction {
         #[arg(long)]
         agent: Option<String>,
     },
+}
+
+fn region_of(text: &str) -> Result<blocks::BoxArgs, CliError> {
+    let numbers: Result<Vec<f64>, _> = text.split(',').map(|n| n.trim().parse::<f64>()).collect();
+    match numbers.as_deref() {
+        Ok([x, y, width, height]) => Ok(blocks::BoxArgs {
+            x: Some(*x),
+            y: Some(*y),
+            width: Some(*width),
+            height: Some(*height),
+        }),
+        _ => Err(CliError::Invalid(format!(
+            "--box takes four numbers, x,y,width,height; got {text:?}"
+        ))),
+    }
 }
 
 fn params_of(path: Option<PathBuf>) -> Result<Option<Map<String, Value>>, CliError> {
@@ -98,6 +116,7 @@ pub fn run(action: BlocksAction) -> Result<(), CliError> {
             video,
             start_ms,
             hold_ms,
+            region,
             params,
             agent,
         } => {
@@ -108,7 +127,7 @@ pub fn run(action: BlocksAction) -> Result<(), CliError> {
                 video,
                 start_ms,
                 hold_ms,
-                region: None,
+                region: region.as_deref().map(region_of).transpose()?,
                 colors: None::<Colors>,
                 font: None,
                 params: params_of(params)?,

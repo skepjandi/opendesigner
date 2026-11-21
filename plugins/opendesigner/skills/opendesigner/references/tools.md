@@ -12,7 +12,7 @@ No arguments.
 
 ## `get_playbook`
 
-Craft guidance for making work that is not mediocre. Topics: design (images), style (named looks with rules), video (start with the inventory of media, footage, sounds and assets), motion (timings, easing, recipes), 3d (devices in 3D, captures from a simulator, moves), formats (sizes and safe zones), logo (identity design), blocks (the catalog of ready-made titles, overlays, backgrounds, charts and motion, and when to use one), characters (flat-vector characters, bubbles and animated props). Call it with no topic for the list; read the ones that apply before you build, not after.
+Craft guidance for making work that is not mediocre. Topics: design (images), style (named looks with rules), video (start with the inventory of media, footage, sounds and assets), motion (timings, easing, recipes), 3d (devices in 3D, captures from a simulator, moves), formats (sizes and safe zones), logo (identity design), blocks (the catalog of ready-made titles, overlays, backgrounds, charts and motion, and when to use one), scenery (layered flat-vector scenes: scenery blocks, parallax, idle loops, scene moves and the camera), characters (flat-vector characters, bubbles and animated props), explainer (anything animated: animation, scenes, explainers, motion graphics, cartoons, 2D illustration, Kurzgesagt or In a Nutshell style; read it FIRST, a jpg backdrop with moving text is never an animated scene). Call it with no topic for the list; read the ones that apply before you build, not after.
 
 Read-only.
 
@@ -416,7 +416,7 @@ Arguments:
 
 ## `export_video`
 
-Draw every frame of a video and write it as an H.264 MP4 to exports/<file>. Needs ffmpeg on the user's computer (the error says what to install). This can take a while.
+Draw every frame of a video and write it as an H.264 MP4 to exports/<file>. Needs ffmpeg on the user's computer (the error says what to install). This can take a while. For an animated or illustrated video, run review_video first and fix its findings.
 
 Arguments:
 
@@ -438,15 +438,29 @@ Arguments:
 
 ## `animate_preset`
 
-Animate a node with a named move, measured from its designed pose, as keyframes you can then inspect in list_videos and change with apply_ops animate. 3D device moves: spin (a full turn; strength 2 is two), turntable (slow side to side), swing (away one way, then the other, back), flip_in (turns from its back to face the viewer, springing), hero_reveal (starts flat and square, settles into the designed tilt and turn), push_in and pull_back (camera closer or settling back), orbit (the view swings around the device), scroll_screen (scrolls a long capture top to bottom). Any node: rise_in, drop_in, float (gentle drift; a 3D device also sways), fade_in, fade_out, slide_in_left, slide_in_right. Keys already inside start_ms..start_ms+duration_ms for the same properties are replaced and the rest kept, so moves chain. Times are from the start of the video; the node should be in a frame the video shows at that time.
+Animate a node with a named move, measured from its designed pose, as keyframes you can then inspect in list_videos and change with apply_ops animate. 3D device moves: spin (a full turn; strength 2 is two), turntable (slow side to side), swing (away one way, then the other, back), flip_in (turns from its back to face the viewer, springing), hero_reveal (starts flat and square, settles into the designed tilt and turn), push_in and pull_back (camera closer or settling back), orbit (the view swings around the device), scroll_screen (scrolls a long capture top to bottom). Any node: rise_in, drop_in, float (gentle drift; a 3D device also sways), fade_in, fade_out, slide_in_left, slide_in_right. Keys already inside start_ms..start_ms+duration_ms for the same properties are replaced and the rest kept, so moves chain. Times are from the start of the video; the node should be in a frame the video shows at that time. Scene moves work on any node, not only 3D devices, and write ordinary keyframes. Ambient (loop by default, end where they start, `seed` shifts the phase so nodes do not move in lockstep; duration_ms is one cycle): float (lazy drift), bob (up and down with a little tilt), breathe (squash and stretch), pulse (a beat of scale), spin (intensity = turns), wobble, swing (a pendulum tilt), orbit (the node's middle circles `center_x`/`center_y`, or a point to its left; `radius`). Entrances and impacts (play once): pop_in (scale 0 to 1 with a small overshoot), bounce_in (drops in and bounces), elastic_in (rings in), slide_in_left|right|up|down (with overshoot), fade_up, zoom_in, shake (decays), draw_on (a stroked node's trim_end 0 to 1). Camera moves write the video's camera (the node is the video; layers with a `depth` follow it by that much): camera_push_in, camera_pull_back, camera_pan (`direction` left|right|up|down, `amount` in document units), camera_drift (slow loop), camera_shake (decays), camera_whip (fast pan, `direction`). animate_along_path: the `path` node's curve is sampled into x/y keys (and, with `orient`, rotation) so `node` follows it over the time range with `ease`. stagger: apply the move named in `of` to every id in `nodes`, `step_ms` apart, starting `from` first|last| center|random (seeded). `intensity` scales how far a move goes (1 as designed), `repeat` is once|loop|pingpong, `ease` overrides the move's own.
 
 Arguments:
 
-- `duration_ms` (integer, required) 
+- `amount` (number) camera_pan and camera_whip: how far the camera goes, in document units.
+- `center_x` (number) orbit: the middle of the circle, in the node's parent coordinates.
+- `center_y` (number) orbit: the middle of the circle, in the node's parent coordinates.
+- `direction` (string) camera_pan and camera_whip.
+- `duration_ms` (integer) Needed by the older moves; a scene move has its own default (one cycle, for a loop).
 - `ease` (string) Overrides the preset's own ease.
-- `node` (string, required) Id of the node to move (a device3d for the 3D moves).
+- `from` (string) stagger: which node goes first.
+- `intensity` (number) How far the move goes; 1 is as designed (the same as strength).
+- `node` (string) Id of the node to move (a device3d for the 3D moves); the video's camera moves need none.
+- `nodes` (array) stagger: ids of the nodes, in order.
+- `of` (string) stagger: the move to apply to each node (any move name except stagger).
+- `orient` (boolean) animate_path: turn the node to face along the path.
+- `path` (string) animate_path: id of the path node to follow.
 - `preset` (string, required) 
+- `radius` (number) orbit: the radius when there is no center.
+- `repeat` (string) What the track does after its last key (scene moves; ambient ones loop by default).
+- `seed` (integer) Shifts an ambient move's phase and orders a random stagger.
 - `start_ms` (integer, required) 
+- `step_ms` (integer) stagger: delay between one node and the next.
 - `strength` (number) How far the move goes; 1 is as designed.
 - `summary` (string) One line, in the user's terms, naming what this turn does.
 - `turn` (string) Groups related calls into one turn; omit and each call is its own turn.
@@ -484,7 +498,7 @@ Arguments:
 
 ## `list_blocks`
 
-The block catalog: ready-made titles, lower thirds, overlays, backgrounds, charts, store headlines, motion wrappers, rigged flat-vector characters, speech and thought bubbles and animated props that expand into ordinary nodes (and keyframes on a video). Search by what you need (`query`: words matched against names, tags and descriptions) and/or `category`. Each result has the block id, its category and what it is for. Then get_block for its parameters and add_block to use it.
+The block catalog: ready-made titles, lower thirds, overlays, backgrounds, charts, store headlines, motion wrappers, rigged flat-vector characters, speech and thought bubbles and animated props that expand into ordinary nodes (and keyframes on a video). Search by what you need (`query`: words matched against names, tags and descriptions) and/or `category`. Each result has the block id, its category and what it is for. Then get_block for its parameters and add_block to use it. Scenery blocks (sky_gradient, parallax_hills, starfield, clouds, sun_glow, ocean_waves, city_skyline, cells_backdrop, particles, grid_floor, connector, highlight_ring) build layered, always-moving flat-vector scenes: read get_playbook `scenery` first.
 
 Read-only.
 
@@ -839,6 +853,17 @@ Arguments:
 - `width` (number) Width of the whole drawing in document units; the height follows (default: the SVG's own size).
 - `x` (number) Where the drawing's top-left goes in the parent (default 0).
 - `y` (number) Where the drawing's top-left goes in the parent (default 0).
+
+## `review_video`
+
+An animation director's check of a whole video, in numbers, without changing anything. Call it before export_video on any animated or illustrated video and fix what it finds. It reads each scene's nodes and tracks and renders a few small pictures across the video to measure motion. Findings have stable codes: RV001 a scene is one image with text on it, RV002 only text and rectangles move, RV003 a still stretch over 2.5 s, RV004 no looping ambient motion, RV005 no camera move in a video over 15 s, RV006 too few vector shapes, RV007 repeated scene compositions, RV008 captions cover too much, RV009 no sound, RV010 the sound is the same in every scene, RV011 colors are not from tokens, RV012 too few layers moving. It returns per-scene and whole-video numbers, a score from 0 to 100 and the three fixes that would help most. A score under 70 is not ready.
+
+Read-only.
+
+Arguments:
+
+- `samples` (integer) How many moments to render (default 12).
+- `video` (string) Id of a video from list_videos; defaults to the first.
 
 ## `show_preview`
 

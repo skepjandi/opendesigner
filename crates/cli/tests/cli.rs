@@ -536,6 +536,29 @@ fn the_block_catalog_lists_describes_and_adds_a_block_to_a_project() {
             .status
             .success()
     );
+    let placed = od(&[
+        "blocks",
+        "add",
+        dir_s,
+        "badge_pill",
+        "--frame",
+        &frame,
+        "--box",
+        "100,200,300,80",
+    ]);
+    assert!(placed.status.success(), "{placed:?}");
+    let refused = od(&[
+        "blocks",
+        "add",
+        dir_s,
+        "badge_pill",
+        "--frame",
+        &frame,
+        "--box",
+        "1,2,3",
+    ]);
+    assert!(!refused.status.success());
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("--box takes four numbers"));
 }
 
 /// Sound tracks, captions and the sound tools, headless: the same tools the MCP server offers.
