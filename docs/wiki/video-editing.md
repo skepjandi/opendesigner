@@ -93,6 +93,7 @@ Where we deliberately differ: local-only and open files (Kino stores footage in 
 - **The order is fixed** (`od_render::grade`): blur, exposure, temperature, tint, contrast, saturation, vignette. The colour maths runs on the stored values, as most editors' basic controls do, and is not done in linear light.
 - **Blur** is three box passes (a Gaussian of the same sigma to within a few percent, at any radius), and its radius is in thousandths of the picture's shorter side, so a preview and the export blur by the same amount.
 - **Keyframes.** The numbers of an image node's grade can be keyframed (`grade_exposure`, `grade_contrast`, `grade_saturation`, `grade_temperature`, `grade_tint`, `grade_vignette`, `grade_blur`), so a shot can pull focus or warm up over the clip.
+- **Vector motion.** A stroke can be drawn on: `trim_end` (and `trim_start`, `stroke_width`) are keyframed numbers of any node with a stroke, so a line, a rounded rect or a path grows from nothing to its whole outline over the clip. `fill_color` keys take a color (`"value": "#rrggbb"`) and mix in sRGB, for shapes that change color. A frame is drawn from the document as it looks at that moment (`Document::at_time`), the same for the canvas, the preview and the export; a test pins `trim_end` 0 to 1 at the start, middle and end of a clip ([Document Format](./document-format.md#vector-shapes)).
 
 ## Parallel export
 

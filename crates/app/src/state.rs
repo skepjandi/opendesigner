@@ -689,6 +689,9 @@ impl EditorState {
                 node.fill = Some(paint("#fcf1d9")?);
             }
             NodeKind::Group | NodeKind::Image | NodeKind::Device3d => {}
+            NodeKind::Path => {
+                return Err("a path needs path data: ask the agent, or import an SVG".to_string());
+            }
         }
         let parent = match (kind, &self.active_frame) {
             (NodeKind::Frame, _) | (_, None) => self.with_ws(|ws| {
@@ -2032,6 +2035,10 @@ impl EditorState {
             let mut v = serde_json::to_value(&shallow).unwrap_or(Value::Null);
             if let Value::Object(m) = &mut v {
                 m.insert("child_count".into(), json!(kids));
+                if let Some(gradient) = n.fill.as_ref().filter(|f| f.stops().is_some()) {
+                    // the inspector's fill box shows a paint as text
+                    m.insert("fill".into(), json!(gradient.to_string()));
+                }
                 if self.language.is_some() && n.kind == NodeKind::Text {
                     m.insert("translated".into(), json!(translation.is_some()));
                 }
@@ -2600,6 +2607,17 @@ mod tests {
         s.undo().unwrap();
         s.select(Some(&id)).unwrap();
         assert_eq!(s.selected().map(|i| i.to_string()), Some(id));
+    }
+
+    #[test]
+    fn a_gradient_fill_reaches_the_inspector_as_text() {
+        let (mut s, _t) = state();
+        let id = s.create_node("rect", 10.0, 10.0, 100.0, 60.0).unwrap();
+        let gradient = json!({"type": "linear", "angle": 0, "stops": [
+            {"offset": 0, "color": "#ff0000"}, {"offset": 1, "color": "#0000ff"}]});
+        s.set_property(&id, "fill", &gradient.to_string()).unwrap();
+        assert_eq!(insp(&s)["fill"], "linear(0deg, #ff0000 0, #0000ff 1)");
+        assert!(s.set_property(&id, "fill", "\"linear(0deg)\"").is_err());
     }
 
     #[test]
