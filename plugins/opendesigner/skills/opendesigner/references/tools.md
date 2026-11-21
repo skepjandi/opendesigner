@@ -12,7 +12,7 @@ No arguments.
 
 ## `get_playbook`
 
-Craft guidance for making work that is not mediocre. Topics: design (images), style (named looks with rules), video (start with the inventory of media, footage, sounds and assets), motion (timings, easing, recipes), 3d (devices in 3D, captures from a simulator, moves), formats (sizes and safe zones), logo (identity design), blocks (the catalog of ready-made titles, overlays, backgrounds, charts and motion, and when to use one). Call it with no topic for the list; read the ones that apply before you build, not after.
+Craft guidance for making work that is not mediocre. Topics: design (images), style (named looks with rules), video (start with the inventory of media, footage, sounds and assets), motion (timings, easing, recipes), 3d (devices in 3D, captures from a simulator, moves), formats (sizes and safe zones), logo (identity design), blocks (the catalog of ready-made titles, overlays, backgrounds, charts and motion, and when to use one), characters (flat-vector characters, bubbles and animated props). Call it with no topic for the list; read the ones that apply before you build, not after.
 
 Read-only.
 
@@ -484,7 +484,7 @@ Arguments:
 
 ## `list_blocks`
 
-The block catalog: ready-made titles, lower thirds, overlays, backgrounds, charts, store headlines and motion wrappers that expand into ordinary nodes (and keyframes on a video). Search by what you need (`query`: words matched against names, tags and descriptions) and/or `category`. Each result has the block id, its category and what it is for. Then get_block for its parameters and add_block to use it.
+The block catalog: ready-made titles, lower thirds, overlays, backgrounds, charts, store headlines, motion wrappers, rigged flat-vector characters, speech and thought bubbles and animated props that expand into ordinary nodes (and keyframes on a video). Search by what you need (`query`: words matched against names, tags and descriptions) and/or `category`. Each result has the block id, its category and what it is for. Then get_block for its parameters and add_block to use it.
 
 Read-only.
 
