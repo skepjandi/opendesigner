@@ -196,6 +196,24 @@ pub const RULES: &[Rule] = &[
         Severity::Warn,
         "Two variables are bound to the same node property; the last one set wins.",
     ),
+    rule(
+        "OD080",
+        "node-scaled-flat",
+        Severity::Warn,
+        "A node's scale_x or scale_y is 0 and nothing animates it, so the node is never visible.",
+    ),
+    rule(
+        "OD081",
+        "clip-without-area",
+        Severity::Warn,
+        "A group clips its children but has no size and no children to take a box from, so it shows nothing.",
+    ),
+    rule(
+        "OD082",
+        "loop-jumps",
+        Severity::Info,
+        "A looping animation ends on a different value than it starts with, so it jumps once per cycle.",
+    ),
 ];
 
 pub fn rule_for(code: &str) -> Option<&'static Rule> {
@@ -306,8 +324,6 @@ fn used_frames(doc: &Document) -> HashSet<NodeId> {
 
 struct FrameBox {
     id: NodeId,
-    x: f64,
-    y: f64,
     w: f64,
     h: f64,
 }
@@ -356,8 +372,9 @@ impl Linter<'_> {
         }
         let abs = (origin.0 + n.x, origin.1 + n.y);
         self.paint_tokens(n, frame);
+        self.transform_rules(n, frame);
         if let Some(f) = frame {
-            self.bounds(n, abs, f);
+            self.bounds(n, f);
         }
         match n.kind {
             NodeKind::Text => self.text(n, abs, frame),
@@ -385,8 +402,6 @@ impl Linter<'_> {
         self.push_fill(n, abs);
         let mine = FrameBox {
             id: n.id.clone(),
-            x: abs.0,
-            y: abs.1,
             w: n.width,
             h: n.height,
         };
@@ -420,16 +435,50 @@ impl Linter<'_> {
         );
     }
 
-    fn bounds(&mut self, n: &Node, abs: (f64, f64), f: &FrameBox) {
+    /// Nodes that turn, scale or clip: a flat scale shows nothing and a clip needs a box.
+    fn transform_rules(&mut self, n: &Node, frame: Option<&FrameBox>) {
+        let at = At::node(&n.id, frame.map(|f| &f.id));
+        let animated = |prop: AnimProp| {
+            self.doc.videos.iter().any(|v| {
+                v.animations
+                    .iter()
+                    .any(|a| a.node == n.id && a.prop == prop)
+            })
+        };
+        let flat = (n.scale_x == 0.0 && !animated(AnimProp::ScaleX) && !animated(AnimProp::Scale))
+            || (n.scale_y == 0.0 && !animated(AnimProp::ScaleY) && !animated(AnimProp::Scale));
+        if flat {
+            self.add(
+                "OD080",
+                at.clone(),
+                format!("{} has a scale of 0 and is never drawn", n.id),
+                "Give scale_x and scale_y a real value, or animate them up from 0.",
+            );
+        }
+        let no_area = || {
+            n.layout_box()
+                .is_none_or(|b| b.width <= 0.0 || b.height <= 0.0)
+        };
+        if n.kind == NodeKind::Group && n.clip && no_area() {
+            self.add(
+                "OD081",
+                at,
+                format!("group {} clips its children to a box with no area", n.id),
+                "Give the group a width and height, or turn clip off.",
+            );
+        }
+    }
+
+    fn bounds(&mut self, n: &Node, f: &FrameBox) {
         if matches!(n.kind, NodeKind::Group) || n.width <= 0.0 || n.height <= 0.0 {
             return;
         }
-        let (left, top, right, bottom) = (abs.0, abs.1, abs.0 + n.width, abs.1 + n.height);
-        let outside = right <= f.x || left >= f.x + f.w || bottom <= f.y || top >= f.y + f.h;
-        let partly = left < f.x - 0.5
-            || top < f.y - 0.5
-            || right > f.x + f.w + 0.5
-            || bottom > f.y + f.h + 0.5;
+        let Some(b) = crate::geometry::bounds_in_frame(self.doc, &f.id, &n.id) else {
+            return;
+        };
+        let (left, top, right, bottom) = (b.x, b.y, b.right(), b.bottom());
+        let outside = right <= 0.0 || left >= f.w || bottom <= 0.0 || top >= f.h;
+        let partly = left < -0.5 || top < -0.5 || right > f.w + 0.5 || bottom > f.h + 0.5;
         if outside {
             self.add(
                 "OD001",
@@ -821,6 +870,24 @@ impl Linter<'_> {
         a: &crate::animation::Animation,
         duration: u64,
     ) {
+        if a.repeat == crate::animation::Repeat::Loop
+            && let (Some(first), Some(last)) = (a.keys.first(), a.keys.last())
+            && (first.value - last.value).abs() > 1e-9
+        {
+            self.add(
+                "OD082",
+                At::node(&a.node, None),
+                format!(
+                    "the looping {} animation of {} in video {} ends on {} but starts on {}",
+                    a.prop.as_str(),
+                    a.node,
+                    v.id,
+                    last.value,
+                    first.value
+                ),
+                "End the keys on the first key's value for a seamless loop, or use repeat pingpong.",
+            );
+        }
         if let Some(last) = a.keys.last()
             && last.at_ms > duration
         {

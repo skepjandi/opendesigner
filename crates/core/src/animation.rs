@@ -980,10 +980,14 @@ fn clamp_zoom(z: f64) -> f64 {
 
 /// One sentence per animation for a video's story: what moves, through which values, when.
 pub fn describe(doc: &Document, a: &Animation) -> String {
-    let name = doc.node(&a.node).map_or_else(
-        || a.node.to_string(),
-        |n| format!("{} ({})", n.name, a.node),
-    );
+    let name = if a.prop.is_camera() {
+        "the camera".to_string()
+    } else {
+        doc.node(&a.node).map_or_else(
+            || a.node.to_string(),
+            |n| format!("{} ({})", n.name, a.node),
+        )
+    };
     let ease_name = |e: Ease| {
         serde_json::to_value(e)
             .ok()
@@ -1003,7 +1007,16 @@ pub fn describe(doc: &Document, a: &Animation) -> String {
             }
         })
         .collect();
-    format!("{name} {}: {}", a.prop.as_str(), steps.join(", then "))
+    let cycle = match a.repeat {
+        Repeat::Once => "",
+        Repeat::Loop => ", then again from the start, for ever",
+        Repeat::Pingpong => ", then back and forth, for ever",
+    };
+    format!(
+        "{name} {}: {}{cycle}",
+        a.prop.as_str(),
+        steps.join(", then ")
+    )
 }
 
 fn trim(v: f64) -> String {

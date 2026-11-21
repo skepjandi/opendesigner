@@ -6,9 +6,8 @@
 //! gives. Which tiles an edit reaches comes from the ids it touched: each node's rows (with
 //! stroke and text overflow) are recorded at every draw, and an edit dirties the rows its nodes
 //! covered before and cover now. When that cannot be told (a different size, scale or token set,
-//! a root frame whose own look changed, a 3D device, a node that turns, scales, blurs, casts a
-//! shadow or clips: those paint outside the rows their box covers) the caller draws the frame
-//! again.
+//! a root frame whose own look changed, a 3D device, a node that turns, scales, blurs or casts a
+//! shadow: those paint outside the rows their box covers) the caller draws the frame again.
 //!
 //! Warnings (images that could not be drawn, text overflow) are not tracked here; the editor
 //! reports them from the document, not from the drawing.
@@ -68,8 +67,8 @@ pub struct Retained {
 }
 
 impl Retained {
-    /// Draws `frame` at `scale`. `None` when the frame holds a 3D device or a node with a
-    /// transform or effect, which are drawn as a whole and not kept in tiles.
+    /// Draws `frame` at `scale`. `None` when the frame holds a 3D device or a node that turns,
+    /// scales, blurs or casts a shadow, which are drawn as a whole and not kept in tiles.
     pub fn render(
         doc: &Document,
         frame: &NodeId,
@@ -265,7 +264,7 @@ impl Snapshot {
             (parent_origin.0 + node.x, parent_origin.1 + node.y)
         };
         let hidden = hidden || !node.visible;
-        self.has_device |= node.kind == NodeKind::Device3d || node.has_effects();
+        self.has_device |= node.kind == NodeKind::Device3d || node.paints_beyond_its_box();
         let at = self.items.len();
         self.index.insert(hash_of(&node.id), at);
         self.items.push(Item {

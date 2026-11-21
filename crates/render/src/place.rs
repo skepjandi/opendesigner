@@ -39,6 +39,11 @@ pub(crate) fn scale_of(t: Transform) -> f32 {
 
 /// The upright rectangle `(left, top, right, bottom)` around the box `(x, y, w, h)` after `t`.
 pub(crate) fn device_rect(t: Transform, x: f32, y: f32, w: f32, h: f32) -> (f32, f32, f32, f32) {
+    if t.kx == 0.0 && t.ky == 0.0 {
+        let (x0, x1) = (t.sx * x + t.tx, t.sx * (x + w) + t.tx);
+        let (y0, y1) = (t.sy * y + t.ty, t.sy * (y + h) + t.ty);
+        return (x0.min(x1), y0.min(y1), x0.max(x1), y0.max(y1));
+    }
     let corners = [(x, y), (x + w, y), (x, y + h), (x + w, y + h)]
         .map(|(px, py)| (t.sx * px + t.kx * py + t.tx, t.ky * px + t.sy * py + t.ty));
     corners.iter().fold(

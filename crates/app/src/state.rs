@@ -2266,12 +2266,17 @@ fn videos_json(doc: &od_core::Document, dir: Option<&Path>) -> String {
         .filter_map(|v| v.get_mut("animations")?.as_array_mut())
         .flatten()
     {
+        let camera = animation
+            .get("prop")
+            .and_then(Value::as_str)
+            .is_some_and(|p| p.starts_with("camera_"));
         let name = animation
             .get("node")
             .and_then(Value::as_str)
             .and_then(|id| NodeId::parse(id).ok())
             .and_then(|id| doc.node(&id))
-            .map(|n| n.name.clone());
+            .map(|n| n.name.clone())
+            .or_else(|| camera.then(|| "Camera".to_string()));
         if let Value::Object(m) = animation {
             m.insert("node_name".into(), json!(name.unwrap_or_default()));
         }
@@ -2627,6 +2632,35 @@ mod tests {
         );
         assert!(s.set_property(&id, "nope", "1").is_err());
         assert!(s.set_property(&id, "x", "not json").is_err());
+    }
+
+    #[test]
+    fn the_inspector_turns_and_scales_a_node_and_the_canvas_draws_it_that_way() {
+        let (mut s, _t) = state();
+        let id = s.create_node("rect", 100.0, 100.0, 100.0, 40.0).unwrap();
+        s.set_property(&id, "fill", "\"#ff0000\"").unwrap();
+        s.set_property(&id, "rotation", "90").unwrap();
+        s.set_property(&id, "scale_x", "0.5").unwrap();
+        s.set_property(&id, "depth", "0").unwrap();
+        let v = insp(&s);
+        assert_eq!(
+            (v["rotation"].as_f64(), v["scale_x"].as_f64()),
+            (Some(90.0), Some(0.5))
+        );
+        assert!(
+            v.get("scale_y").is_none() && v.get("pivot_x").is_none(),
+            "defaults are left out"
+        );
+        assert!(
+            s.set_property(&id, "blur", "-3")
+                .unwrap_err()
+                .contains("blur")
+        );
+        // 100 x 40 scaled to 50 x 40 about its center (150, 120), then turned a quarter: 40 x 50
+        let (w, _, px, _) = draw_canvas(&s, 1.0).unwrap();
+        let red = |x: usize, y: usize| px[(y * w as usize + x) * 4] > 200;
+        assert!(red(150, 100) && red(150, 140), "stands up");
+        assert!(!red(115, 120) && !red(185, 120), "no longer lies down");
     }
 
     #[test]

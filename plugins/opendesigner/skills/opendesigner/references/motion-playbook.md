@@ -28,13 +28,25 @@ whole video process; this page is about movement.
 - **Overlays**: any design frame laid over the whole video for a time, with an **enter** and **exit**
   (fade, slide_up/down/left/right, pop, zoom, none), a duration for each (`fade_ms`) and an **ease**.
   A frame without a fill is transparent, so an overlay can be one headline, one badge, one arrow.
-- **Eases**: `linear`, `ease_in`, `ease_out`, `ease_in_out`, `back` (overshoots, like a pop),
-  `spring` (overshoots and settles, for an arrival with weight).
-- **Keyframes**: any number of a node (`x`, `y`, `opacity`, `width`, `height`, `corner_radius`, and
+- **Eases**: `linear`, `ease_in`, `ease_out`, `ease_in_out` (also `ease_in_out_cubic`), `back` (overshoots,
+  like a pop; also `ease_out_back`), `spring` (overshoots and settles, for an arrival with weight),
+  `elastic` (rings past the end a few times) and `bounce` (hits the end and bounces off it).
+- **Keyframes**: any number of a node (`x`, `y`, `opacity`, `width`, `height`, `corner_radius`,
+  `rotation`, `scale_x`, `scale_y`, `scale`, `blur`, `shadow_dx`, `shadow_dy`, `shadow_blur`, and
   on a 3D device its turn, tilt, roll, zoom, lens, light, shadow, glare and screen scroll) can be
   keyframed over the video's time with `animate` in `apply_ops`, or with a named move through
   `animate_preset`. A video can also blur what moves (`motion_blur`, 2 to 16 pictures). See the
   `3d` playbook for devices in 3D.
+- **Repeating tracks**: `animate` takes `repeat`: `once` (hold the last value, the default), `loop`
+  (start again from the first key for as long as the video plays; end on the first key's value so
+  the cycle has no jump) or `pingpong` (forward, then back). A few keys make an idle that lasts the
+  whole video: a float, a breath, a blink, a spin (`rotation` 0 to 360 with `ease: linear` and `loop`).
+  Send `repeat` again whenever you replace the keys of a looping track.
+- **Camera**: `camera_x`, `camera_y` (the scene pans the other way), `camera_zoom` and
+  `camera_rotation` are keyframed with `animate` using the video's own id as `node`. They move
+  every node of a clip's frame by its `depth` (1 with the scene, 0 stays on the screen, 0.5 for
+  parallax); overlays are not moved. A single key holds the camera still. Keep the scene larger
+  than the frame where the camera moves, or its edge shows.
 - Sound: footage keeps its own, and a video can carry up to eight sound tracks
   (see Sound below). `make_sound` synthesizes effects and simple loops, not music: for a music bed
   use `search_sounds` or ask the user for a track rather than promising one.

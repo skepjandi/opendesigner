@@ -188,6 +188,15 @@ impl Affine {
 
     /// The smallest upright rectangle holding `rect` after the map.
     pub fn bounds_of(self, rect: Rect) -> Rect {
+        if self.b == 0.0 && self.c == 0.0 && self.a > 0.0 && self.d > 0.0 {
+            // upright: the size is the scaled size itself, not a difference of two corners
+            return Rect {
+                x: self.a * rect.x + self.e,
+                y: self.d * rect.y + self.f,
+                width: self.a * rect.width,
+                height: self.d * rect.height,
+            };
+        }
         let corners = [
             self.apply(rect.x, rect.y),
             self.apply(rect.right(), rect.y),
@@ -258,14 +267,10 @@ impl Node {
         self.rotation != 0.0 || self.scale_x != 1.0 || self.scale_y != 1.0
     }
 
-    /// Whether the node does anything beyond sitting at its position: a transform, a blur, a
-    /// shadow, a clip or a depth.
-    pub fn has_effects(&self) -> bool {
-        self.is_transformed()
-            || self.blur > 0.0
-            || self.shadow.is_some()
-            || self.clip
-            || self.depth != 1.0
+    /// Whether the node can paint outside the rows its own box covers: it is turned or scaled,
+    /// blurred or casts a shadow. (A clip only paints less, and a depth only matters to a camera.)
+    pub fn paints_beyond_its_box(&self) -> bool {
+        self.is_transformed() || self.blur > 0.0 || self.shadow.is_some()
     }
 
     /// The box a pivot and a clip refer to, in the node's own coordinates: its size, or for a
@@ -420,6 +425,20 @@ mod tests {
         let back = m.inverse().map(|i| i.apply(12.0, 3.0));
         near(back.unwrap_or_default(), (1.0, 1.0));
         assert!(Affine::scale(0.0, 1.0).inverse().is_none());
+    }
+
+    #[test]
+    fn an_upright_box_keeps_its_exact_size() {
+        let rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 114.0,
+            height: 7.3,
+        };
+        let moved = Affine::translate(1234.567, 0.1).bounds_of(rect);
+        assert_eq!((moved.width, moved.height), (114.0, 7.3));
+        let turned = Affine::rotate(90.0).bounds_of(rect);
+        assert!((turned.width - 7.3).abs() < 1e-9 && (turned.height - 114.0).abs() < 1e-9);
     }
 
     #[test]

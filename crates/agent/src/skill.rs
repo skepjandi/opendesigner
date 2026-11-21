@@ -348,6 +348,15 @@ Properties for `set`: `name`, `x`, `y`, `width`, `height`, `visible`, `opacity` 
 (`left`, `center`, `right` or null), `line_height` (a multiple of the font size, 0.5 to 4, or
 null), `image`. Not every property applies to every kind of node; a rejection says which.
 
+Transform and effects work on any node and on everything inside it: `rotation` (degrees, clockwise),
+`scale_x` and `scale_y` (negative flips; `scale` sets both), `pivot_x` and `pivot_y` (fractions of the
+node's own box the turn and scale happen about, 0.5 is the middle; a group without a size uses the box
+around its children), `blur` (px), `drop_shadow` (`{"dx": 0, "dy": 12, "blur": 24, "color": "#00000066"}`
+or null; `shadow_dx`, `shadow_dy` and `shadow_blur` change one number), `clip` (a group or frame cuts
+its children at its box; give a group a `width` and `height`) and `depth` (how far a video's camera
+moves it: 1 with the scene, 0 pinned to the screen, 0.5 for parallax). `create` takes the same names
+(`shadow` for the shadow). Bounds and hit tests follow the transform.
+
 Design tokens are named colors. Define or recolor one with `{"op": "set_token", "name":
 "brand.gold", "value": "#f2ca83"}`; every node that fills or strokes with `{brand.gold}` changes
 with it, and those nodes are outlined for the user. `{"op": "set_token", "name": "brand.old",

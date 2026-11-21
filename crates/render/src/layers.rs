@@ -10,6 +10,9 @@ use crate::{Ctx, Place, RenderError, View, draw_node, grade, rounded_rect, text}
 
 /// Standard deviations a blur reaches out to.
 const REACH_SIGMAS: f32 = 3.0;
+/// How far past the picture a layer is drawn, in pixels, whatever the blur: a huge blur must not
+/// ask for a huge layer.
+const MAX_MARGIN: f32 = 1024.0;
 
 pub(crate) fn needs_layer(node: &Node) -> bool {
     node.blur > 0.0 || node.shadow.is_some()
@@ -134,7 +137,8 @@ pub(crate) fn draw_layered(
     let Some(area) = paint_area(ctx, node, place) else {
         return Ok(());
     };
-    let view = Area(0.0, 0.0, ctx.view.width, ctx.view.height).grow(reach(node, ppu));
+    let margin = reach(node, ppu).min(MAX_MARGIN);
+    let view = Area(0.0, 0.0, ctx.view.width, ctx.view.height).grow(margin);
     let Area(l, t, r, b) = area.within(view);
     let (left, top) = (l.floor() as i32, t.floor() as i32);
     let (width, height) = (

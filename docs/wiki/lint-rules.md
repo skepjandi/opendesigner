@@ -41,6 +41,12 @@ Each finding is `{code, severity, node?, frame?, video?, message, hint}`. `sever
 | `OD061` | binding-invalid | error | A template variable's binding cannot be written to its node (wrong property for the node). |
 | `OD062` | binding-shadowed-by-translation | info | A text node bound to a variable also has translations; those win in their language. |
 | `OD063` | binding-duplicated | warn | Two variables are bound to the same node property; the last one set wins. |
+| `OD080` | node-scaled-flat | warn | A node's scale_x or scale_y is 0 and nothing animates it, so the node is never visible. |
+| `OD081` | clip-without-area | warn | A group clips its children but has no size and no children to take a box from, so it shows nothing. |
+| `OD082` | loop-jumps | info | A looping animation ends on a different value than it starts with, so it jumps once per cycle. |
+
+`OD001` to `OD003` judge a turned or scaled node by the upright box around it after its transform and its
+parents' (`geometry::bounds_in_frame`), not by its untransformed box.
 
 ## What the linter does not know
 

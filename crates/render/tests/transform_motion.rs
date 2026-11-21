@@ -621,3 +621,60 @@ fn a_moving_camera_or_loop_changes_the_picture_signature_and_a_held_one_does_not
     assert_ne!(r.signature(3400), r.signature(3500), "the camera is moving");
     assert_ne!(r.signature(4400), r.signature(4500), "the loop never stops");
 }
+
+#[test]
+fn any_worker_count_exports_the_showcase_as_a_plain_loop_draws_it() {
+    use od_render::export::{SourceFactory, export_frames};
+    let (s, v) = showcase();
+    let doc = s.document();
+    let video = doc.video(&v).unwrap();
+    let mut plain = VideoRenderer::new(doc, video, None);
+    let expected: Vec<Vec<u8>> = (0..video.frame_count())
+        .map(|n| {
+            let ms = od_core::timebase::frame_ms(n, video.fps);
+            plain.frame_at(ms).unwrap().data().to_vec()
+        })
+        .collect();
+    let none: &SourceFactory = &|| None;
+    for workers in [1, 2, 3, 8] {
+        let mut got: Vec<Vec<u8>> = Vec::new();
+        export_frames(doc, video, None, none, workers, &mut |_, px| {
+            got.push(px.to_vec());
+            Ok(true)
+        })
+        .unwrap();
+        assert!(got == expected, "{workers} workers");
+    }
+}
+
+#[test]
+fn tiles_are_kept_only_for_frames_without_a_transform_or_effect() {
+    let mut sc = Scene::new(100.0, 100.0, Some("#ffffff"));
+    let r = sc.shape(&sc.frame.clone(), (10.0, 10.0, 20.0, 20.0), "#ff0000");
+    let kept = od_render::Retained::render(sc.s.document(), &sc.frame, 1.0, None).unwrap();
+    assert!(kept.is_some());
+    sc.set(&r, Property::Rotation(10.0));
+    let kept = od_render::Retained::render(sc.s.document(), &sc.frame, 1.0, None).unwrap();
+    assert!(
+        kept.is_none(),
+        "a turned node paints outside its box's rows"
+    );
+}
+
+#[test]
+fn the_largest_blur_and_shadow_the_limits_allow_still_render() {
+    let mut sc = Scene::new(100.0, 100.0, Some("#ffffff"));
+    let r = sc.shape(&sc.frame.clone(), (40.0, 40.0, 20.0, 20.0), "#ff0000");
+    sc.set(&r, Property::Blur(500.0));
+    sc.set(
+        &r,
+        Property::DropShadow(Some(Shadow {
+            dx: 5000.0,
+            dy: -5000.0,
+            blur: 500.0,
+            color: Paint::parse("#000000").unwrap(),
+        })),
+    );
+    let p = sc.render();
+    assert_eq!((p.width(), p.height()), (100, 100));
+}
