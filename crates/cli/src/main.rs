@@ -190,29 +190,74 @@ enum Command {
         #[arg(long, default_value_t = 8.0)]
         rotate_x: f64,
     },
-    /// Animate a node with a named move (spin, turntable, hero_reveal, float, ...) as keyframes.
+    /// Animate a node (or the camera) with a named move (spin, hero_reveal, float, pop_in,
+    /// camera_pan, stagger, animate_along_path, ...) as keyframes.
     Animate {
         dir: PathBuf,
         /// A video id from `videos`.
         #[arg(long)]
         video: String,
-        /// The node to move.
+        /// The node to move (not needed for the camera moves).
         #[arg(long)]
-        node: String,
-        /// The move: spin, turntable, swing, flip_in, hero_reveal, rise_in, drop_in, float,
-        /// push_in, pull_back, orbit, scroll_screen, fade_in, fade_out, slide_in_left,
-        /// slide_in_right.
+        node: Option<String>,
+        /// The move: the 3D moves (spin, turntable, swing, flip_in, hero_reveal, push_in,
+        /// pull_back, orbit, scroll_screen), moves for any node (rise_in, drop_in, float,
+        /// fade_in, fade_out, bob, breathe, pulse, wobble, shake, pop_in, bounce_in, elastic_in,
+        /// slide_in_left|right|up|down, fade_up, zoom_in, draw_on, orbit, stagger,
+        /// animate_along_path) and the camera (camera_push_in, camera_pull_back, camera_pan,
+        /// camera_drift, camera_shake, camera_whip). `get_playbook scenery` describes them.
         #[arg(long)]
         preset: String,
         /// When the move starts, from the start of the video.
         #[arg(long, default_value_t = 0)]
         start_ms: u64,
-        /// How long the move lasts.
-        #[arg(long, default_value_t = 1200)]
-        duration_ms: u64,
+        /// How long the move lasts (a scene move has its own default).
+        #[arg(long)]
+        duration_ms: Option<u64>,
         /// How far the move goes; 1 is as designed.
-        #[arg(long, default_value_t = 1.0)]
-        strength: f64,
+        #[arg(long, alias = "strength")]
+        intensity: Option<f64>,
+        /// The ease: linear, ease_in, ease_out, ease_in_out, back, spring, elastic, bounce, ...
+        #[arg(long)]
+        ease: Option<String>,
+        /// once, loop or pingpong (scene moves).
+        #[arg(long)]
+        repeat: Option<String>,
+        /// Shifts an ambient move's phase and orders a random stagger.
+        #[arg(long)]
+        seed: Option<u64>,
+        /// camera_pan and camera_whip: left, right, up or down.
+        #[arg(long)]
+        direction: Option<String>,
+        /// camera_pan and camera_whip: how far, in document units.
+        #[arg(long)]
+        amount: Option<f64>,
+        /// orbit: the middle of the circle.
+        #[arg(long, requires = "center_y")]
+        center_x: Option<f64>,
+        #[arg(long, requires = "center_x")]
+        center_y: Option<f64>,
+        /// orbit: the radius when there is no center.
+        #[arg(long)]
+        radius: Option<f64>,
+        /// animate_along_path: the path node to follow.
+        #[arg(long)]
+        path: Option<String>,
+        /// animate_along_path: turn the node to face along the path.
+        #[arg(long)]
+        orient: bool,
+        /// stagger: the move to apply to each node.
+        #[arg(long = "of")]
+        of_move: Option<String>,
+        /// stagger: the node ids, separated by commas.
+        #[arg(long, value_delimiter = ',')]
+        nodes: Vec<String>,
+        /// stagger: the delay between one node and the next.
+        #[arg(long)]
+        step_ms: Option<u64>,
+        /// stagger: first, last, center or random.
+        #[arg(long = "from")]
+        from_end: Option<String>,
         #[arg(long)]
         agent: Option<String>,
     },
@@ -396,6 +441,11 @@ fn parse_model(name: &str) -> Result<od_core::DeviceModel, CliError> {
 }
 
 /// The named move on the command line.
+fn parse_ease(name: &str) -> Result<od_core::Ease, CliError> {
+    serde_json::from_value(serde_json::Value::from(name))
+        .map_err(|_| CliError::Invalid(format!("unknown ease {name:?}")))
+}
+
 fn parse_preset(name: &str) -> Result<od_core::Preset, CliError> {
     od_core::Preset::ALL
         .into_iter()
@@ -813,29 +863,85 @@ fn run(cli: Cli) -> Result<(), CliError> {
             preset,
             start_ms,
             duration_ms,
-            strength,
+            intensity,
+            ease,
+            repeat,
+            seed,
+            direction,
+            amount,
+            center_x,
+            center_y,
+            radius,
+            path,
+            orient,
+            of_move,
+            nodes,
+            step_ms,
+            from_end,
             agent,
         } => {
-            let preset = parse_preset(&preset)?;
             let mut session = project::load(&dir)?;
-            let video_id = od_core::NodeId::parse(&video)?;
-            let node_id = od_core::NodeId::parse(&node)?;
-            let ops = od_core::animation::preset_ops(
-                session.document(),
-                &video_id,
-                &node_id,
-                od_core::PresetRequest {
-                    preset,
-                    start_ms,
-                    duration_ms,
-                    strength,
-                    ease: None,
-                },
-            )?;
+            let ops = if od_agent::scene_tool::takes(session.document(), &preset, node.as_deref()) {
+                let mut args = serde_json::json!({
+                    "video": video, "preset": preset, "start_ms": start_ms,
+                });
+                let extras = [
+                    ("node", node.map(serde_json::Value::from)),
+                    ("duration_ms", duration_ms.map(serde_json::Value::from)),
+                    ("intensity", intensity.map(serde_json::Value::from)),
+                    ("ease", ease.map(serde_json::Value::from)),
+                    ("repeat", repeat.map(serde_json::Value::from)),
+                    ("seed", seed.map(serde_json::Value::from)),
+                    ("direction", direction.map(serde_json::Value::from)),
+                    ("amount", amount.map(serde_json::Value::from)),
+                    ("center_x", center_x.map(serde_json::Value::from)),
+                    ("center_y", center_y.map(serde_json::Value::from)),
+                    ("radius", radius.map(serde_json::Value::from)),
+                    ("path", path.map(serde_json::Value::from)),
+                    ("orient", orient.then_some(serde_json::Value::Bool(true))),
+                    ("of", of_move.map(serde_json::Value::from)),
+                    (
+                        "nodes",
+                        (!nodes.is_empty()).then(|| serde_json::json!(nodes)),
+                    ),
+                    ("step_ms", step_ms.map(serde_json::Value::from)),
+                    ("from", from_end.map(serde_json::Value::from)),
+                ];
+                for (name, value) in extras {
+                    if let (Some(v), Some(o)) = (value, args.as_object_mut()) {
+                        o.insert(name.to_string(), v);
+                    }
+                }
+                od_agent::scene_tool::operations_from_json(session.document(), args)
+                    .map_err(|e| CliError::Invalid(e.0))?
+            } else {
+                let node =
+                    node.ok_or_else(|| CliError::Invalid("this move needs --node".into()))?;
+                let video_id = od_core::NodeId::parse(&video)?;
+                let node_id = od_core::NodeId::parse(&node)?;
+                let chosen = parse_preset(&preset)?;
+                let ops = od_core::animation::preset_ops(
+                    session.document(),
+                    &video_id,
+                    &node_id,
+                    od_core::PresetRequest {
+                        preset: chosen,
+                        start_ms,
+                        duration_ms: duration_ms.unwrap_or(1200),
+                        strength: intensity.unwrap_or(1.0),
+                        ease: ease.as_deref().map(parse_ease).transpose()?,
+                    },
+                )?;
+                if ops.is_empty() {
+                    return Err(CliError::Invalid(format!(
+                        "{preset} would not move {node} from where it is"
+                    )));
+                }
+                ops
+            };
             if ops.is_empty() {
                 return Err(CliError::Invalid(format!(
-                    "{} would not move {node} from where it is",
-                    preset.as_str()
+                    "{preset} would not move anything from where it is"
                 )));
             }
             let receipt = session.apply(actor(agent)?, None, &ops)?;
