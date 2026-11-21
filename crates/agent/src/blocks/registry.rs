@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 use super::BlockError;
 use super::args::{Args, Param};
 use super::kit::Kit;
-use super::{backdrops, data, overlays, social, titles, wrappers};
+use super::{backdrops, bubbles, characters, data, overlays, props, social, titles, wrappers};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Category {
@@ -16,16 +16,18 @@ pub enum Category {
     Data,
     Store,
     Motion,
+    Characters,
 }
 
 impl Category {
-    pub const ALL: [Category; 6] = [
+    pub const ALL: [Category; 7] = [
         Category::Titles,
         Category::Overlays,
         Category::Backgrounds,
         Category::Data,
         Category::Store,
         Category::Motion,
+        Category::Characters,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -36,6 +38,7 @@ impl Category {
             Category::Data => "data",
             Category::Store => "store",
             Category::Motion => "motion",
+            Category::Characters => "characters",
         }
     }
 
@@ -47,6 +50,7 @@ impl Category {
             Category::Data => "Data",
             Category::Store => "Social and store",
             Category::Motion => "Motion wrappers",
+            Category::Characters => "Characters, bubbles and props",
         }
     }
 
@@ -135,6 +139,9 @@ pub fn all() -> impl Iterator<Item = &'static Block> {
         data::BLOCKS,
         social::BLOCKS,
         wrappers::BLOCKS,
+        characters::BLOCKS,
+        bubbles::BLOCKS,
+        props::BLOCKS,
     ]
     .into_iter()
     .flat_map(|b| b.iter())

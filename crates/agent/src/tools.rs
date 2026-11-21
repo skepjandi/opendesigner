@@ -161,9 +161,9 @@ fn core_definitions() -> Vec<Value> {
              assets), motion (timings, easing, recipes), 3d (devices in 3D, captures from a \
              simulator, moves), formats (sizes and \
              safe zones), logo (identity design), blocks (the catalog of ready-made titles, overlays, backgrounds, \
-             charts and motion, and when to use one). Call it with no topic for the list; read the ones that apply \
+             charts and motion, and when to use one), characters (flat-vector characters, bubbles and animated props). Call it with no topic for the list; read the ones that apply \
              before you build, not after.",
-            json!({"topic": {"type": "string", "enum": ["design", "style", "video", "motion", "3d", "formats", "logo", "blocks"]}}),
+            json!({"topic": {"type": "string", "enum": ["design", "style", "video", "motion", "3d", "formats", "logo", "blocks", "characters"]}}),
             &[],
             true,
         ),

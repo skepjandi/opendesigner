@@ -260,6 +260,17 @@ fn box_of(
     Ok(b)
 }
 
+/// The groups below `node` (a rig's head, eyes, pupils), by name, so they can be animated further.
+fn nested_groups(node: &Node, out: &mut Vec<(String, NodeId)>) {
+    for c in &node.children {
+        if c.kind == NodeKind::Group {
+            let short = c.name.rsplit('/').next().unwrap_or(&c.name);
+            out.push((short.to_string(), c.id.clone()));
+        }
+        nested_groups(c, out);
+    }
+}
+
 fn index_parts(node: &Node, out: &mut HashMap<String, NodeId>) {
     out.insert(node.name.clone(), node.id.clone());
     for c in &node.children {
@@ -314,7 +325,12 @@ fn move_ops(
                 scratch, video, &node, request,
             )?)
         }
-        Move::Keys { target, prop, keys } => {
+        Move::Keys {
+            target,
+            prop,
+            keys,
+            repeat,
+        } => {
             let node = target_id(target, root, names)?;
             Ok(vec![Operation::Animate {
                 video: video.clone(),
@@ -328,7 +344,7 @@ fn move_ops(
                         ease,
                     })
                     .collect(),
-                repeat: od_core::Repeat::Once,
+                repeat: *repeat,
             }])
         }
     }
@@ -444,6 +460,9 @@ pub fn plan(doc: &Document, req: &Request) -> Result<Plan, BlockError> {
             let short = c.name.rsplit('/').next().unwrap_or(&c.name);
             (short.to_string(), c.id.clone())
         }));
+        for c in &made.children {
+            nested_groups(c, &mut parts);
+        }
     }
 
     let animate = video.is_some() && !moves.is_empty();

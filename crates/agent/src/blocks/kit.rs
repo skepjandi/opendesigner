@@ -4,7 +4,7 @@
 
 use std::collections::BTreeMap;
 
-use od_core::animation::{AnimProp, Preset};
+use od_core::animation::{AnimProp, Preset, Repeat};
 use od_core::geometry::Rect;
 use od_core::{
     Document, Ease, ImageFit, NewNode, Node, NodeId, NodeKind, Paint, Rgba, Stroke, TextAlign,
@@ -104,6 +104,8 @@ pub enum Move {
         target: Target,
         prop: AnimProp,
         keys: Vec<(u64, f64, Ease)>,
+        /// What the track does after its last key; a cycle runs from the first key to the last.
+        repeat: Repeat,
     },
 }
 
@@ -645,10 +647,22 @@ impl<'a> Kit<'a> {
     }
 
     pub fn keys(&mut self, target: Target, prop: AnimProp, keys: &[(u64, f64, Ease)]) {
+        self.track(target, prop, keys, Repeat::Once);
+    }
+
+    /// Keys that cycle (`Loop`, `Pingpong`) or play once.
+    pub fn track(
+        &mut self,
+        target: Target,
+        prop: AnimProp,
+        keys: &[(u64, f64, Ease)],
+        repeat: Repeat,
+    ) {
         self.moves.push(Move::Keys {
             target,
             prop,
             keys: keys.to_vec(),
+            repeat,
         });
     }
 

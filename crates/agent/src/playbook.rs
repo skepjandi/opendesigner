@@ -84,6 +84,11 @@ pub const TOPICS: &[(&str, &str, &str)] = &[
         "the block catalog: ready-made titles, overlays, backgrounds, charts and motion, and when to use one",
         include_str!("../skill/blocks-playbook.md"),
     ),
+    (
+        "characters",
+        "flat-vector characters, speech and thought bubbles and animated props (rocket, bulb, atom, planet, tree, house, laptop, gear, cell, DNA): the rig, actions, timing",
+        include_str!("../skill/characters-playbook.md"),
+    ),
 ];
 
 pub fn topic(name: &str) -> Option<&'static str> {
