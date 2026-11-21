@@ -218,7 +218,7 @@ impl Paint {
                 stops: checked_stops(stops, tokens)?,
             },
             Paint::Radial { cx, cy, r, stops } => {
-                if !(*r > 0.0) {
+                if r.is_nan() || *r <= 0.0 {
                     return Err(gradient_error("radius r must be above 0"));
                 }
                 Paint::Radial {

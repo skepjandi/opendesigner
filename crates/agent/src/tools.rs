@@ -323,7 +323,7 @@ fn core_definitions() -> Vec<Value> {
              {op:'animate', video, node, prop, keys:[{at_ms, value, ease?}]} (keyframes one number of a node over the video's time, \
              at_ms from the start of the video, strictly increasing; the value holds before the first key and after the last; \
              prop one of x, y, width, height, opacity, corner_radius, rotate_x, rotate_y, rotate_z, zoom, fov, light_angle, shadow, glare, \
-             screen_scroll, trim_start, trim_end, stroke_width (the node needs a stroke), fill_color (keys take value '#rrggbb[aa]', mixed in sRGB; the node \
+             screen_scroll, trim_start, trim_end, stroke_width (the node needs a stroke), fill_color (key value '#rrggbb[aa]', mixed in sRGB and listed back as the number 0xRRGGBBAA; the node \
              needs a fill), or on an image node grade_exposure, grade_contrast, grade_saturation, grade_temperature, grade_tint, grade_vignette, grade_blur; keys:[] removes it; animate_preset writes these for you). Eases: linear, ease_in, ease_out, ease_in_out, \
              back (overshoots) or spring (overshoots and settles). Colors are '#rrggbb', '#rrggbbaa' or \
              '{token.name}'. Template variables (see list_variables): {op:'declare_variable', variable:{id, kind, label, description?, \

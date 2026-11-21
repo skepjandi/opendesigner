@@ -445,6 +445,16 @@ fn drawings_that_expand_into_too_much_are_refused() {
     );
     assert!(refused(&bomb).contains("<use>"));
 
+    let rects: String = (0..400)
+        .map(|_| r#"<rect width="1" height="1"/>"#)
+        .collect();
+    let uses: String = (0..400).map(|_| r##"<use href="#a"/>"##).collect();
+    let fan = format!(r#"{HEAD}<defs><g id="a">{rects}</g></defs>{uses}</svg>"#);
+    assert!(
+        refused(&fan).contains("2000"),
+        "400 uses of 400 shapes are 160,000 shapes"
+    );
+
     let big = " ".repeat(svg_vector::MAX_SVG_BYTES + 1);
     assert!(refused(&format!("{HEAD}{big}</svg>")).contains("larger"));
 }

@@ -7,6 +7,8 @@
 //! transform flattened into the shapes. The result is one `NewNode` tree, so a single `create`
 //! operation brings it in and a single undo takes it out.
 
+use std::collections::HashMap;
+
 use od_core::path::{Path, Seg};
 use od_core::{FillRule, LineCap, LineJoin, NewNode, NodeKind, Paint, Rgba, Stop, Stroke};
 use resvg::usvg::{self, roxmltree};
@@ -72,11 +74,11 @@ pub fn import(svg: &str, options: &Options) -> Result<Imported, ImportError> {
         .map_err(|e| ImportError(format!("not a drawable SVG: {e}")))?;
     let size = tree.size();
     let (sw, sh) = (f64::from(size.width()), f64::from(size.height()));
-    if !(sw > 0.0 && sh > 0.0) {
+    if sw.is_nan() || sh.is_nan() || sw <= 0.0 || sh <= 0.0 {
         return refuse("the SVG has no size; give it a viewBox");
     }
     let scale = options.width.map_or(1.0, |w| w / sw);
-    if !(scale.is_finite() && scale > 0.0) {
+    if !scale.is_finite() || scale <= 0.0 {
         return refuse("width must be a positive number");
     }
     let mut converter = Converter::new(scale);
@@ -168,6 +170,10 @@ fn audit(svg: &str) -> Result<Audit, ImportError> {
             .to_string(),
         texts: 0,
     };
+    let by_id: HashMap<&str, roxmltree::Node> = doc
+        .descendants()
+        .filter_map(|n| Some((n.attribute("id")?, n)))
+        .collect();
     let mut shapes = 0;
     for node in doc.descendants().filter(roxmltree::Node::is_element) {
         let tag = node.tag_name().name().to_ascii_lowercase();
@@ -184,7 +190,7 @@ fn audit(svg: &str) -> Result<Audit, ImportError> {
             }
             "text" => audit.texts += 1,
             "style" => check_style(&node)?,
-            "use" => check_use(&doc, &node)?,
+            "use" => shapes += 1 + check_use(&by_id, &node)?,
             t if SHAPE_ELEMENTS.contains(&t) => shapes += 1,
             _ => {}
         }
@@ -248,28 +254,30 @@ fn check_style(node: &roxmltree::Node) -> Result<(), ImportError> {
 }
 
 /// A `<use>` may not point at something that itself uses: such chains multiply into millions of
-/// shapes from a few bytes.
-fn check_use(doc: &roxmltree::Document, node: &roxmltree::Node) -> Result<(), ImportError> {
+/// shapes from a few bytes. Answers how many shapes this use draws.
+fn check_use(
+    by_id: &HashMap<&str, roxmltree::Node>,
+    node: &roxmltree::Node,
+) -> Result<usize, ImportError> {
     let target = node
         .attribute("href")
         .or_else(|| node.attribute(("http://www.w3.org/1999/xlink", "href")))
-        .and_then(|h| h.strip_prefix('#'));
-    let Some(id) = target else {
-        return Ok(());
+        .and_then(|h| h.strip_prefix('#'))
+        .and_then(|id| by_id.get(id));
+    let Some(target) = target else {
+        return Ok(0);
     };
-    let nested = doc
-        .descendants()
-        .find(|n| n.attribute("id") == Some(id))
-        .is_some_and(|t| {
-            t.descendants()
-                .any(|d| d.is_element() && d.tag_name().name() == "use")
-        });
-    if nested {
-        return refuse(
-            "the SVG has <use> elements that refer to other <use> elements; not imported",
-        );
+    let mut drawn = 0;
+    for d in target.descendants().filter(roxmltree::Node::is_element) {
+        let tag = d.tag_name().name().to_ascii_lowercase();
+        if tag == "use" {
+            return refuse(
+                "the SVG has <use> elements that refer to other <use> elements; not imported",
+            );
+        }
+        drawn += usize::from(SHAPE_ELEMENTS.contains(&tag.as_str()));
     }
-    Ok(())
+    Ok(drawn)
 }
 
 /// A converted node and the box it covers, in the drawing's coordinates, until it is placed.
@@ -521,7 +529,7 @@ impl Converter {
         let (w, h) = frame.size;
         let (cos, sin) = (dx / length, dy / length);
         let reach = (w * cos).abs() / 2.0 + (h * sin).abs() / 2.0;
-        if !(length > 1e-9 && reach > 1e-9) {
+        if length.is_nan() || length <= 1e-9 || reach <= 1e-9 {
             return stops.last().map(|s| s.color.clone());
         }
         let (center, a) = ((w / 2.0, h / 2.0), 2.0 * reach / length);
@@ -543,7 +551,7 @@ impl Converter {
         let (rx, ry) = (dist(c, to_box(cx + r, cy)), dist(c, to_box(cx, cy + r)));
         let radius = (rx + ry) / 2.0;
         let longer = frame.size.0.max(frame.size.1);
-        if !(radius > 1e-9 && longer > 1e-9) {
+        if radius.is_nan() || radius <= 1e-9 || longer <= 1e-9 {
             return stops.last().map(|s| s.color.clone());
         }
         if (rx - ry).abs() > 0.15 * radius {

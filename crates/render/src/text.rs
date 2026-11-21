@@ -172,6 +172,54 @@ pub(crate) fn measure(node: &Node) -> Option<(f32, f32)> {
     }))
 }
 
+/// Draws `node`'s text under `transform`. Where the map only scales and translates the glyphs
+/// go straight onto the pixmap; where it turns, flips or stretches unevenly the text is drawn
+/// upright on a scratch picture and that picture is placed.
+pub(crate) fn draw_placed(
+    pixmap: &mut Pixmap,
+    mask: Option<&Mask>,
+    node: &Node,
+    transform: Transform,
+    color: Rgba,
+    opacity: f32,
+) {
+    if transform.kx == 0.0
+        && transform.ky == 0.0
+        && transform.sx > 0.0
+        && transform.sx == transform.sy
+    {
+        return draw_text(pixmap, mask, node, transform, color, opacity);
+    }
+    let Some((text_w, text_h)) = measure(node) else {
+        return;
+    };
+    let pad = (node.font_size.unwrap_or(16.0) as f32 * 0.5).ceil() + 2.0;
+    let (box_w, box_h) = (
+        (node.width as f32).max(text_w) + 2.0 * pad,
+        (node.height as f32).max(text_h) + 2.0 * pad,
+    );
+    let wanted = crate::place::scale_of(transform).max(0.01);
+    let s = wanted.min(MAX_SCRATCH / box_w.max(box_h));
+    let (w, h) = ((box_w * s).ceil() as u32, (box_h * s).ceil() as u32);
+    let Some(mut scratch) = Pixmap::new(w.max(1), h.max(1)) else {
+        return;
+    };
+    let upright = Transform::from_row(s, 0.0, 0.0, s, pad * s, pad * s);
+    draw_text(&mut scratch, None, node, upright, color, 1.0);
+    let paint = tiny_skia::PixmapPaint {
+        opacity,
+        quality: tiny_skia::FilterQuality::Bilinear,
+        ..tiny_skia::PixmapPaint::default()
+    };
+    let placed = transform
+        .pre_scale(1.0 / s, 1.0 / s)
+        .pre_translate(-pad * s, -pad * s);
+    pixmap.draw_pixmap(0, 0, scratch.as_ref(), &paint, placed, mask);
+}
+
+/// The longest side, in pixels, of the scratch picture turned text is drawn on.
+const MAX_SCRATCH: f32 = 4096.0;
+
 /// Draws `node`'s text with its top-left corner at the origin of `transform`.
 pub(crate) fn draw_text(
     pixmap: &mut Pixmap,

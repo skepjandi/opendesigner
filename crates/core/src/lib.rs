@@ -27,13 +27,14 @@ pub mod project;
 mod snap;
 pub mod speed;
 pub mod timebase;
+pub mod transform;
 pub mod variables;
 pub mod vector;
 pub mod video;
 pub mod view;
 pub mod workspace;
 
-pub use animation::{AnimProp, Animation, Key, Preset, PresetRequest};
+pub use animation::{AnimProp, Animation, Key, Preset, PresetRequest, Repeat};
 pub use annotations::{Annotation, AnnotationStatus, AnnotationTarget, Annotations};
 pub use audio::{Duck, NewTrack, SoundTrack, TrackPatch, TrackRole};
 pub use captions::{CaptionPosition, CaptionPreset, CaptionStyle, Captions, Cue, NewCue, Word};
@@ -47,6 +48,7 @@ pub use ops::{AppliedOp, NewNode, Operation, Property};
 pub use paint::{Paint, Rgba, Stop};
 pub use path::Path;
 pub use speed::SpeedKey;
+pub use transform::{Affine, Camera, Shadow};
 pub use variables::{Binding, Portrays, VarValue, Variable, VariableKind};
 pub use vector::{FillRule, LineCap, LineJoin, ViewBox};
 pub use video::{

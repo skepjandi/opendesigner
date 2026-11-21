@@ -4,7 +4,7 @@
 
 use od_core::{
     Actor, AnimProp, Document, Ease, Key, LineCap, NewNode, NodeId, NodeKind, Operation, Paint,
-    Session, Stop, Stroke,
+    Property, Session, Stop, Stroke,
 };
 use od_render::{Rendered, render_frame};
 
@@ -478,6 +478,7 @@ fn animated_line() -> (Session, NodeId) {
                 video: video.clone(),
                 node: node.clone(),
                 prop: AnimProp::TrimEnd,
+                repeat: od_core::animation::Repeat::Once,
                 keys: vec![
                     Key {
                         at_ms: 0,
@@ -525,5 +526,139 @@ fn animating_trim_end_draws_the_stroke_on_over_time() {
     assert!(
         near(a, RED, 1) && near(b, RED, 1) && near(c, RED, 1),
         "t=end all drawn"
+    );
+}
+
+fn bar(sc: &mut Scene) -> NodeId {
+    let mut node = path("M0 0 H80 V20 H0 Z", 10.0, 40.0);
+    node.fill = solid("#ff0000");
+    sc.add(node)
+}
+
+fn turn(sc: &mut Scene, id: &NodeId, prop: Property) {
+    sc.s.apply(
+        Actor::User,
+        None,
+        &[Operation::Set {
+            id: id.clone(),
+            prop,
+        }],
+    )
+    .unwrap();
+}
+
+#[test]
+fn a_path_node_turns_about_its_center_with_its_rotation() {
+    let mut sc = scene(100.0, 100.0);
+    let id = bar(&mut sc);
+    let upright = sc.render(1.0);
+    assert!(near(px(&upright, 20, 50), RED, 1) && near(px(&upright, 50, 15), WHITE, 1));
+    turn(&mut sc, &id, Property::Rotation(90.0));
+    let turned = sc.render(1.0);
+    assert!(near(px(&turned, 50, 15), RED, 1), "the bar now stands up");
+    assert!(near(px(&turned, 20, 50), WHITE, 1));
+    assert!(near(px(&turned, 50, 50), RED, 1), "about its center");
+}
+
+#[test]
+fn a_path_node_scales_and_flips_about_its_pivot() {
+    let mut sc = scene(200.0, 100.0);
+    let id = bar(&mut sc);
+    turn(&mut sc, &id, Property::ScaleX(2.0));
+    let wide = sc.render(1.0);
+    assert!(
+        near(px(&wide, 5, 50), RED, 1),
+        "grown to the left of its box"
+    );
+    assert!(near(px(&wide, 105, 50), RED, 1), "and to the right");
+    assert!(near(px(&wide, 150, 50), WHITE, 1));
+    turn(&mut sc, &id, Property::ScaleX(-1.0));
+    assert!(
+        near(px(&sc.render(1.0), 20, 50), RED, 1),
+        "a flip about the center keeps a symmetric bar in place"
+    );
+}
+
+#[test]
+fn a_gradient_and_a_dashed_stroke_turn_with_their_shape() {
+    let mut sc = scene(100.0, 100.0);
+    let mut node = path("M0 0 H80 V20 H0 Z", 10.0, 40.0);
+    node.fill = Some(Paint::Linear {
+        angle: 0.0,
+        stops: stops(&[(0.0, "#ff0000"), (1.0, "#0000ff")]),
+    });
+    let id = sc.add(node);
+    turn(&mut sc, &id, Property::Rotation(90.0));
+    let r = sc.render(1.0);
+    assert!(
+        near(px(&r, 50, 12), RED, 24),
+        "the red end is on top now: {:?}",
+        px(&r, 50, 12)
+    );
+    assert!(
+        near(px(&r, 50, 88), [0, 0, 255], 24),
+        "{:?}",
+        px(&r, 50, 88)
+    );
+
+    let mut sc = scene(100.0, 100.0);
+    let mut line = path("M0 0 H80", 10.0, 50.0);
+    let mut stroke = Stroke::new(Paint::parse("#ff0000").unwrap(), 6.0);
+    stroke.dash = vec![10.0, 10.0];
+    stroke.trim_end = 0.5;
+    line.stroke = Some(stroke);
+    let id = sc.add(line);
+    turn(&mut sc, &id, Property::Rotation(90.0));
+    let r = sc.render(1.0);
+    assert!(
+        near(px(&r, 50, 15), RED, 1),
+        "the first dash sits at the top now"
+    );
+    assert!(near(px(&r, 50, 25), WHITE, 1), "then its gap");
+    assert!(near(px(&r, 50, 35), RED, 1), "then the second dash");
+    assert!(near(px(&r, 50, 80), WHITE, 1), "the trimmed half is gone");
+    assert!(
+        near(px(&r, 20, 50), WHITE, 1),
+        "nothing is left where the line was"
+    );
+}
+
+#[test]
+fn a_group_of_paths_turns_as_one() {
+    let mut sc = scene(100.0, 100.0);
+    let group = sc.add(NewNode::new(NodeKind::Group));
+    for (x, color) in [(10.0, "#ff0000"), (50.0, "#0000ff")] {
+        let mut n = path("M0 0 H40 V20 H0 Z", x, 40.0);
+        n.fill = solid(color);
+        create(&mut sc.s, &group, n);
+    }
+    turn(&mut sc, &group, Property::Rotation(90.0));
+    let r = sc.render(1.0);
+    assert!(
+        near(px(&r, 50, 20), RED, 1),
+        "the left bar went to the top: {:?}",
+        px(&r, 50, 20)
+    );
+    assert!(
+        near(px(&r, 50, 80), [0, 0, 255], 1),
+        "the right bar went to the bottom: {:?}",
+        px(&r, 50, 80)
+    );
+    assert!(near(px(&r, 20, 50), WHITE, 1));
+}
+
+#[test]
+fn a_turned_path_is_hit_where_it_is_drawn() {
+    let mut sc = scene(100.0, 100.0);
+    let id = bar(&mut sc);
+    turn(&mut sc, &id, Property::Rotation(90.0));
+    let doc = sc.s.document();
+    assert_eq!(
+        od_core::geometry::hit_test(doc, &sc.frame, 50.0, 15.0),
+        Some(id.clone())
+    );
+    assert_eq!(
+        od_core::geometry::hit_test(doc, &sc.frame, 20.0, 50.0),
+        Some(sc.frame.clone())
     );
 }
