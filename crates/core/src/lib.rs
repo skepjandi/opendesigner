@@ -21,12 +21,14 @@ pub mod media;
 pub mod model;
 pub mod ops;
 pub mod paint;
+pub mod path;
 pub mod pauses;
 pub mod project;
 mod snap;
 pub mod speed;
 pub mod timebase;
 pub mod variables;
+pub mod vector;
 pub mod video;
 pub mod view;
 pub mod workspace;
@@ -42,9 +44,11 @@ pub use grade::{Grade, GradeParam, Look};
 pub use history::{Actor, Checkpoint, Session, Transaction, TransactionKind, TxReceipt};
 pub use model::{Document, ImageFit, Node, NodeId, NodeKind, Page, Stroke, TextAlign};
 pub use ops::{AppliedOp, NewNode, Operation, Property};
-pub use paint::{Paint, Rgba};
+pub use paint::{Paint, Rgba, Stop};
+pub use path::Path;
 pub use speed::SpeedKey;
 pub use variables::{Binding, Portrays, VarValue, Variable, VariableKind};
+pub use vector::{FillRule, LineCap, LineJoin, ViewBox};
 pub use video::{
     AudioTrack, Clip, ClipProperty, ClipSource, Ease, Entrance, Footage, Motion, Overlay,
     OverlayProperty, Transition, TransitionKind, Video, VideoProperty,

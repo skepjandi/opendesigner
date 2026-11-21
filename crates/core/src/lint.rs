@@ -196,6 +196,24 @@ pub const RULES: &[Rule] = &[
         Severity::Warn,
         "Two variables are bound to the same node property; the last one set wins.",
     ),
+    rule(
+        "OD070",
+        "path-invisible",
+        Severity::Warn,
+        "A path has no fill and no visible stroke, so nothing of it is drawn.",
+    ),
+    rule(
+        "OD071",
+        "gradient-stops-unsorted",
+        Severity::Warn,
+        "A gradient's stops are not in increasing offset order; they are drawn sorted, which is rarely what was meant.",
+    ),
+    rule(
+        "OD072",
+        "trim-hides-stroke",
+        Severity::Warn,
+        "A stroke's trim start and end are equal, so none of the outline is drawn and nothing animates it.",
+    ),
 ];
 
 pub fn rule_for(code: &str) -> Option<&'static Rule> {
@@ -356,6 +374,7 @@ impl Linter<'_> {
         }
         let abs = (origin.0 + n.x, origin.1 + n.y);
         self.paint_tokens(n, frame);
+        self.stroke_and_gradients(n, frame);
         if let Some(f) = frame {
             self.bounds(n, abs, f);
         }
@@ -365,6 +384,7 @@ impl Linter<'_> {
             NodeKind::Rect | NodeKind::Ellipse => self.shape(n, abs),
             NodeKind::Frame => self.frame(n, abs, frame),
             NodeKind::Group => self.children(n, abs, frame),
+            NodeKind::Path => self.vector(n, frame),
         }
     }
 
@@ -454,13 +474,62 @@ impl Linter<'_> {
         }
     }
 
+    fn stroke_and_gradients(&mut self, n: &Node, frame: Option<&FrameBox>) {
+        let at = At::node(&n.id, frame.map(|f| &f.id));
+        let paints = n.fill.iter().chain(n.stroke.iter().map(|s| &s.paint));
+        let unsorted = paints
+            .filter_map(Paint::stops)
+            .any(|stops| stops.windows(2).any(|w| w[0].offset > w[1].offset));
+        if unsorted {
+            self.add(
+                "OD071",
+                at.clone(),
+                format!("{} has a gradient whose stops are out of order", n.id),
+                "Order the stops by increasing offset.",
+            );
+        }
+        let hidden = n.stroke.as_ref().is_some_and(|s| {
+            s.width > 0.0
+                && (s.trim_start - s.trim_end).abs() < f64::EPSILON
+                && !self.trim_animated(&n.id)
+        });
+        if hidden {
+            self.add(
+                "OD072",
+                at,
+                format!("the trim of {}'s stroke leaves none of the outline", n.id),
+                "Set trim_start and trim_end apart (0 and 1 draw it all), or animate trim_end to draw it on.",
+            );
+        }
+    }
+
+    fn trim_animated(&self, id: &NodeId) -> bool {
+        self.doc.videos.iter().any(|v| {
+            v.animations
+                .iter()
+                .any(|a| &a.node == id && matches!(a.prop, AnimProp::TrimStart | AnimProp::TrimEnd))
+        })
+    }
+
+    fn vector(&mut self, n: &Node, frame: Option<&FrameBox>) {
+        let drawn_stroke = n.stroke.as_ref().is_some_and(|s| s.width > 0.0);
+        if n.fill.is_none() && !drawn_stroke {
+            self.add(
+                "OD070",
+                At::node(&n.id, frame.map(|f| &f.id)),
+                format!(
+                    "path {} has no fill and no stroke, so it is invisible",
+                    n.id
+                ),
+                "Give it a fill, or a stroke with a width above 0.",
+            );
+        }
+    }
+
     fn paint_tokens(&mut self, n: &Node, frame: Option<&FrameBox>) {
         let paints = n.fill.iter().chain(n.stroke.iter().map(|s| &s.paint));
         let missing: Vec<String> = paints
-            .filter_map(|p| match p {
-                Paint::Token(t) if !self.doc.tokens.contains_key(t) => Some(t.clone()),
-                _ => None,
-            })
+            .flat_map(|p| p.undefined_tokens(&self.doc.tokens))
             .collect();
         for token in missing {
             self.add(

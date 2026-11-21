@@ -367,6 +367,9 @@ fn new_node_from(node: &Node) -> NewNode {
         image: node.image.clone(),
         image_fit: node.image_fit,
         device3d: node.device3d.clone(),
+        path: node.path.clone(),
+        view_box: node.view_box,
+        fill_rule: node.fill_rule,
         children: node.children.iter().map(new_node_from).collect(),
     }
 }

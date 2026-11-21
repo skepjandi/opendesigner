@@ -100,6 +100,9 @@ pub fn bounds_in_frame(doc: &Document, frame: &NodeId, id: &NodeId) -> Option<Re
 }
 
 fn inside(node: &Node, x: f64, y: f64) -> bool {
+    if node.kind == NodeKind::Path {
+        return crate::vector::hits(node, x, y);
+    }
     if x < 0.0 || y < 0.0 || x > node.width || y > node.height {
         return false;
     }
