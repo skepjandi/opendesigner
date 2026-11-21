@@ -99,6 +99,11 @@ pub const TOPICS: &[(&str, &str, &str)] = &[
         "flat-vector scenes: layered scenery blocks, parallax, idle loops, scene moves and camera presets",
         include_str!("../skill/scenery-playbook.md"),
     ),
+    (
+        "sketch",
+        "hand-made looks: sketch, boil, watercolor_wash, paper_grain, flow_strokes, marker_underline, scribble_circle; when to use them, how to combine them, palette and node budgets",
+        include_str!("../skill/sketch-playbook.md"),
+    ),
 ];
 
 pub fn topic(name: &str) -> Option<&'static str> {
