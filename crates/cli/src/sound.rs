@@ -133,7 +133,7 @@ pub enum SoundAction {
 #[derive(Subcommand)]
 pub enum CaptionsAction {
     /// Replace the captions with a transcript: an SRT or WebVTT file, or word timings as JSON.
-    /// OpenDesigner does no speech recognition; the transcript comes from your own speech tool.
+    /// OpenDesigner has no speech recognition built in; the transcript comes from your own speech tool (or `opendesigner transcribe`).
     Import {
         #[command(flatten)]
         target: Target,

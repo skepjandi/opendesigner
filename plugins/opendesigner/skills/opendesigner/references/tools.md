@@ -659,7 +659,7 @@ Arguments:
 
 ## `import_captions`
 
-Set a video's captions from a transcript the user (or their speech MCP server) produced. format `srt` or `vtt` (WebVTT inline <00:00:01.500> word times become word timings), or `words_json`: a list of {text|word, start_ms|start (seconds), end_ms|end}, which is what a speech-to-text server gives, grouped into cues at sentence ends and pauses. This tool does not recognize speech: OpenDesigner has no speech-to-text built in, so a transcript must come from the user's own speech server. Replaces every cue; keeps the style. `offset_ms` shifts all times; cues outside the video are dropped and counted. Captions are drawn in the preview and burned into export_video.
+Set a video's captions from a transcript the user (or their speech MCP server) produced. format `srt` or `vtt` (WebVTT inline <00:00:01.500> word times become word timings), or `words_json`: a list of {text|word, start_ms|start (seconds), end_ms|end}, which is what a speech-to-text server gives, grouped into cues at sentence ends and pauses. This tool does not recognize speech: OpenDesigner has no speech-to-text built in, so a transcript must come from the user's own speech server (or `transcribe`, which runs the user's whisper). Replaces every cue; keeps the style. `offset_ms` shifts all times; cues outside the video are dropped and counted. Captions are drawn in the preview and burned into export_video.
 
 Arguments:
 
@@ -865,6 +865,42 @@ Arguments:
 - `samples` (integer) How many moments to render (default 12).
 - `video` (string) Id of a video from list_videos; defaults to the first.
 
+## `get_capabilities`
+
+Which optional programs the user has installed, with their versions: ffmpeg (video export, pauses, waveforms), a speech-to-text program (whisper-cli or whisper, for transcribe) and rembg (for remove_background), each with the exact install hint when it is missing. Read-only: it runs only `--version`. Call it before transcribe, remove_background or export_video. If something you need is missing, ask the user to install it instead of trying. OpenDesigner never installs or downloads these.
+
+Read-only.
+
+No arguments.
+
+## `transcribe`
+
+Speech to text, on the user's computer: runs the user's whisper program over a media/ audio or video file (`file`) or over a video's own sound mix (`video`) and returns the words with their times in ms (the same shape import_captions reads as words_json), the plain text, and gaps between words (like detect_pauses). With `apply: true` the words also become the video's captions with word highlighting, as one undoable change (`video` is then required; with `file` add `offset_ms` where the file starts on the timeline). Nothing is uploaded by OpenDesigner. Slow: minutes for long speech. Call get_capabilities first. When a program is missing, do not try the tool: tell the user what to install (the report has the exact command) and carry on without it. whisper-cli (whisper.cpp) needs a model file: the user sets OPENDESIGNER_WHISPER_MODEL, or you pass `model` as a plain file name the user placed in the app's models folder or in media/; the Python whisper takes a model name such as base or small.en.
+
+Arguments:
+
+- `apply` (boolean) Also set the words as the video's captions (replaces its cues).
+- `file` (string) A media/ audio (.mp3 .wav .m4a .aac .ogg) or footage (.mp4 .mov .m4v) file. Give this or `video`.
+- `language` (string) `auto` (default) or a two- or three-letter code such as en, de, es.
+- `min_pause_ms` (integer) The shortest gap between words reported as a pause (default 500).
+- `model` (string) whisper-cli: a plain model file name in the app's models folder or media/. whisper: a model name (base, small.en, large-v3). Default: OPENDESIGNER_WHISPER_MODEL, or base for whisper.
+- `offset_ms` (integer) With file and apply: where the file starts on the video's timeline (default 0).
+- `summary` (string) 
+- `timeout_s` (integer) Stop the program after this long (default 300).
+- `turn` (string) 
+- `video` (string) Id of a video from list_videos: its sound mix is transcribed, so the times are timeline times. Required with apply.
+
+## `remove_background`
+
+Cut the subject out of an image with the user's rembg, on their computer: reads a media/ image (png, jpg, webp) and writes media/<name>-cutout.png with a transparent background (or, with `mask_only`, media/<name>-mask.png, the black-and-white mask), plus a .rembg.json sidecar naming the source, tool and model. Nothing is overwritten and the source stays as it is. The result is an ordinary image asset: place it with an image node. Nothing is uploaded by OpenDesigner. Call get_capabilities first. When a program is missing, do not try the tool: tell the user what to install (the report has the exact command) and carry on without it.
+
+Arguments:
+
+- `file` (string, required) media/<name> of a png, jpg or webp.
+- `mask_only` (boolean) Write only the mask.
+- `model` (string) A rembg model name such as u2net, isnet-general-use or birefnet-general (the user's rembg may download it the first time). Default: rembg's own.
+- `timeout_s` (integer) Stop the program after this long (default 180).
+
 ## `show_preview`
 
 Show the user the end product, in the Preview panel: the clean frame, video or image they asked for, without editor handles. You decide what that is: call it as soon as there is a deliverable (the hero frame, the finished video) and again whenever you replace it with a better one. The user can look at something else; their choice is theirs and your call stays the default. The canvas is for working; this is for the result.
@@ -1026,8 +1062,11 @@ shows them all. Then set the track. For more than one (music, a voice-over, effe
 `add_sound_track` (role `music`, `voice` or `sfx`, up to 8; start, trim, gain, fades, pan; music can
 `duck` under the voice), `set_sound_track` and `remove_sound_track`. Captions are data: bring a
 transcript from the user's own speech server with `import_captions` (`srt`, `vtt`, `words_json`;
-OpenDesigner does no speech recognition), or estimate from a script with `captions_from_script`,
-then `set_caption_style`. `detect_pauses`, `remove_pauses` and `get_waveform` need ffmpeg. A Freesound sound keeps its
+OpenDesigner has no speech recognition built in), run the user's own whisper with `transcribe` (word
+timings, `apply: true` sets the captions), or estimate from a script with `captions_from_script`,
+then `set_caption_style`. Programs the user installs (ffmpeg, whisper, rembg for `remove_background`)
+may be missing: call `get_capabilities` before using them and, when one is missing, ask the user to
+install it (the report has the command) instead of failing mid-task. `detect_pauses`, `remove_pauses` and `get_waveform` need ffmpeg. A Freesound sound keeps its
 author's license: show the attribution the tool gives you (title, author, license, link) wherever
 the sound is used, and prefer CC0.
 
