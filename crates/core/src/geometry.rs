@@ -5,6 +5,7 @@
 use serde::Serialize;
 
 use crate::model::{Document, Node, NodeId, NodeKind};
+use crate::transform::Affine;
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 pub struct Rect {
@@ -37,24 +38,37 @@ impl Rect {
     }
 }
 
-/// Bounds of `node` with its position taken as `(ox + node.x, oy + node.y)`. A group has no size
-/// of its own, so its bounds are the union of its visible children; an empty group has none.
-fn bounds_at(node: &Node, ox: f64, oy: f64) -> Option<Rect> {
-    let (x, y) = (ox + node.x, oy + node.y);
-    if node.kind == NodeKind::Group {
+/// Bounds of `node` where `parent` maps its parent's coordinates (an upright rectangle around
+/// the node's box after its rotation and scale). A group that is not a clip has no size of its
+/// own, so its bounds are the union of its visible children; an empty group has none.
+fn bounds_at(node: &Node, parent: Affine) -> Option<Rect> {
+    let here = parent.after(node.local_affine());
+    if node.kind == NodeKind::Group && !(node.clip && node.layout_box().is_some()) {
         return node
             .children
             .iter()
             .filter(|c| c.visible)
-            .filter_map(|c| bounds_at(c, x, y))
+            .filter_map(|c| bounds_at(c, here))
             .reduce(Rect::union);
     }
-    Some(Rect {
-        x,
-        y,
-        width: node.width,
-        height: node.height,
-    })
+    let own = node.layout_box()?;
+    Some(here.bounds_of(Rect {
+        x: 0.0,
+        y: 0.0,
+        ..own
+    }))
+}
+
+/// Where the coordinates of the node at `path` below `from` sit in `from`'s: the product of the
+/// local maps of the nodes between them, `from` itself and the node excluded.
+fn affine_below(from: &Node, path: &[usize]) -> Option<Affine> {
+    let mut node = from;
+    let mut affine = Affine::IDENTITY;
+    for &i in path.split_last().map_or(&[][..], |(_, above)| above) {
+        node = node.children.get(i)?;
+        affine = affine.after(node.local_affine());
+    }
+    Some(affine)
 }
 
 /// The offset of a node's parent origin in page coordinates: the sum of its ancestors' positions
@@ -82,21 +96,31 @@ pub(crate) fn parent_origin(doc: &Document, id: &NodeId) -> Option<(f64, f64)> {
 /// Bounds of a node in its page's coordinates.
 pub fn page_bounds(doc: &Document, id: &NodeId) -> Option<Rect> {
     let node = doc.node(id)?;
-    let (ox, oy) = parent_origin(doc, id)?;
-    bounds_at(node, ox, oy)
+    let loc = doc.locate(id)?;
+    let root = &doc.pages.get(loc.page)?.root;
+    bounds_at(node, affine_below(root, &loc.path)?)
 }
 
 /// Bounds of `id` relative to the origin of `frame`, or `None` when `id` is not that frame or
 /// inside it.
 pub fn bounds_in_frame(doc: &Document, frame: &NodeId, id: &NodeId) -> Option<Rect> {
-    let f = page_bounds(doc, frame)?;
+    let frame_node = doc.node(frame)?;
     let loc_f = doc.locate(frame)?;
     let loc_n = doc.locate(id)?;
     if loc_f.page != loc_n.page || !loc_n.path.starts_with(&loc_f.path) {
         return None;
     }
-    let b = page_bounds(doc, id)?;
-    Some(b.translate(-f.x, -f.y))
+    if frame == id {
+        return Some(Rect {
+            x: 0.0,
+            y: 0.0,
+            width: frame_node.width,
+            height: frame_node.height,
+        });
+    }
+    let node = doc.node(id)?;
+    let below = loc_n.path.get(loc_f.path.len()..)?;
+    bounds_at(node, affine_below(frame_node, below)?)
 }
 
 fn inside(node: &Node, x: f64, y: f64) -> bool {
@@ -111,13 +135,28 @@ fn inside(node: &Node, x: f64, y: f64) -> bool {
     true
 }
 
+/// A point given in `node`'s parent coordinates, in the node's own (before its rotation and
+/// scale); `None` when the node is scaled flat.
+fn to_local(node: &Node, x: f64, y: f64) -> Option<(f64, f64)> {
+    if !node.is_transformed() {
+        return Some((x - node.x, y - node.y));
+    }
+    node.local_affine().inverse().map(|i| i.apply(x, y))
+}
+
 /// The topmost visible node under a point given in `node`'s parent coordinates.
 fn hit(node: &Node, x: f64, y: f64) -> Option<NodeId> {
     if !node.visible {
         return None;
     }
-    let (lx, ly) = (x - node.x, y - node.y);
+    let (lx, ly) = to_local(node, x, y)?;
     match node.kind {
+        NodeKind::Group if node.clip && node.layout_box().is_some() => {
+            if !inside(node, lx, ly) {
+                return None;
+            }
+            node.children.iter().rev().find_map(|c| hit(c, lx, ly))
+        }
         NodeKind::Group => node.children.iter().rev().find_map(|c| hit(c, lx, ly)),
         NodeKind::Frame => {
             if !inside(node, lx, ly) {

@@ -3232,6 +3232,7 @@ mod tests {
                     ease: od_core::Ease::Linear,
                 },
             ],
+            repeat: od_core::Repeat::Once,
         }])
         .unwrap();
         let videos: Vec<Value> = serde_json::from_str(&s.snapshot().videos).unwrap();

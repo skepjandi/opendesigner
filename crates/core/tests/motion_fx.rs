@@ -237,6 +237,7 @@ fn transitions_footage_in_points_overlays_and_keys_are_snapped_too() {
                         ease: Ease::Linear,
                     },
                 ],
+                repeat: od_core::Repeat::Once,
             }],
         )
         .unwrap();
@@ -405,6 +406,7 @@ fn an_image_node_carries_a_grade_that_keyframes_can_move() {
                     ease: Ease::Linear,
                 },
             ],
+            repeat: od_core::Repeat::Once,
         }],
     )
     .unwrap();

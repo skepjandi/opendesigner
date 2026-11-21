@@ -6,7 +6,9 @@
 //! gives. Which tiles an edit reaches comes from the ids it touched: each node's rows (with
 //! stroke and text overflow) are recorded at every draw, and an edit dirties the rows its nodes
 //! covered before and cover now. When that cannot be told (a different size, scale or token set,
-//! a root frame whose own look changed, a 3D device) the caller draws the frame again.
+//! a root frame whose own look changed, a 3D device, a node that turns, scales, blurs, casts a
+//! shadow or clips: those paint outside the rows their box covers) the caller draws the frame
+//! again.
 //!
 //! Warnings (images that could not be drawn, text overflow) are not tracked here; the editor
 //! reports them from the document, not from the drawing.
@@ -66,8 +68,8 @@ pub struct Retained {
 }
 
 impl Retained {
-    /// Draws `frame` at `scale`. `None` when the frame holds a 3D device, which is drawn as a
-    /// whole and is not kept in tiles.
+    /// Draws `frame` at `scale`. `None` when the frame holds a 3D device or a node with a
+    /// transform or effect, which are drawn as a whole and not kept in tiles.
     pub fn render(
         doc: &Document,
         frame: &NodeId,
@@ -187,8 +189,18 @@ fn draw_tiles(
     let devices = HashMap::new();
     let draw = |top: u32| -> Result<(u32, Vec<u8>), RenderError> {
         let rows = tile_rows(h);
-        draw_rows(doc, node, scale, (w, h), project_dir, &devices, top, rows)
-            .map(|(bytes, _)| (top, bytes))
+        draw_rows(
+            doc,
+            node,
+            scale,
+            (w, h),
+            project_dir,
+            &devices,
+            top,
+            rows,
+            od_core::Camera::default(),
+        )
+        .map(|(bytes, _)| (top, bytes))
     };
     let threads = std::thread::available_parallelism()
         .map_or(1, |n| n.get())
@@ -253,7 +265,7 @@ impl Snapshot {
             (parent_origin.0 + node.x, parent_origin.1 + node.y)
         };
         let hidden = hidden || !node.visible;
-        self.has_device |= node.kind == NodeKind::Device3d;
+        self.has_device |= node.kind == NodeKind::Device3d || node.has_effects();
         let at = self.items.len();
         self.index.insert(hash_of(&node.id), at);
         self.items.push(Item {

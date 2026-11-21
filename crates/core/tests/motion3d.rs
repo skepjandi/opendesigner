@@ -71,6 +71,7 @@ fn animate(video: &NodeId, device: &NodeId, prop: AnimProp, keys: Vec<Key>) -> O
         node: device.clone(),
         prop,
         keys,
+        repeat: od_core::Repeat::Once,
     }
 }
 
@@ -224,6 +225,7 @@ fn animation_keys_are_validated_against_the_node() {
             node: f.frame.clone(),
             prop: AnimProp::RotateY,
             keys: vec![key(0, 1.0, Ease::Linear)],
+            repeat: od_core::Repeat::Once,
         }],
     );
     assert!(matches!(rotate_a_frame, Err(OpError::NotApplicable { .. })));
