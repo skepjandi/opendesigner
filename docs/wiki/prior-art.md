@@ -48,6 +48,20 @@ Open-source (Apache-2.0) framework that renders HTML, CSS and seekable animation
 | Preview and render share one runtime | Ours: preview and export share `render`; preview is a cached, reduced-size draw |
 | Account, cloud render, Pro models | Not copied: local files, no account |
 
+## Ideas taken from open projects (2026-11-26)
+
+Read for ideas only; no code, text or assets were copied, and everything is rebuilt as data operations. Each project's licence was read on its repository page.
+
+| Project | Idea we took |
+|---------|--------------|
+| [Rough.js](https://github.com/rough-stuff/rough) (MIT) | A seeded hand-drawn outline: wobble, bowing, strokes drawn twice, hachure and cross-hatch fills: the `sketch` block |
+| [p5.brush](https://github.com/acamposuribe/p5.brush) (MIT) | Watercolour washes built from stacked deformed layers, hatching, strokes along a vector field: `watercolor_wash`, `flow_strokes` |
+| [Whisper](https://github.com/openai/whisper) (MIT) and [rembg](https://github.com/danielgatis/rembg) (MIT) | Word timestamps and background removal, run as the user's own installed programs: `transcribe`, `remove_background` |
+| [drawn-by-code](https://github.com/illodev/drawn-by-code) (licence "Other": ideas only) | The self-review loop: contact sheets, frame strips, 1:1 crops, a layering pass, flash safety, beat alignment, a harsh-critic rule |
+| [ClaudeAnimationBase](https://github.com/JohnHeibel/ClaudeAnimationBase) (MIT) | Acting with many expressions and painted marks instead of text; animating on twos; timing as "reads" the viewer must take in |
+| [claude-animated-shorts](https://github.com/mromidev/claude-animated-shorts) (MIT; reference frames for study only) | The short-form script shape (paradox hook, pivot, ironic payoff), ease-out camera bursts, loudness to -14 LUFS |
+| GSAP (from a guide) | The ease family (power, expo, circ, sine, steps) and stagger from edges or a grid |
+
 ## Penpot ([penpot.app](https://penpot.app))
 
 Open-source design tool. Ships an official **MCP server** that works through Penpot's Plugin API ("data queries, transformation and creation operations") for any MCP-capable AI client, free.

@@ -45,6 +45,8 @@ pub enum Kind {
     Region,
     /// Ids of existing nodes.
     Nodes,
+    /// Optional ids of nodes in the target frame, kept with their boxes in frame coordinates.
+    Targets,
     /// A `media/` image path.
     Image,
     /// A bundled Lucide icon name.
@@ -146,6 +148,14 @@ impl Param {
         }
     }
 
+    pub const fn targets(name: &'static str, about: &'static str) -> Param {
+        Param {
+            name,
+            about,
+            kind: Kind::Targets,
+        }
+    }
+
     pub const fn image(name: &'static str, about: &'static str) -> Param {
         Param {
             name,
@@ -189,6 +199,10 @@ impl Param {
                 "node_ids",
                 json!({"required": true, "max": MAX_NODES_PER_CALL}),
             ),
+            Kind::Targets => (
+                "node_ids",
+                json!({"required": false, "max": MAX_NODES_PER_CALL, "accepts": "ids of nodes in the target frame"}),
+            ),
             Kind::Image => ("image", json!({"accepts": "a media/ path from list_media"})),
             Kind::Icon { default } => (
                 "icon",
@@ -210,6 +224,7 @@ pub enum Val {
     Data(Value),
     Region(Option<Rect>),
     Nodes(Vec<NodeId>),
+    Targets(Vec<(NodeId, Rect)>),
     Image(Option<String>),
 }
 
@@ -295,6 +310,37 @@ fn icon_of(v: &Value, block: &str, name: &str) -> Result<String, BlockError> {
         )
     })?;
     Ok(s.to_string())
+}
+
+fn targets_of(
+    given: Option<&Value>,
+    doc: &Document,
+    frame: &NodeId,
+    block: &str,
+    name: &str,
+) -> Result<Vec<(NodeId, Rect)>, BlockError> {
+    let Some(v) = given else {
+        return Ok(Vec::new());
+    };
+    let list = v
+        .as_array()
+        .ok_or_else(|| bad(block, name, "give a list of node ids"))?;
+    if list.len() > MAX_NODES_PER_CALL {
+        return Err(bad(
+            block,
+            name,
+            format!("at most {MAX_NODES_PER_CALL} nodes"),
+        ));
+    }
+    list.iter()
+        .map(|item| {
+            let rect = region_of(item, doc, frame, block, name)?;
+            let id = item
+                .as_str()
+                .ok_or_else(|| bad(block, name, "ids are text"))?;
+            Ok((NodeId::parse(id).map_err(|e| bad(block, name, e))?, rect))
+        })
+        .collect()
 }
 
 fn resolve_one(
@@ -398,6 +444,7 @@ fn resolve_one(
             }
             Ok(Val::Nodes(ids))
         }
+        (Kind::Targets, v) => targets_of(v, doc, frame, block, name).map(Val::Targets),
         (Kind::Image, v) => Ok(Val::Image(match v {
             Some(v) => {
                 let s = v
@@ -488,6 +535,13 @@ impl Args {
     pub fn nodes(&self, name: &'static str) -> &[NodeId] {
         match self.get(name) {
             Some(Val::Nodes(n)) => n,
+            _ => &[],
+        }
+    }
+
+    pub fn targets(&self, name: &'static str) -> &[(NodeId, Rect)] {
+        match self.get(name) {
+            Some(Val::Targets(t)) => t,
             _ => &[],
         }
     }

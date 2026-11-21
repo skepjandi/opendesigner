@@ -104,6 +104,11 @@ pub const TOPICS: &[(&str, &str, &str)] = &[
         "reviewing your own video: the self-critique loop, the checklist, strips, crops, grids, diffs and review_video",
         include_str!("../skill/review-playbook.md"),
     ),
+    (
+        "sketch",
+        "hand-made looks: sketch, boil, watercolor_wash, paper_grain, flow_strokes, marker_underline, scribble_circle; when to use them, how to combine them, palette and node budgets",
+        include_str!("../skill/sketch-playbook.md"),
+    ),
 ];
 
 pub fn topic(name: &str) -> Option<&'static str> {

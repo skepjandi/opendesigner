@@ -12,7 +12,7 @@ No arguments.
 
 ## `get_playbook`
 
-Craft guidance for making work that is not mediocre. Topics: design (images), style (named looks with rules), video (start with the inventory of media, footage, sounds and assets), motion (timings, easing, recipes), 3d (devices in 3D, captures from a simulator, moves), formats (sizes and safe zones), logo (identity design), blocks (the catalog of ready-made titles, overlays, backgrounds, charts and motion, and when to use one), scenery (layered flat-vector scenes: scenery blocks, parallax, idle loops, scene moves and the camera), characters (flat-vector characters, bubbles and animated props), explainer (anything animated: animation, scenes, explainers, motion graphics, cartoons, 2D illustration, Kurzgesagt or In a Nutshell style; read it FIRST, a jpg backdrop with moving text is never an animated scene). Call it with no topic for the list; read the ones that apply before you build, not after.
+Craft guidance for making work that is not mediocre. Topics: design (images), style (named looks with rules), video (start with the inventory of media, footage, sounds and assets), motion (timings, easing, recipes), 3d (devices in 3D, captures from a simulator, moves), formats (sizes and safe zones), logo (identity design), blocks (the catalog of ready-made titles, overlays, backgrounds, charts and motion, and when to use one), scenery (layered flat-vector scenes: scenery blocks, parallax, idle loops, scene moves and the camera), characters (flat-vector characters, bubbles and animated props), sketch (hand-made looks: pen sketches and hatching, line boil, watercolor washes, film grain, grass and wind strokes, hand-drawn emphasis), explainer (anything animated: animation, scenes, explainers, motion graphics, cartoons, 2D illustration, Kurzgesagt or In a Nutshell style; read it FIRST, a jpg backdrop with moving text is never an animated scene), review (look at your own video harshly: strips, crops, grids, diffs, the checklist). Call it with no topic for the list; read the ones that apply before you build, not after.
 
 Read-only.
 
@@ -502,7 +502,7 @@ Arguments:
 
 ## `list_blocks`
 
-The block catalog: ready-made titles, lower thirds, overlays, backgrounds, charts, store headlines, motion wrappers, rigged flat-vector characters (eighteen expressions, expression changes, reactions), emote marks (exclamation, sweat drops, hearts, lightbulb, zzz), speech and thought bubbles and animated props that expand into ordinary nodes (and keyframes on a video). Search by what you need (`query`: words matched against names, tags and descriptions) and/or `category`. Each result has the block id, its category and what it is for. Then get_block for its parameters and add_block to use it. Scenery blocks (sky_gradient, parallax_hills, starfield, clouds, sun_glow, ocean_waves, city_skyline, cells_backdrop, particles, grid_floor, connector, highlight_ring) build layered, always-moving flat-vector scenes: read get_playbook `scenery` first.
+The block catalog: ready-made titles, lower thirds, overlays, backgrounds, charts, store headlines, motion wrappers, rigged flat-vector characters (eighteen expressions, expression changes, reactions), emote marks (exclamation, sweat drops, hearts, lightbulb, zzz), speech and thought bubbles and animated props that expand into ordinary nodes (and keyframes on a video). Search by what you need (`query`: words matched against names, tags and descriptions) and/or `category`. Each result has the block id, its category and what it is for. Then get_block for its parameters and add_block to use it. Scenery blocks (sky_gradient, parallax_hills, starfield, clouds, sun_glow, ocean_waves, city_skyline, cells_backdrop, particles, grid_floor, connector, highlight_ring) build layered, always-moving flat-vector scenes: read get_playbook `scenery` first. Hand-made looks (sketch, boil, watercolor_wash, paper_grain, flow_strokes, marker_underline, scribble_circle) draw wobbly pen outlines and hatching, painted washes, film grain, grass and wind strokes and hand-drawn emphasis: read get_playbook `sketch` first.
 
 Read-only.
 
@@ -860,12 +860,13 @@ Arguments:
 
 ## `review_video`
 
-An animation director's check of a whole video, in numbers, without changing anything. Call it before export_video on any animated or illustrated video and fix what it finds. It reads each scene's nodes and tracks and renders a few small pictures across the video to measure motion. Findings have stable codes: RV001 a scene is one image with text on it, RV002 only text and rectangles move, RV003 a still stretch over 2.5 s, RV004 no looping ambient motion, RV005 no camera move in a video over 15 s, RV006 too few vector shapes, RV007 repeated scene compositions, RV008 captions cover too much, RV009 no sound, RV010 the sound is the same in every scene, RV011 colors are not from tokens, RV012 too few layers moving. It returns per-scene and whole-video numbers, a score from 0 to 100 and the three fixes that would help most. A score under 70 is not ready.
+An animation director's check of a whole video, in numbers, without changing anything. Call it before export_video on any animated or illustrated video and fix what it finds. It reads each scene's nodes and tracks and renders a few small pictures across the video to measure motion. Findings have stable codes: RV001 a scene is one image with text on it, RV002 only text and rectangles move, RV003 a still stretch over 2.5 s, RV004 no looping ambient motion, RV005 no camera move in a video over 15 s, RV006 too few vector shapes, RV007 repeated scene compositions, RV008 captions cover too much, RV009 no sound, RV010 the sound is the same in every scene, RV011 colors are not from tokens, RV012 too few layers moving, RV013 flash safety (over 3 large brightness changes in a second: an error that makes the video not ready), RV014 cuts off the beat (needs `bpm`), RV015 text leaves before it can be read, RV016 text in a vertical video's unsafe top or bottom zone, RV017 a 2 s stretch with fewer than 3 moving layers, RV018 the same scene twice, RV019 no held last picture. `overlap` lists regions where two layers of a scene overlap, back to front: check each with video_crop and confirm which should be on top. It returns per-scene and whole-video numbers, a score from 0 to 100 and the three fixes that would help most. A score under 70 is not ready.
 
 Read-only.
 
 Arguments:
 
+- `bpm` (number) The tempo of the music, to check that cuts land on a beat (RV014). Videos have no tempo of their own.
 - `samples` (integer) How many moments to render (default 12).
 - `video` (string) Id of a video from list_videos; defaults to the first.
 
@@ -904,6 +905,71 @@ Arguments:
 - `mask_only` (boolean) Write only the mask.
 - `model` (string) A rembg model name such as u2net, isnet-general-use or birefnet-general (the user's rembg may download it the first time). Default: rembg's own.
 - `timeout_s` (integer) Stop the program after this long (default 180).
+
+## `video_strip`
+
+Every frame (or every Nth) of a short stretch of a video, in one labeled grid read left to right, top to bottom: the way to judge anticipation, overshoot, settling and a transition frame by frame. At most 36 pictures; a longer stretch is refused with the `every` that fits, so narrow `from_ms` and `to_ms` to the move you are judging. Each picture carries its time in milliseconds.
+
+Read-only.
+
+Arguments:
+
+- `cell_side` (integer) Longest side of each picture (default 192).
+- `every` (integer) Take every Nth frame (default 1: all).
+- `from_ms` (integer, required) First moment.
+- `locale` (string) A language from list_locales.
+- `to_ms` (integer, required) Last moment, included.
+- `video` (string, required) Id of a video from list_videos.
+
+## `video_crop`
+
+A piece of the video's picture at full resolution (1:1), to inspect a face, a hand, a contact point or small text. Give `x`, `y`, `width`, `height` in video pixels, or a `node` id: the crop then follows that node's box through the camera, the clip's zoom and the node's own transforms at that moment, plus `padding`. `zoom` 2 to 4 enlarges each pixel (no smoothing) for a tiny region. Use frame_grid first to read positions.
+
+Read-only.
+
+Arguments:
+
+- `height` (integer) 
+- `locale` (string) A language from list_locales.
+- `node` (string) Instead of a region: a node id from get_tree whose box to follow.
+- `padding` (integer) Video pixels added around a node's box (default 24).
+- `time_ms` (integer, required) The moment.
+- `video` (string, required) Id of a video from list_videos.
+- `width` (integer) 
+- `x` (integer) 
+- `y` (integer) 
+- `zoom` (integer) Enlarge each pixel this many times (default 1).
+
+## `frame_grid`
+
+The picture at a moment with a labeled coordinate grid over it: lines every `spacing` video pixels, numbered along the top (x) and left (y) edges in video pixels, so you can read where things are and give exact x, y, width, height to video_crop or to apply_ops.
+
+Read-only.
+
+Arguments:
+
+- `locale` (string) A language from list_locales.
+- `max_side` (integer) Longest side of the picture (default 768).
+- `spacing` (integer) Video pixels between lines (default: about 10 lines along the long side).
+- `time_ms` (integer, required) The moment.
+- `video` (string, required) Id of a video from list_videos.
+
+## `video_diff`
+
+Two moments side by side with the pixels that changed painted magenta over a dimmed copy: the first picture, the second, then the changes (`mode` overlay gives only the changes). Compare a time with another time of the video (`other_time_ms`), or the same or another time of another video of the project (`other_video`, same size). The text gives the share of pixels changed and their box. Use it on a nearly identical pair, such as the frames before and after a hit, or two takes of a scene.
+
+Read-only.
+
+Arguments:
+
+- `locale` (string) A language from list_locales.
+- `max_side` (integer) Longest side of each picture (default 512).
+- `mode` (string) Default side_by_side.
+- `other_time_ms` (integer) The second moment (default: the same as time_ms).
+- `other_video` (string) A second video to take the second moment from (default: the same video).
+- `threshold` (integer) A channel must differ by more than this to count as changed (default 12).
+- `time_ms` (integer, required) The first moment.
+- `video` (string, required) Id of a video from list_videos.
 
 ## `show_preview`
 

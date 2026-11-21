@@ -272,18 +272,27 @@ fn aurora(p: &Params, rng: &mut Rng) -> String {
 }
 
 fn grain(p: &Params) -> String {
+    let overlay = p.variant.as_deref() == Some("overlay");
     let cols = colors(p, &["#f5f5f5", "#000000"]);
-    let (r, g, b) = rgb(cols.get(1).map_or("#000000", String::as_str));
+    let speck = if overlay { cols.last() } else { cols.get(1) };
+    let (r, g, b) = rgb(speck.map_or("#000000", String::as_str));
     let freq = 0.9 / f64::from(p.scale.unwrap_or(1).clamp(1, 16));
+    let ground = if overlay {
+        String::new()
+    } else {
+        format!(
+            "<rect width=\"{}\" height=\"{}\" fill=\"{}\"/>",
+            p.width, p.height, cols[0]
+        )
+    };
     format!(
-        "{}<defs><filter id=\"n\" filterUnits=\"userSpaceOnUse\" x=\"0\" y=\"0\" width=\"{w}\" height=\"{h}\"><feTurbulence type=\"fractalNoise\" baseFrequency=\"{}\" numOctaves=\"3\" seed=\"{}\" stitchTiles=\"stitch\"/><feColorMatrix type=\"matrix\" values=\"0 0 0 0 {} 0 0 0 0 {} 0 0 0 0 {} 0 0 0 0.9 -0.35\"/></filter></defs><rect width=\"{w}\" height=\"{h}\" fill=\"{}\"/><rect width=\"{w}\" height=\"{h}\" filter=\"url(#n)\"/></svg>",
+        "{}<defs><filter id=\"n\" filterUnits=\"userSpaceOnUse\" x=\"0\" y=\"0\" width=\"{w}\" height=\"{h}\"><feTurbulence type=\"fractalNoise\" baseFrequency=\"{}\" numOctaves=\"3\" seed=\"{}\" stitchTiles=\"stitch\"/><feColorMatrix type=\"matrix\" values=\"0 0 0 0 {} 0 0 0 0 {} 0 0 0 0 {} 0 0 0 0.9 -0.35\"/></filter></defs>{ground}<rect width=\"{w}\" height=\"{h}\" filter=\"url(#n)\"/></svg>",
         head(p),
         n(freq),
         p.seed % 1000,
         n(r),
         n(g),
         n(b),
-        cols[0],
         w = p.width,
         h = p.height
     )

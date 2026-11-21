@@ -7,8 +7,8 @@ use super::BlockError;
 use super::args::{Args, Param};
 use super::kit::Kit;
 use super::{
-    backdrops, bubbles, characters, data, emotes, guides, land, micro, overlays, props, sky,
-    social, titles, wrappers,
+    backdrops, bubbles, characters, data, emotes, emphasis, flow, guides, land, micro, overlays,
+    paper, props, sketch, sky, social, titles, wash, wrappers,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -153,6 +153,11 @@ pub fn all() -> impl Iterator<Item = &'static Block> {
         land::BLOCKS,
         micro::BLOCKS,
         guides::BLOCKS,
+        sketch::BLOCKS,
+        emphasis::BLOCKS,
+        wash::BLOCKS,
+        paper::BLOCKS,
+        flow::BLOCKS,
     ]
     .into_iter()
     .flat_map(|b| b.iter())

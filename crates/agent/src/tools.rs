@@ -164,12 +164,12 @@ fn core_definitions() -> Vec<Value> {
              assets), motion (timings, easing, recipes), 3d (devices in 3D, captures from a \
              simulator, moves), formats (sizes and \
              safe zones), logo (identity design), blocks (the catalog of ready-made titles, overlays, backgrounds, \
-             charts and motion, and when to use one), scenery (layered flat-vector scenes: scenery blocks, parallax, idle loops, scene moves and the camera), characters (flat-vector characters, bubbles and animated props), explainer (anything animated: animation, scenes, \
+             charts and motion, and when to use one), scenery (layered flat-vector scenes: scenery blocks, parallax, idle loops, scene moves and the camera), characters (flat-vector characters, bubbles and animated props), sketch (hand-made looks: pen sketches and hatching, line boil, watercolor washes, film grain, grass and wind strokes, hand-drawn emphasis), explainer (anything animated: animation, scenes, \
              explainers, motion graphics, cartoons, 2D illustration, Kurzgesagt or In a Nutshell style; read it \
              FIRST, a jpg backdrop with moving text is never an animated scene), review (look at your own video \
              harshly: strips, crops, grids, diffs, the checklist). Call it with no topic for the \
              list; read the ones that apply before you build, not after.",
-            json!({"topic": {"type": "string", "enum": ["design", "style", "video", "motion", "3d", "formats", "logo", "blocks", "scenery", "characters", "explainer", "review"]}}),
+            json!({"topic": {"type": "string", "enum": ["design", "style", "video", "motion", "3d", "formats", "logo", "blocks", "scenery", "characters", "sketch", "explainer", "review"]}}),
             &[],
             true,
         ),

@@ -6,6 +6,19 @@ All notable changes to OpenDesigner are documented here.
 >
 > **Wiki**: the [GitHub Wiki](https://github.com/skepjandi/opendesigner/wiki) is the public-facing main wiki — architecture, document format, agent integration, security model, roadmap. Source-controlled editing surface is `docs/wiki/` in this repo; CI (`.github/workflows/sync-wiki.yml`) mirrors it to the GitHub Wiki on every merge to `main`. New single-PR changes belong here, not as new wiki pages.
 
+## 2026-11-26
+
+### feat: hand-made looks, richer acting, self-review tools, speech and cutouts, time feel
+
+**Area:** `feat(agent)`, `feat(core)`, `feat(render)`, `feat(media)`, `feat(cli)`
+
+- **Hand-made look.** Blocks `sketch` (wobbly double strokes, hachure, cross-hatch, zigzag, dots, dashed fills, draw-on), `boil`, `watercolor_wash`, `paper_grain`, `flow_strokes`, `marker_underline`, `scribble_circle`; playbook topic `sketch`.
+- **Acting.** `character` has 18 expressions, timed `expression_changes`, looks and reactions (take, shrug, nod, shake head, laugh); new `emote` block with 13 painted marks.
+- **Self-review.** Tools `video_strip`, `video_crop`, `frame_grid`, `video_diff` (CLI `inspect`); `review_video` adds RV013 to RV019 (flash safety, beat, legibility, safe zones, density, repetition, ending) and an overlap pass; playbook topic `review`.
+- **External programs.** `get_capabilities` / `opendesigner doctor`, `transcribe` (the user's whisper program, word timings into captions) and `remove_background` (the user's rembg); nothing is bundled.
+- **Time feel.** Eases `steps_N`, power, expo, circ, sine; `Video.hold_frames` (animate on twos); stagger from edges and in a grid; `camera_burst`; an export `loudness` target (-14, -16, -23 LUFS).
+- Project format is now version 5.
+
 ## 2026-11-25
 
 ### feat(agent): flat-vector scenes: characters, scenery, motion presets, an explainer playbook and review_video

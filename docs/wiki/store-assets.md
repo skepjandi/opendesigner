@@ -180,6 +180,28 @@ An app preview is footage of the app; a promo or an explainer around it is built
 
 **Palette.** Colors are mixed from the four roles (tokens first, created tokens when none), never hard-coded: skies run from the background toward the accent and the light, hills and water darken and desaturate toward the viewer, and windows, stars and glows take the foreground tinted with the accent.
 
+### Hand-made blocks
+
+> **Status: Built** (`crates/agent/src/blocks/{sketchgeo,sketchdraw,sketch,wash,paper,flow,fieldgeo,emphasis}.rs`, 2026-11-26). Seven blocks give a scene a drawn, painted and photographed-on-paper look. They are blocks like the rest: ordinary `path` nodes (and `image` nodes for the grain) plus ordinary keyframes, one undoable transaction, deterministic by `seed`, at most about 400 nodes, colors from the tokens. Playbook: `get_playbook` `sketch` (`crates/agent/skill/sketch-playbook.md`). No new operation and no new document field.
+
+| Block | What it makes |
+|-------|---------------|
+| `sketch` | Outlines of `targets` (ids of nodes in the frame: rectangles keep their corner radius, ellipses stay round, paths keep their curves, anything else uses its box) or of a `shape` (`rect`, `ellipse`, `circle`, `polygon`, `polyline`, `line`, `path`, or a list of up to 12), drawn `passes` times with seeded wobble, `bowing` and overshoot at the stroke ends; an optional fill: `solid` (a loose wash), `hachure`, `cross_hatch`, `zigzag`, `dots` or `dashed`. `draw_on` runs `trim_end` over each stroke in turn. |
+| `boil` | 2 to 4 differently seeded drawings of the same shapes in groups that take turns about 12 times a second, looping |
+| `watercolor_wash` | 6 to 12 translucent copies of an outline, each deformed by repeated seeded midpoint displacement, plus 3 paler inner pools, a wider faint bleed layer and 4 darker edge strokes; the paint is blurred as a group (`softness`), the edge band less. Blooms in (opacity and scale) unless `bloom` is off. |
+| `paper_grain` | A faint tint, grain pictures and a radial vignette over the whole frame, for the top of the stack |
+| `flow_strokes` | `grass`, `hair`, `wind`, `water` or `flow`: up to 140 strokes that follow a seeded vector field as filled tapered ribbons, in five bands that sway (rotation about the roots) or drift (x) in loops |
+| `marker_underline` | A `marker` band gone over twice, a `double`, `wavy` or `scribble` underline under a node or box, drawn on |
+| `scribble_circle` | A scribbled loop (`circle`), an `arrow` that points at the target from `arrow_from` degrees, or a `cross`, drawn on |
+
+**Geometry is pure.** `sketchgeo.rs` and `fieldgeo.rs` know nothing of documents or the renderer: rings (flattened outlines), corner detection that splits an outline into strokes the way a pen is lifted at a corner, smooth value noise for the wobble, the scan-line hachure (each scan line is cut at the edges it crosses and the stretches between the 1st and 2nd, 3rd and 4th crossing are inside, so concave shapes and holes are right), zigzag, dots, vector fields, tapered ribbons and polygon deformation, all functions of a seed (`stream(seed, salt)` gives each pass, variant and stroke its own generator, so changing one never shifts another). The tests check that every hachure line lies inside concave shapes and shapes with holes, that the same seed gives the same lines and another seed other ones.
+
+**Boil and grain steps.** The engine has no stepped ease and no animatable `visible`, so a drawing is shown by `opacity` keys on its group: one key a whole frame before the change holds the old value and the key on the change carries the new one, so a frame shows one value or the other (within a millisecond of interpolation). Keys snap to the video's frame grid and must stay strictly increasing after the snap, so the keys are a whole number of frames of the slowest video apart, at least two to a drawing, and a loop is cut to a whole number of milliseconds (`Cadence` in `sketchdraw.rs`) so repeats never drift off the grid. `draw_on` gives every stroke at least two frames, so a drawing of very many strokes takes longer than `duration_ms`. `[INFERENCE]` The 12 fps asked for becomes 15 or 10 on a 30 fps video (a drawing is two or three frames); a 24 fps video gets exactly 12.
+
+**Grain is a picture, not speckle.** `paper_grain` writes one generated picture per variant and tone to `media/` (`Asset::grain_overlay`: the `grain` generator's new `overlay` variant, transparent ground, at most 1024 px, stretched to the frame; named `block-grain-<recipe hash>.png` like the other generated pictures, so the same recipe is the same file). That is one node per picture instead of thousands of tiny shapes. With `loop_ms` above 0 the variants take turns like a boil; at 0 one grain holds.
+
+**Not done.** `[INFERENCE]` Targets that are rotated or scaled are drawn at their bounding box (a path node's shape is followed in its box, not through its turn). The `sketch` block does not hide the nodes it redraws. There is no hand-drawn text. `boil` does not boil a `sketch` that already exists; it draws its own variants.
+
 ## The studio (intended)
 
 A page type for listing art whose unit is a **set**, not a single frame:
