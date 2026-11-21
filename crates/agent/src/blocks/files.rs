@@ -15,6 +15,7 @@ use crate::assets::raster;
 
 const MAX_ICON_PX: u32 = 512;
 const MAX_BACKDROP_SIDE: f64 = 1600.0;
+const MAX_OVERLAY_SIDE: f64 = 1024.0;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Asset {
@@ -56,6 +57,21 @@ impl Asset {
             width: (box_w * k).round().max(2.0) as u32,
             height: (box_h * k).round().max(2.0) as u32,
             scale: scale.map(|s| (f64::from(s) * k).round().max(2.0) as u32),
+        }
+    }
+
+    /// Grain specks of one color on a transparent picture, for laying over everything. The
+    /// picture is at most 1024 px on its longer side; `speck` is the size of a speck in it.
+    pub fn grain_overlay(color: String, seed: u64, box_w: f64, box_h: f64, speck: u32) -> Asset {
+        let k = (MAX_OVERLAY_SIDE / box_w.max(box_h)).min(1.0);
+        Asset::Generated {
+            generator: "grain",
+            variant: Some("overlay".to_string()),
+            colors: vec![color],
+            seed,
+            width: (box_w * k).round().max(2.0) as u32,
+            height: (box_h * k).round().max(2.0) as u32,
+            scale: Some(speck),
         }
     }
 

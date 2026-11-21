@@ -13,13 +13,14 @@ use super::art::{
     linear, lit, path, pen, rect_of, rounded, shade, shadow, solid, tint, turned,
 };
 use super::character_motion::{Rest, Script};
+use super::faces::{self, Expr, Eyes};
 use super::kit::{Kit, Role, at, mix};
 use super::registry::{Block, Category, Layer, Place};
 
 const STYLES: &[&str] = &["blob", "bean", "robot", "creature"];
-const EXPRESSIONS: &[&str] = &["neutral", "happy", "surprised", "sad", "angry", "thinking"];
 const FACING: &[&str] = &["auto", "front", "left", "right"];
 const ACTIONS: &[&str] = &["idle", "wave", "talk", "walk", "jump", "point", "celebrate"];
+const REACTIONS: &[&str] = &["none", "take", "shrug", "nod", "shake_head", "laugh"];
 
 pub const CHARACTER_PARAMS: &[Param] = &[
     Param::choice(
@@ -48,9 +49,9 @@ pub const CHARACTER_PARAMS: &[Param] = &[
     ),
     Param::choice(
         "expression",
-        "The face: eyes, brows, mouth and cheeks.",
+        "The face: eyes, lids, brows, mouth, cheeks. Eighteen of them, each a different silhouette.",
         "happy",
-        EXPRESSIONS,
+        faces::NAMES,
     ),
     Param::choice(
         "facing",
@@ -104,7 +105,40 @@ pub const CHARACTER_PARAMS: &[Param] = &[
         "target",
         "A node id or {x, y} the point action aims its arm at.",
     ),
-    Param::region("look_at", "A node id or {x, y} the pupils look toward."),
+    Param::region(
+        "look_at",
+        "A node id or {x, y} the character looks at: the pupils turn to it and the face turns a little toward it.",
+    ),
+    Param::data(
+        "looks",
+        "Where the eyes go over time: [{at_ms, x, y}, ...] (frame points, from the start of the block; at least 400 ms apart, up to 24). At each the eyes jump first and the face follows a beat later, so the character looks before it reacts. Starts from `look_at` or the expression's own gaze. Needs a video.",
+        "null",
+    ),
+    Param::data(
+        "expression_changes",
+        "The character acts through expressions: [{at_ms, expression}, ...] from `expression` (the first at_ms is 200 or more, then 300 ms apart or more; up to 40 changes through 6 different faces). Each change squints first, swaps the face and overshoots before it settles, as ordinary keyframes. Tie each to a story beat. Needs a video.",
+        "null",
+    ),
+    Param::choice(
+        "reaction",
+        "A one-off bit of acting at `reaction_at_ms`: take (a double-take with squash), shrug, nod, shake_head, laugh (body bounce for `reaction_ms`). Pair it with an expression change at the same time. take and laugh keep the body: not with walk, jump or celebrate; shrug also not with wave or point.",
+        "none",
+        REACTIONS,
+    ),
+    Param::count(
+        "reaction_at_ms",
+        "When the reaction starts, from the start of the block.",
+        0,
+        0,
+        600_000,
+    ),
+    Param::count(
+        "reaction_ms",
+        "How long a laugh lasts (0: 1800 ms); the other reactions have their own length and repeat `loops` times.",
+        0,
+        0,
+        20_000,
+    ),
     Param::count(
         "loops",
         "How many times wave, jump, point and celebrate play (each one is written out).",
@@ -129,20 +163,11 @@ pub enum Style {
     Creature,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Expr {
-    Neutral,
-    Happy,
-    Surprised,
-    Sad,
-    Angry,
-    Thinking,
-}
-
 /// What the face and accessories ask for.
 pub struct Cfg {
     pub style: Style,
-    pub expr: Expr,
+    /// Every expression that gets a face drawn: the `expression` first, then the ones it changes to.
+    pub faces: Vec<Expr>,
     pub facing: f64,
     pub hat: bool,
     pub glasses: bool,
@@ -302,13 +327,13 @@ impl Geo {
 
 /// The colors, each a paint (a token stays a token) and its resolved value for shading.
 pub struct Pal {
-    body: Paint,
-    body_c: Rgba,
-    skin: Paint,
-    skin_c: Rgba,
-    accent: Paint,
-    accent_c: Rgba,
-    ink: Paint,
+    pub(super) body: Paint,
+    pub(super) body_c: Rgba,
+    pub(super) skin: Paint,
+    pub(super) skin_c: Rgba,
+    pub(super) accent: Paint,
+    pub(super) accent_c: Rgba,
+    pub(super) ink: Paint,
     legs: Paint,
     legs_c: Rgba,
 }
@@ -358,11 +383,11 @@ impl Pal {
     }
 }
 
-fn solid_rgba(hex: &str) -> Rgba {
+pub(super) fn solid_rgba(hex: &str) -> Rgba {
     Rgba::parse_hex(hex).unwrap_or(BLACK)
 }
 
-fn parse(hex: &str) -> Rgba {
+pub(super) fn parse(hex: &str) -> Rgba {
     solid_rgba(hex)
 }
 
@@ -390,7 +415,9 @@ pub const BLOCKS: &[Block] = &[Block {
             mouth, arm_l, arm_r, leg_l, leg_r, hat, glasses, backpack) with pivots at the joints. \
             With a video it breathes, bobs, blinks and sways for ever (desynchronised by seed) and \
             performs an action: wave, talk (mouth only moves in the ranges you give), walk from \
-            from_x to to_x, jump with squash and stretch, point at a target, celebrate.",
+            from_x to to_x, jump with squash and stretch, point at a target, celebrate. Eighteen \
+            expressions, a list of expression_changes (each squints, swaps and overshoots), timed \
+            looks (the eyes lead the face), and reactions: take, shrug, nod, shake_head, laugh.",
     tags: &[
         "character",
         "person",
@@ -420,15 +447,8 @@ fn read_style(a: &Args) -> Style {
     }
 }
 
-fn read_expr(a: &Args) -> Expr {
-    match a.text("expression") {
-        "happy" => Expr::Happy,
-        "surprised" => Expr::Surprised,
-        "sad" => Expr::Sad,
-        "angry" => Expr::Angry,
-        "thinking" => Expr::Thinking,
-        _ => Expr::Neutral,
-    }
+pub(super) fn read_expr(a: &Args) -> Expr {
+    Expr::parse(a.text("expression")).unwrap_or(Expr::Neutral)
 }
 
 fn read_facing(a: &Args, script: &Script) -> f64 {
@@ -444,9 +464,10 @@ fn read_cfg(a: &Args, script: &Script) -> Cfg {
     let look = a
         .region("look_at")
         .map(|r| (r.x + r.width / 2.0, r.y + r.height / 2.0));
+    let expr = read_expr(a);
     Cfg {
         style: read_style(a),
-        expr: read_expr(a),
+        faces: script.acting.faces(expr),
         facing: read_facing(a, script),
         hat: a.flag("hat"),
         glasses: a.flag("glasses"),
@@ -493,6 +514,7 @@ fn draw_rig(k: &Kit, g: &Geo, pal: &Pal, cfg: &Cfg) -> (Grp, Rest) {
     }
     rig.add_group(draw_body(k, g, pal, cfg));
     let (head, mut rest) = draw_head(k, g, pal, cfg);
+    rest.head_x = g.head.x - rox;
     rest.head_y = g.head.y - roy;
     rig.add_group(head);
     for side in 0..2 {
@@ -640,33 +662,6 @@ fn draw_arm(k: &Kit, g: &Geo, pal: &Pal, cfg: &Cfg, side: usize) -> Grp {
     grp
 }
 
-/// The eyes' layout, shared by the eyes, brows, glasses and cheeks.
-struct Eyes {
-    cy: f64,
-    gap: f64,
-    ew: f64,
-    eh: f64,
-    dx: f64,
-}
-
-fn eyes_layout(g: &Geo, cfg: &Cfg) -> Eyes {
-    let h = g.head;
-    let robot = cfg.style == Style::Robot;
-    let mut ew = h.width * if robot { 0.16 } else { 0.19 };
-    if cfg.expr == Expr::Surprised {
-        ew *= 1.2;
-    }
-    let eh =
-        ew * if robot { 1.05 } else { 1.18 } * if cfg.expr == Expr::Angry { 0.86 } else { 1.0 };
-    Eyes {
-        cy: h.y + h.height * 0.47,
-        gap: h.width * 0.2,
-        ew,
-        eh,
-        dx: cfg.facing * h.width * 0.13,
-    }
-}
-
 fn draw_head(k: &Kit, g: &Geo, pal: &Pal, cfg: &Cfg) -> (Grp, Rest) {
     let h = g.head;
     let mut grp = Grp::new(k, "head", h).pivot(g.cx, h.y + h.height * 0.92);
@@ -699,13 +694,13 @@ fn draw_head(k: &Kit, g: &Geo, pal: &Pal, cfg: &Cfg) -> (Grp, Rest) {
         );
         grp.add(turned(ellipse(shine, glow(WHITE, 0.5)), -28.0).named(k, "head_shine"));
     }
-    let eyes = eyes_layout(g, cfg);
-    if cfg.style != Style::Robot {
-        draw_cheeks(k, g, pal, cfg, &eyes, &mut grp);
+    let eyes = faces::eyes_layout(g, cfg);
+    for (i, expr) in cfg.faces.iter().enumerate() {
+        let prefix = if i == 0 { "" } else { expr.name() };
+        let (face, rig) = faces::draw_face(k, g, pal, cfg, &eyes, *expr, prefix);
+        grp.add_group(face);
+        rest.faces.push(rig);
     }
-    grp.add_group(draw_eyes(k, g, pal, cfg, &eyes, &mut rest));
-    grp.add_group(draw_brows(k, g, pal, cfg, &eyes));
-    grp.add_group(draw_mouth(k, g, pal, cfg));
     if cfg.glasses {
         grp.add_group(draw_glasses(k, g, pal, &eyes));
     }
@@ -725,260 +720,17 @@ fn head_shape(k: &Kit, g: &Geo, pal: &Pal, cfg: &Cfg) -> NewNode {
     .named(k, "head_shape")
 }
 
-fn draw_cheeks(k: &Kit, g: &Geo, pal: &Pal, cfg: &Cfg, e: &Eyes, head: &mut Grp) {
-    let alpha = match cfg.expr {
-        Expr::Sad => 0.25,
-        Expr::Happy => 0.7,
-        _ => 0.5,
-    };
-    let blush = parse(&mix(pal.skin_c, solid_rgba("#ff4d6d"), 0.6));
-    let (w, h) = (g.head.width * 0.15, g.head.width * 0.09);
-    for (i, sign) in [-1.0, 1.0].into_iter().enumerate() {
-        let cx = g.cx + e.dx + sign * g.head.width * 0.3;
-        let cy = e.cy + g.head.height * 0.18;
-        head.add(
-            ellipse(centered(cx, cy, w, h), glow(blush, alpha)).named(k, &format!("cheek_{i}")),
-        );
-    }
-}
-
-/// How far (as a share of the room the pupil has) it sits off center for each expression.
-fn base_gaze(expr: Expr) -> (f64, f64) {
-    match expr {
-        Expr::Happy => (0.0, 0.1),
-        Expr::Sad => (0.0, 0.6),
-        Expr::Angry => (0.0, 0.2),
-        Expr::Thinking => (0.7, -0.7),
-        _ => (0.0, 0.0),
-    }
-}
-
-fn draw_eyes(k: &Kit, g: &Geo, pal: &Pal, cfg: &Cfg, e: &Eyes, rest: &mut Rest) -> Grp {
-    let box_ = rect_of(
-        g.cx + e.dx - e.gap - e.ew / 2.0,
-        e.cy - e.eh / 2.0,
-        2.0 * e.gap + e.ew,
-        e.eh,
-    );
-    let mut eyes = Grp::new(k, "eyes", box_);
-    for (side, sign) in [(0usize, -1.0), (1usize, 1.0)] {
-        let cx = g.cx + e.dx + sign * e.gap;
-        let far = (cfg.facing * sign).is_sign_negative() && cfg.facing != 0.0;
-        let (eye, pupil_rest) = draw_eye(k, g, pal, cfg, e, side, cx, far);
-        rest.pupil[side] = pupil_rest;
-        eyes.add_group(eye);
-    }
-    eyes
-}
-
-#[allow(clippy::too_many_arguments)]
-fn draw_eye(
-    k: &Kit,
-    g: &Geo,
-    pal: &Pal,
-    cfg: &Cfg,
-    e: &Eyes,
-    side: usize,
-    cx: f64,
-    far: bool,
-) -> (Grp, (f64, f64)) {
-    let tag = if side == 0 { "l" } else { "r" };
-    let robot = cfg.style == Style::Robot;
-    let box_ = centered(cx, e.cy, e.ew, e.eh);
-    let mut eye = Grp::new(k, &format!("eye_{tag}"), box_);
-    if far {
-        eye.node.scale_x = Some(0.82);
-    }
-    let sclera = if robot {
-        radial_glow(pal.accent_c)
-    } else {
-        linear(90.0, &[(0.0, solid("#ffffff")), (1.0, solid("#dce4ef"))])
-    };
-    eye.add(ellipse(box_, sclera).named(k, &format!("sclera_{tag}")));
-    let pscale = if cfg.expr == Expr::Surprised {
-        0.62
-    } else {
-        0.8
-    } * if robot { 0.7 } else { 1.0 };
-    let pw = e.ew * 0.7 * pscale;
-    let ph = pw * 1.1;
-    let (room_x, room_y) = ((e.ew - pw) / 2.0 * 0.85, (e.eh - ph) / 2.0 * 0.85);
-    let (gx, gy) = gaze(g, cfg, e, cx);
-    let (px, py) = (cx + gx * room_x, e.cy + gy * room_y);
-    let pupil_box = centered(px, py, pw, ph);
-    let mut pupil = Grp::new(k, &format!("pupil_{tag}"), pupil_box);
-    let ink = if robot {
-        Paint::Color(shade_rgba(pal.accent_c))
-    } else {
-        pal.ink.clone()
-    };
-    pupil.add(ellipse(pupil_box, ink).named(k, &format!("pupil_shape_{tag}")));
-    let glint = pw * 0.36;
-    pupil.add(
-        ellipse(
-            centered(px + pw * 0.16, py - ph * 0.2, glint, glint),
-            solid("#ffffff"),
-        )
-        .named(k, &format!("glint_{tag}")),
-    );
-    let (ox, oy) = (pupil_box.x - box_.x, pupil_box.y - box_.y);
-    eye.add_group(pupil);
-    (eye, (ox, oy))
-}
-
-fn shade_rgba(c: Rgba) -> Rgba {
+pub(super) fn shade_rgba(c: Rgba) -> Rgba {
     parse(&mix(c, BLACK, 0.65))
 }
 
-fn radial_glow(c: Rgba) -> Paint {
+pub(super) fn radial_glow(c: Rgba) -> Paint {
     super::art::radial(
         0.5,
         0.5,
         0.55,
         &[(0.0, tint(c, 0.75)), (1.0, Paint::Color(c))],
     )
-}
-
-/// The pupil's offset as shares of its room (-1 to 1 on each axis).
-fn gaze(g: &Geo, cfg: &Cfg, e: &Eyes, eye_x: f64) -> (f64, f64) {
-    let Some((tx, ty)) = cfg.look else {
-        let (bx, by) = base_gaze(cfg.expr);
-        return (bx + cfg.facing * 0.5, by);
-    };
-    let (dx, dy) = (tx - eye_x, ty - e.cy);
-    let len = dx.hypot(dy).max(1.0);
-    let reach = (len / (g.head.width * 1.5)).min(1.0);
-    (dx / len * reach, dy / len * reach)
-}
-
-fn draw_brows(k: &Kit, g: &Geo, pal: &Pal, cfg: &Cfg, e: &Eyes) -> Grp {
-    let (lift, tilt) = match cfg.expr {
-        Expr::Surprised => (e.ew * 0.55, 0.0),
-        Expr::Sad => (e.ew * 0.25, -14.0),
-        Expr::Angry => (-e.ew * 0.05, 20.0),
-        Expr::Thinking => (e.ew * 0.3, -8.0),
-        Expr::Happy => (e.ew * 0.25, -5.0),
-        Expr::Neutral => (e.ew * 0.2, 0.0),
-    };
-    let bl = e.ew * 1.15;
-    let bt = (e.ew * 0.2).max(1.5);
-    let y = e.cy - e.eh / 2.0 - e.ew * 0.32 - lift;
-    let box_ = rect_of(
-        g.cx + e.dx - e.gap - bl / 2.0,
-        y - bt,
-        2.0 * e.gap + bl,
-        bt * 2.0 + e.ew * 0.6,
-    );
-    let mut brows = Grp::new(k, "brows", box_);
-    let hidden = cfg.style == Style::Robot || cfg.expr == Expr::Neutral;
-    for (i, sign) in [-1.0, 1.0].into_iter().enumerate() {
-        let cx = g.cx + e.dx + sign * e.gap;
-        let raise = if cfg.expr == Expr::Thinking && i == 1 {
-            e.ew * 0.35
-        } else {
-            0.0
-        };
-        let brow = rounded(centered(cx, y - raise, bl, bt), bt / 2.0, pal.ink.clone());
-        brows.add(turned(brow, tilt * -sign).named(k, &format!("brow_{i}")));
-    }
-    if hidden { brows.opacity(0.0) } else { brows }
-}
-
-/// The mouth's rectangle and which of its two shapes shows.
-fn draw_mouth(k: &Kit, g: &Geo, pal: &Pal, cfg: &Cfg) -> Grp {
-    let h = g.head;
-    let (mw, mh) = (h.width * 0.26, h.width * 0.17);
-    let shift = if cfg.expr == Expr::Thinking {
-        h.width * 0.07
-    } else {
-        0.0
-    };
-    let (mx, my) = (
-        g.cx + cfg.facing * h.width * 0.13 + shift,
-        h.y + h.height * 0.74,
-    );
-    let box_ = centered(mx, my, mw, mh);
-    let ink = if cfg.style == Style::Robot {
-        lit(&pal.accent, pal.accent_c)
-    } else {
-        pal.ink.clone()
-    };
-    let mut mouth = Grp::new(k, "mouth", box_);
-    let open_visible = matches!(cfg.expr, Expr::Happy | Expr::Surprised);
-    if !open_visible {
-        mouth.add(lip(k, cfg, box_, ink.clone(), h.width * 0.03));
-    }
-    let mut open = Grp::new(k, "mouth_open", box_).pivot(mx, box_.y + mh * 0.1);
-    for part in open_shape(k, cfg, box_, ink, pal) {
-        open.add(part);
-    }
-    if !open_visible {
-        open = open.opacity(0.0);
-        open.node.scale_y = Some(0.3);
-    }
-    mouth.add_group(open);
-    mouth
-}
-
-fn lip(k: &Kit, cfg: &Cfg, b: Rect, ink: Paint, width: f64) -> NewNode {
-    let (w, h) = (b.width, b.height);
-    let d = match cfg.expr {
-        Expr::Sad => format!(
-            "M0,{:.2} Q{:.2},{:.2} {w:.2},{:.2}",
-            h * 0.85,
-            w / 2.0,
-            h * 0.05,
-            h * 0.85
-        ),
-        Expr::Angry => format!(
-            "M0,{:.2} Q{:.2},{:.2} {w:.2},{:.2}",
-            h * 0.7,
-            w / 2.0,
-            h * 0.3,
-            h * 0.7
-        ),
-        Expr::Thinking => format!(
-            "M0,{:.2} Q{:.2},{:.2} {:.2},{:.2} T{w:.2},{:.2}",
-            h * 0.55,
-            w * 0.25,
-            h * 0.15,
-            w / 2.0,
-            h * 0.55,
-            h * 0.55
-        ),
-        _ => format!(
-            "M0,{:.2} Q{:.2},{:.2} {w:.2},{:.2}",
-            h * 0.3,
-            w / 2.0,
-            h * 1.0,
-            h * 0.3
-        ),
-    };
-    line(b, d, ink, width.max(1.5)).named(k, "lip")
-}
-
-fn open_shape(k: &Kit, cfg: &Cfg, b: Rect, ink: Paint, pal: &Pal) -> Vec<NewNode> {
-    let (w, h) = (b.width, b.height);
-    if cfg.expr == Expr::Surprised {
-        let o = centered(b.x + w / 2.0, b.y + h / 2.0, w * 0.42, h * 0.8);
-        return vec![ellipse(o, ink).named(k, "mouth_o")];
-    }
-    let d = format!(
-        "M0,{:.2} L{w:.2},{:.2} C{:.2},{:.2} {:.2},{:.2} 0,{:.2} Z",
-        h * 0.1,
-        h * 0.1,
-        w * 1.0,
-        h * 1.15,
-        0.0,
-        h * 1.15,
-        h * 0.1,
-    );
-    let tongue = mix(pal.skin_c, solid_rgba("#ff4d6d"), 0.75);
-    let tongue_box = centered(b.x + w / 2.0, b.y + h * 0.74, w * 0.5, h * 0.3);
-    vec![
-        path(b, d, Some(ink)).named(k, "mouth_bowl"),
-        ellipse(tongue_box, solid(&tongue)).named(k, "tongue"),
-    ]
 }
 
 fn draw_glasses(k: &Kit, g: &Geo, pal: &Pal, e: &Eyes) -> Grp {

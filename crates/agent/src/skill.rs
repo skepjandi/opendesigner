@@ -155,6 +155,14 @@ pub fn generate() -> Vec<SkillFile> {
             path: "references/scenery-playbook.md",
             contents: playbook::topic("scenery").unwrap_or_default().to_string(),
         },
+        SkillFile {
+            path: "references/review-playbook.md",
+            contents: playbook::topic("review").unwrap_or_default().to_string(),
+        },
+        SkillFile {
+            path: "references/sketch-playbook.md",
+            contents: playbook::topic("sketch").unwrap_or_default().to_string(),
+        },
     ]
 }
 
@@ -448,6 +456,7 @@ write the file with `export_video`, which needs `ffmpeg` on the user's computer 
 is missing. For the App Store pass `preset` to `export_video` (see `list_video_presets`): sizes, 15 to 30
 seconds and 30 fps are checked before anything is encoded, and the preset says what it does not
 check (the audio track, the H.264 profile).
+Pass `loudness` (-14 social, -16 podcast, -23 broadcast LUFS) to bring the sound to a platform level. For a hand-drawn rhythm set the video's `hold_frames` to 2 (on twos) or 3 and use `steps_4`-style eases.
 
 Sound: a video can carry one sound track under its picture, a file in the project's `media/`
 folder. `{"op": "set_video", "video": "v_20", "prop": {"name": "audio", "value": {"file":
@@ -462,8 +471,11 @@ shows them all. Then set the track. For more than one (music, a voice-over, effe
 `add_sound_track` (role `music`, `voice` or `sfx`, up to 8; start, trim, gain, fades, pan; music can
 `duck` under the voice), `set_sound_track` and `remove_sound_track`. Captions are data: bring a
 transcript from the user's own speech server with `import_captions` (`srt`, `vtt`, `words_json`;
-OpenDesigner does no speech recognition), or estimate from a script with `captions_from_script`,
-then `set_caption_style`. `detect_pauses`, `remove_pauses` and `get_waveform` need ffmpeg. A Freesound sound keeps its
+OpenDesigner has no speech recognition built in), run the user's own whisper with `transcribe` (word
+timings, `apply: true` sets the captions), or estimate from a script with `captions_from_script`,
+then `set_caption_style`. Programs the user installs (ffmpeg, whisper, rembg for `remove_background`)
+may be missing: call `get_capabilities` before using them and, when one is missing, ask the user to
+install it (the report has the command) instead of failing mid-task. `detect_pauses`, `remove_pauses` and `get_waveform` need ffmpeg. A Freesound sound keeps its
 author's license: show the attribution the tool gives you (title, author, license, link) wherever
 the sound is used, and prefer CC0.
 

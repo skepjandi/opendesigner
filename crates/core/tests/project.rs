@@ -108,14 +108,14 @@ fn a_newer_format_is_refused_not_guessed_at() {
     let manifest = fs::read_to_string(dir.join("od.toml")).unwrap();
     fs::write(
         dir.join("od.toml"),
-        manifest.replace("format = 4", "format = 99"),
+        manifest.replace("format = 5", "format = 99"),
     )
     .unwrap();
     assert!(matches!(
         project::load(&dir),
         Err(ProjectError::NewerFormat {
             found: 99,
-            supported: 4
+            supported: 5
         })
     ));
 }

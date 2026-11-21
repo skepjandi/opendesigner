@@ -1107,6 +1107,7 @@ dependencies = [
 name = "opendesigner-media"
 version = "0.0.1"
 dependencies = [
+ "serde_json",
  "tempfile",
  "thiserror 2.0.21",
 ]

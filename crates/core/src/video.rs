@@ -47,6 +47,43 @@ pub enum Ease {
     Elastic,
     /// Falls to the end and bounces off it a few times, like a dropped ball.
     Bounce,
+    /// Holds each of 2 poses (the start, then the end): a jump halfway through.
+    #[serde(rename = "steps_2")]
+    Steps2,
+    /// Holds each of 3 evenly spaced poses, jumping between them.
+    #[serde(rename = "steps_3")]
+    Steps3,
+    /// Holds each of 4 evenly spaced poses: animation "on fours".
+    #[serde(rename = "steps_4")]
+    Steps4,
+    /// Holds each of 6 evenly spaced poses.
+    #[serde(rename = "steps_6")]
+    Steps6,
+    /// Holds each of 8 evenly spaced poses.
+    #[serde(rename = "steps_8")]
+    Steps8,
+    /// Holds each of 12 evenly spaced poses.
+    #[serde(rename = "steps_12")]
+    Steps12,
+    /// Power curves: progress is `t` raised to the number in the name (2 or 4).
+    Power2In,
+    Power2Out,
+    Power2InOut,
+    Power4In,
+    Power4Out,
+    Power4InOut,
+    /// Exponential curves: almost nothing, then everything (in), or the reverse (out).
+    ExpoIn,
+    ExpoOut,
+    ExpoInOut,
+    /// Circular curves: a quarter circle, steep at one end and flat at the other.
+    CircIn,
+    CircOut,
+    CircInOut,
+    /// Sine curves: the gentlest of the named eases.
+    SineIn,
+    SineOut,
+    SineInOut,
 }
 
 impl Ease {
@@ -76,8 +113,72 @@ impl Ease {
             }
             Ease::Elastic => elastic_out(t),
             Ease::Bounce => bounce_out(t),
+            Ease::Steps2 => steps(t, 2),
+            Ease::Steps3 => steps(t, 3),
+            Ease::Steps4 => steps(t, 4),
+            Ease::Steps6 => steps(t, 6),
+            Ease::Steps8 => steps(t, 8),
+            Ease::Steps12 => steps(t, 12),
+            Ease::Power2In => power_in(t, 2),
+            Ease::Power2Out => power_out(t, 2),
+            Ease::Power2InOut => power_in_out(t, 2),
+            Ease::Power4In => power_in(t, 4),
+            Ease::Power4Out => power_out(t, 4),
+            Ease::Power4InOut => power_in_out(t, 4),
+            Ease::ExpoIn => expo_in(t),
+            Ease::ExpoOut => 1.0 - expo_in(1.0 - t),
+            Ease::ExpoInOut => in_out(t, expo_in),
+            Ease::CircIn => circ_in(t),
+            Ease::CircOut => 1.0 - circ_in(1.0 - t),
+            Ease::CircInOut => in_out(t, circ_in),
+            Ease::SineIn => sine_in(t),
+            Ease::SineOut => 1.0 - sine_in(1.0 - t),
+            Ease::SineInOut => in_out(t, sine_in),
         }
     }
+}
+
+/// `count` poses spread from 0 to 1 and held for an equal share of the time each.
+fn steps(t: f64, count: u32) -> f64 {
+    let n = f64::from(count);
+    ((t * n).floor().min(n - 1.0)) / (n - 1.0)
+}
+
+fn power_in(t: f64, power: i32) -> f64 {
+    t.powi(power)
+}
+
+fn power_out(t: f64, power: i32) -> f64 {
+    1.0 - (1.0 - t).powi(power)
+}
+
+fn power_in_out(t: f64, power: i32) -> f64 {
+    in_out(t, |u| power_in(u, power))
+}
+
+/// Builds the in-out curve from an ease-in curve: the in curve mirrored around the middle.
+fn in_out(t: f64, ease_in: impl Fn(f64) -> f64) -> f64 {
+    if t < 0.5 {
+        ease_in(2.0 * t) / 2.0
+    } else {
+        1.0 - ease_in(2.0 - 2.0 * t) / 2.0
+    }
+}
+
+fn expo_in(t: f64) -> f64 {
+    if t <= 0.0 {
+        0.0
+    } else {
+        2f64.powf(10.0 * t - 10.0)
+    }
+}
+
+fn circ_in(t: f64) -> f64 {
+    1.0 - (1.0 - t * t).max(0.0).sqrt()
+}
+
+fn sine_in(t: f64) -> f64 {
+    1.0 - (t * std::f64::consts::FRAC_PI_2).cos()
 }
 
 fn elastic_out(t: f64) -> f64 {
@@ -336,6 +437,20 @@ pub struct Video {
     /// smear a real camera's shutter gives fast motion.
     #[serde(default, skip_serializing_if = "is_zero_u32")]
     pub motion_blur: u32,
+    /// Each drawing is held for this many frames (1 draws every frame, 2 is animation "on
+    /// twos", 3 "on threes"); see `Video::held_ms`.
+    #[serde(default = "one_u32", skip_serializing_if = "is_one_u32")]
+    pub hold_frames: u32,
+}
+
+pub const MAX_HOLD_FRAMES: u32 = 6;
+
+fn one_u32() -> u32 {
+    1
+}
+
+fn is_one_u32(v: &u32) -> bool {
+    *v == 1
 }
 
 fn is_zero_u32(v: &u32) -> bool {
@@ -390,6 +505,18 @@ impl Video {
         (self.duration_ms() * u64::from(self.fps)).div_ceil(1000)
     }
 
+    /// The moment whose picture is shown at `ms`: with `hold_frames` above 1 every frame of a
+    /// group of that many shows the picture of the group's first frame ("on twos"), otherwise
+    /// `ms` itself. Idempotent, so a frame's own start time maps to its group's start time.
+    pub fn held_ms(&self, ms: u64) -> u64 {
+        if self.hold_frames <= 1 {
+            return ms;
+        }
+        let frame = crate::timebase::frame_containing(ms, self.fps);
+        let first = frame - frame % u64::from(self.hold_frames);
+        crate::timebase::frame_ms(first, self.fps)
+    }
+
     pub fn clip(&self, id: &NodeId) -> Option<usize> {
         self.clips.iter().position(|c| &c.id == id)
     }
@@ -399,6 +526,15 @@ impl Video {
         text_within("video name", &self.name, limits::MAX_NAME_LEN)?;
         check_fps(self.fps)?;
         check_size(self.width, self.height)?;
+        if !(1..=MAX_HOLD_FRAMES).contains(&self.hold_frames) {
+            return Err(OpError::OutOfBounds {
+                what: "hold_frames",
+                detail: format!(
+                    "{} is not a number of frames from 1 to {MAX_HOLD_FRAMES}",
+                    self.hold_frames
+                ),
+            });
+        }
         if self.clips.len() > MAX_CLIPS {
             return Err(OpError::Limit(format!(
                 "at most {MAX_CLIPS} clips per video"
@@ -583,6 +719,8 @@ pub enum VideoProperty {
     Captions(crate::captions::Captions),
     /// Pictures blended per frame for motion blur: 0 (off) or 2 to 16.
     MotionBlur(u32),
+    /// Frames each drawing is held for: 1 (every frame is drawn) to 6; 2 is "on twos".
+    HoldFrames(u32),
 }
 
 /// One settable property of a clip. Serialized as `{"name": "duration_ms", "value": 3000}`.
@@ -742,6 +880,7 @@ pub(crate) fn apply(
                 captions: Default::default(),
                 animations: Vec::new(),
                 motion_blur: 0,
+                hold_frames: 1,
             };
             video.check_fields()?;
             let id = video.id.clone();
@@ -831,6 +970,10 @@ pub(crate) fn apply(
                 VideoProperty::MotionBlur(samples) => {
                     let old = std::mem::replace(&mut video.motion_blur, *samples);
                     (VideoProperty::MotionBlur(old), prop.clone())
+                }
+                VideoProperty::HoldFrames(frames) => {
+                    let old = std::mem::replace(&mut video.hold_frames, *frames);
+                    (VideoProperty::HoldFrames(old), prop.clone())
                 }
             };
             if let Err(e) = video.check_fields() {
@@ -1225,6 +1368,98 @@ mod ease_tests {
                 (1..100).all(|i| e.apply(f64::from(i) / 100.0) <= 1.0),
                 "{e:?}"
             );
+        }
+    }
+
+    const MONOTONE: [Ease; 18] = [
+        Ease::Power2In,
+        Ease::Power2Out,
+        Ease::Power2InOut,
+        Ease::Power4In,
+        Ease::Power4Out,
+        Ease::Power4InOut,
+        Ease::ExpoIn,
+        Ease::ExpoOut,
+        Ease::ExpoInOut,
+        Ease::CircIn,
+        Ease::CircOut,
+        Ease::CircInOut,
+        Ease::SineIn,
+        Ease::SineOut,
+        Ease::SineInOut,
+        Ease::Steps2,
+        Ease::Steps4,
+        Ease::Steps12,
+    ];
+
+    #[test]
+    fn named_eases_start_at_zero_end_at_one_and_never_go_backwards() {
+        for e in MONOTONE {
+            assert!(e.apply(0.0).abs() < 1e-9, "{e:?}");
+            assert!((e.apply(1.0) - 1.0).abs() < 1e-9, "{e:?}");
+            let mut last = 0.0;
+            for i in 0..=1000 {
+                let v = e.apply(f64::from(i) / 1000.0);
+                assert!(v >= last - 1e-12 && v <= 1.0 + 1e-12, "{e:?} at {i}: {v}");
+                last = v;
+            }
+        }
+    }
+
+    #[test]
+    fn named_eases_have_their_known_midpoints() {
+        let mid = |e: Ease| e.apply(0.5);
+        assert!((mid(Ease::Power2In) - 0.25).abs() < 1e-9);
+        assert!((mid(Ease::Power2Out) - 0.75).abs() < 1e-9);
+        assert!((mid(Ease::Power4In) - 0.0625).abs() < 1e-9);
+        assert!((mid(Ease::Power4Out) - 0.9375).abs() < 1e-9);
+        assert!((mid(Ease::ExpoIn) - 2f64.powi(-5)).abs() < 1e-9);
+        assert!((mid(Ease::CircIn) - (1.0 - 0.75f64.sqrt())).abs() < 1e-9);
+        assert!((mid(Ease::SineIn) - (1.0 - 0.5f64.sqrt())).abs() < 1e-9);
+        for e in [
+            Ease::Power2InOut,
+            Ease::Power4InOut,
+            Ease::ExpoInOut,
+            Ease::CircInOut,
+            Ease::SineInOut,
+        ] {
+            assert!((mid(e) - 0.5).abs() < 1e-9, "{e:?}");
+        }
+        for (a, b) in [
+            (Ease::ExpoIn, Ease::ExpoOut),
+            (Ease::CircIn, Ease::CircOut),
+            (Ease::SineIn, Ease::SineOut),
+            (Ease::Power4In, Ease::Power4Out),
+        ] {
+            assert!((a.apply(0.3) - (1.0 - b.apply(0.7))).abs() < 1e-9, "{a:?}");
+        }
+    }
+
+    #[test]
+    fn steps_hold_each_pose_for_an_equal_share_of_the_time() {
+        assert_eq!(Ease::Steps4.apply(0.0), 0.0);
+        assert_eq!(Ease::Steps4.apply(0.24), 0.0);
+        assert!((Ease::Steps4.apply(0.25) - 1.0 / 3.0).abs() < 1e-9);
+        assert!((Ease::Steps4.apply(0.6) - 2.0 / 3.0).abs() < 1e-9);
+        assert_eq!(Ease::Steps4.apply(0.75), 1.0);
+        assert_eq!(Ease::Steps4.apply(1.0), 1.0);
+        assert_eq!(Ease::Steps2.apply(0.49), 0.0);
+        assert_eq!(Ease::Steps2.apply(0.5), 1.0);
+    }
+
+    #[test]
+    fn new_eases_use_their_snake_case_names() {
+        for (name, ease) in [
+            ("steps_4", Ease::Steps4),
+            ("power2_in_out", Ease::Power2InOut),
+            ("power4_out", Ease::Power4Out),
+            ("expo_in", Ease::ExpoIn),
+            ("circ_out", Ease::CircOut),
+            ("sine_in_out", Ease::SineInOut),
+        ] {
+            let json = serde_json::json!(name);
+            assert_eq!(serde_json::from_value::<Ease>(json.clone()).unwrap(), ease);
+            assert_eq!(serde_json::to_value(ease).unwrap(), json);
         }
     }
 }

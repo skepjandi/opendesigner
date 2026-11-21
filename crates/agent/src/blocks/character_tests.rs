@@ -9,18 +9,18 @@ use tempfile::TempDir;
 
 use super::*;
 
-struct Fixture {
+pub(super) struct Fixture {
     _dir: TempDir,
-    ws: Workspace,
-    frame: NodeId,
-    video: NodeId,
+    pub(super) ws: Workspace,
+    pub(super) frame: NodeId,
+    pub(super) video: NodeId,
 }
 
-fn apply(ws: &mut Workspace, ops: Vec<Operation>) -> od_core::TxReceipt {
+pub(super) fn apply(ws: &mut Workspace, ops: Vec<Operation>) -> od_core::TxReceipt {
     ws.session.apply(Actor::User, None, &ops).unwrap()
 }
 
-fn fixture(w: u32, h: u32) -> Fixture {
+pub(super) fn fixture(w: u32, h: u32) -> Fixture {
     let dir = tempfile::tempdir().unwrap();
     let mut ws = Workspace::create(&dir.path().join("p.od"), "Characters").unwrap();
     let root = ws.session.document().pages[0].root.id.clone();
@@ -56,7 +56,7 @@ fn fixture(w: u32, h: u32) -> Fixture {
 }
 
 impl Fixture {
-    fn doc(&self) -> &Document {
+    pub(super) fn doc(&self) -> &Document {
         self.ws.session.document()
     }
 
@@ -64,7 +64,7 @@ impl Fixture {
         self.ws.dir().unwrap()
     }
 
-    fn request(&self, block: &str, params: Option<Value>) -> Request {
+    pub(super) fn request(&self, block: &str, params: Option<Value>) -> Request {
         Request {
             block: block.into(),
             frame: Some(self.frame.to_string()),
@@ -74,7 +74,7 @@ impl Fixture {
         }
     }
 
-    fn add(&mut self, block: &str, params: Option<Value>) -> Plan {
+    pub(super) fn add(&mut self, block: &str, params: Option<Value>) -> Plan {
         let p = plan(self.doc(), &self.request(block, params))
             .unwrap_or_else(|e| panic!("{block}: {e}"));
         apply(&mut self.ws, p.ops.clone());
@@ -82,7 +82,7 @@ impl Fixture {
     }
 
     /// The frame as it looks `t_ms` into the video.
-    fn shot(&self, t_ms: f64) -> od_render::Pixmap {
+    pub(super) fn shot(&self, t_ms: f64) -> od_render::Pixmap {
         let video = self.doc().video(&self.video).unwrap();
         let doc = self
             .doc()
@@ -130,9 +130,9 @@ fn dump_pictures() {
     }
 }
 
-const SIZES: [(u32, u32); 3] = [(1290, 2796), (1920, 1080), (1080, 1080)];
+pub(super) const SIZES: [(u32, u32); 3] = [(1290, 2796), (1920, 1080), (1080, 1080)];
 
-fn part(p: &Plan, name: &str) -> NodeId {
+pub(super) fn part(p: &Plan, name: &str) -> NodeId {
     p.parts
         .iter()
         .find(|(n, _)| n == name)
@@ -146,13 +146,13 @@ fn part(p: &Plan, name: &str) -> NodeId {
         .clone()
 }
 
-fn at(f: &Fixture, t: f64) -> Document {
+pub(super) fn at(f: &Fixture, t: f64) -> Document {
     f.doc()
         .at_time(f.doc().video(&f.video).unwrap(), t)
         .unwrap()
 }
 
-fn bounds(f: &Fixture, doc: &Document, id: &NodeId) -> Rect {
+pub(super) fn bounds(f: &Fixture, doc: &Document, id: &NodeId) -> Rect {
     geometry::bounds_in_frame(doc, &f.frame, id).unwrap()
 }
 
@@ -168,11 +168,11 @@ fn group_bounds(f: &Fixture, root: &NodeId) -> Rect {
         .unwrap()
 }
 
-fn mid(r: Rect) -> (f64, f64) {
+pub(super) fn mid(r: Rect) -> (f64, f64) {
     (r.x + r.width / 2.0, r.y + r.height / 2.0)
 }
 
-fn track(f: &Fixture, node: &NodeId, prop: AnimProp) -> od_core::Animation {
+pub(super) fn track(f: &Fixture, node: &NodeId, prop: AnimProp) -> od_core::Animation {
     f.doc()
         .video(&f.video)
         .unwrap()
@@ -184,7 +184,7 @@ fn track(f: &Fixture, node: &NodeId, prop: AnimProp) -> od_core::Animation {
 }
 
 /// The share of pixels inside `r` (frame units, picture at half size) that differ.
-fn changed_in(a: &od_render::Pixmap, b: &od_render::Pixmap, r: Rect) -> f64 {
+pub(super) fn changed_in(a: &od_render::Pixmap, b: &od_render::Pixmap, r: Rect) -> f64 {
     let s = 0.5;
     let (x0, y0) = (
         (r.x * s).floor().max(0.0) as u32,

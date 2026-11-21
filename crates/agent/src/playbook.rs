@@ -86,7 +86,7 @@ pub const TOPICS: &[(&str, &str, &str)] = &[
     ),
     (
         "characters",
-        "flat-vector characters, speech and thought bubbles and animated props (rocket, bulb, atom, planet, tree, house, laptop, gear, cell, DNA): the rig, actions, timing",
+        "flat-vector characters (18 expressions, expression changes, looks, reactions), emote marks (exclamation, sweat, hearts, lightbulb, zzz), speech and thought bubbles and animated props (rocket, bulb, atom, planet, tree, house, laptop, gear, cell, DNA): the rig, acting, actions, timing",
         include_str!("../skill/characters-playbook.md"),
     ),
     (
@@ -98,6 +98,16 @@ pub const TOPICS: &[(&str, &str, &str)] = &[
         "scenery",
         "flat-vector scenes: layered scenery blocks, parallax, idle loops, scene moves and camera presets",
         include_str!("../skill/scenery-playbook.md"),
+    ),
+    (
+        "review",
+        "reviewing your own video: the self-critique loop, the checklist, strips, crops, grids, diffs and review_video",
+        include_str!("../skill/review-playbook.md"),
+    ),
+    (
+        "sketch",
+        "hand-made looks: sketch, boil, watercolor_wash, paper_grain, flow_strokes, marker_underline, scribble_circle; when to use them, how to combine them, palette and node budgets",
+        include_str!("../skill/sketch-playbook.md"),
     ),
 ];
 

@@ -16,9 +16,14 @@ use std::thread::JoinHandle;
 use thiserror::Error;
 
 pub mod analysis;
+pub mod cutout;
+pub mod external;
+pub mod loudness;
 pub mod mix;
+pub mod speech;
 
 pub use analysis::Pause;
+pub use loudness::{Loudness, Measured};
 pub use mix::{AudioPiece, DuckSettings, PieceRole};
 
 /// Names the `OPENDESIGNER_FFMPEG` environment variable gives a specific `ffmpeg` to use.
@@ -584,26 +589,27 @@ pub fn audio_path(project: &Path, reference: &str) -> Result<PathBuf, MediaError
 }
 
 /// Puts the sound of `pieces` under the picture of `video` (copied, not re-encoded) and writes
-/// `output`. Each piece is cut from its file, delayed to its place and mixed with the others.
+/// `output`. Each piece is cut from its file, delayed to its place and mixed with the others;
+/// with `loudness` the mix is first measured and then brought to that target
+/// (`loudness` module).
 pub fn add_audio(
     ffmpeg: &Ffmpeg,
     video: &Path,
     pieces: &[AudioPiece],
+    loudness: Option<Loudness>,
     output: &Path,
 ) -> Result<(), MediaError> {
-    let mut cmd = Command::new(&ffmpeg.path);
-    cmd.args(["-hide_banner", "-loglevel", "error", "-y", "-i"])
-        .arg(video);
-    for p in pieces {
-        cmd.arg("-i").arg(&p.file);
-    }
-    let filter = mix::filter_graph(pieces);
+    let master = match loudness {
+        Some(target) => Some(mastering_filter(ffmpeg, video, pieces, target)?),
+        None => None,
+    };
+    let filter = mix::filter_graph_with(pieces, master.as_deref());
+    let mut cmd = mix_command(ffmpeg, video, pieces, "error");
     let out = cmd
         .args(["-filter_complex", &filter, "-map", "0:v", "-map", "[a]"])
         .args(["-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-shortest"])
         .args(["-movflags", "+faststart", "-f", "mp4"])
         .arg(output)
-        .stdin(Stdio::null())
         .output()
         .map_err(|e| MediaError::Io(e.to_string()))?;
     if out.status.success() {
@@ -614,6 +620,51 @@ pub fn add_audio(
             String::from_utf8_lossy(&out.stderr).trim().to_string(),
         ))
     }
+}
+
+/// An ffmpeg command with the picture and every piece as inputs, logging at level `log`.
+fn mix_command(ffmpeg: &Ffmpeg, video: &Path, pieces: &[AudioPiece], log: &str) -> Command {
+    let mut cmd = Command::new(&ffmpeg.path);
+    cmd.args(["-hide_banner", "-nostats", "-loglevel", log, "-y", "-i"])
+        .arg(video);
+    for p in pieces {
+        cmd.arg("-i").arg(&p.file);
+    }
+    cmd.stdin(Stdio::null());
+    cmd
+}
+
+/// The loudness filter for the final mix: the second pass of `target`, or its one-pass form when
+/// the first pass reports nothing usable.
+fn mastering_filter(
+    ffmpeg: &Ffmpeg,
+    video: &Path,
+    pieces: &[AudioPiece],
+    target: Loudness,
+) -> Result<String, MediaError> {
+    let filter = mix::filter_graph_with(pieces, Some(&target.measuring_filter()));
+    let out = mix_command(ffmpeg, video, pieces, "info")
+        .args(["-filter_complex", &filter, "-map", "0:v", "-map", "[a]"])
+        .args([
+            "-c:v",
+            "copy",
+            "-c:a",
+            "pcm_s16le",
+            "-shortest",
+            "-f",
+            "null",
+            "-",
+        ])
+        .output()
+        .map_err(|e| MediaError::Io(e.to_string()))?;
+    let log = String::from_utf8_lossy(&out.stderr);
+    if !out.status.success() {
+        return Err(MediaError::Failed(log.trim().to_string()));
+    }
+    Ok(match Measured::parse(&log) {
+        Some(measured) => target.applying_filter(&measured),
+        None => target.single_pass_filter(),
+    })
 }
 
 /// Mixes `pieces` into one stereo 44.1 kHz 16-bit WAV at `output`, `duration_ms` long: the sound

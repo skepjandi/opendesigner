@@ -155,6 +155,7 @@ impl<'a> VideoRenderer<'a> {
     /// every frame is identical, and an export can reuse the last one instead of drawing it
     /// again. `None` when the picture changes all the time (footage, a screen playing).
     pub fn signature(&self, time_ms: u64) -> Option<Vec<i64>> {
+        let time_ms = self.video.held_ms(time_ms);
         let mut sig = self.signature_at(time_ms, true)?;
         let shutter = self.shutter_ms();
         if shutter > 0.0 {
@@ -304,6 +305,7 @@ impl<'a> VideoRenderer<'a> {
     /// video is black. With motion blur on, a moment in which something moves is the average of
     /// several pictures across the shutter before it.
     pub fn frame_at(&mut self, time_ms: u64) -> Result<Pixmap, RenderError> {
+        let time_ms = self.video.held_ms(time_ms);
         let shutter = self.shutter_ms();
         if shutter <= 0.0 || !self.in_motion(time_ms, shutter) {
             return self.picture(time_ms as f64, time_ms);

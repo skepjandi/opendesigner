@@ -69,7 +69,7 @@ pub(crate) fn video_file_name(file: &str) -> Result<&str, ToolError> {
 }
 
 /// The document as it reads in `locale`, or as it is.
-fn document_in<'a>(
+pub(crate) fn document_in<'a>(
     ws: &'a Source,
     locale: Option<&str>,
 ) -> Result<std::borrow::Cow<'a, od_core::Document>, ToolError> {
@@ -343,6 +343,25 @@ pub fn export_video_with(
     workers: usize,
     progress: &mut dyn FnMut(u64, u64) -> bool,
 ) -> Result<VideoOutcome, ToolError> {
+    export_video_mastered(
+        ws, video, file, locale, preset_id, ffmpeg, workers, None, progress,
+    )
+}
+
+/// [`export_video_with`] bringing the final mix to a `loudness` target when there is sound
+/// (`od_media::loudness`); a video with no sound is exported as it is.
+#[allow(clippy::too_many_arguments)]
+pub fn export_video_mastered(
+    ws: &Source,
+    video: &NodeId,
+    file: &str,
+    locale: Option<&str>,
+    preset_id: Option<&str>,
+    ffmpeg: &Ffmpeg,
+    workers: usize,
+    loudness: Option<od_media::Loudness>,
+    progress: &mut dyn FnMut(u64, u64) -> bool,
+) -> Result<VideoOutcome, ToolError> {
     let preset = check_export(ws, video, file, locale, preset_id)?;
     let file = video_file_name(file)?;
     let dir = exports_dir(ws)?;
@@ -461,7 +480,7 @@ pub fn export_video_with(
     let encoder = writer.encoder.to_string();
     let mut bytes = writer.finish().map_err(|e| ToolError(e.to_string()))?;
     if !audio.is_empty() {
-        let mixed = od_media::add_audio(ffmpeg, &picture_path, &audio, &final_path);
+        let mixed = od_media::add_audio(ffmpeg, &picture_path, &audio, loudness, &final_path);
         let _ = std::fs::remove_file(&picture_path);
         mixed.map_err(|e| ToolError(e.to_string()))?;
         bytes = std::fs::metadata(&final_path)

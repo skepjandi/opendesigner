@@ -9,29 +9,44 @@ mod args;
 mod art;
 mod backdrops;
 mod bubbles;
+mod character_acting;
 mod character_motion;
 mod characters;
 mod data;
+mod emotes;
+mod emphasis;
+mod faces;
+mod fieldgeo;
 mod files;
+mod flow;
 mod guides;
 mod kit;
 mod land;
 mod micro;
 mod overlays;
+mod paper;
 mod plan;
 mod props;
 mod props_science;
 mod registry;
 mod scene;
+mod sketch;
+mod sketchdraw;
+mod sketchgeo;
 mod sky;
 mod social;
 mod titles;
+mod wash;
 mod wrappers;
 
 #[cfg(test)]
 mod character_tests;
 #[cfg(test)]
+mod emote_tests;
+#[cfg(test)]
 mod scenery_tests;
+#[cfg(test)]
+mod sketch_tests;
 #[cfg(test)]
 mod tests;
 
@@ -75,13 +90,16 @@ pub fn definitions() -> Vec<Value> {
         tool(
             "list_blocks",
             "The block catalog: ready-made titles, lower thirds, overlays, backgrounds, charts, store \
-             headlines, motion wrappers, rigged flat-vector characters, speech and thought bubbles and animated props that expand into ordinary nodes (and keyframes on a video). \
+             headlines, motion wrappers, rigged flat-vector characters (eighteen expressions, expression changes, reactions), emote marks (exclamation, sweat drops, hearts, lightbulb, zzz), speech and thought bubbles and animated props that expand into ordinary nodes (and keyframes on a video). \
              Search by what you need (`query`: words matched against names, tags and descriptions) \
              and/or `category`. Each result has the block id, its category and what it is for. Then \
              get_block for its parameters and add_block to use it. Scenery blocks (sky_gradient, \
              parallax_hills, starfield, clouds, sun_glow, ocean_waves, city_skyline, cells_backdrop, \
              particles, grid_floor, connector, highlight_ring) build layered, always-moving \
-             flat-vector scenes: read get_playbook `scenery` first.",
+             flat-vector scenes: read get_playbook `scenery` first. Hand-made looks (sketch, boil, \
+             watercolor_wash, paper_grain, flow_strokes, marker_underline, scribble_circle) draw \
+             wobbly pen outlines and hatching, painted washes, film grain, grass and wind strokes and \
+             hand-drawn emphasis: read get_playbook `sketch` first.",
             json!({
                 "query": text("Words describing what you need, e.g. 'lower third name' or 'bar chart'."),
                 "category": {"type": "string", "enum": categories},

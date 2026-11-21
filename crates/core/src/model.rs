@@ -11,9 +11,9 @@ use crate::vector::{FillRule, LineCap, LineJoin, ViewBox};
 /// Version of the on-disk project format. A loader refuses a newer one. Version 2 added 3D
 /// devices and keyframe animations; version 3 added sound tracks, captions, clip speed and grades,
 /// transitions and template variables; version 4 added vector paths, gradients, 2D transforms,
-/// effects, looping keyframes and the camera. Every older project is a valid version 4 project, because
+/// effects, looping keyframes and the camera; version 5 added `Video.hold_frames`. Every older project is a valid version 5 project, because
 /// each addition is an optional field.
-pub const FORMAT_VERSION: u32 = 4;
+pub const FORMAT_VERSION: u32 = 5;
 
 /// Stable identifier of a node or page. Never reused within a document.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]

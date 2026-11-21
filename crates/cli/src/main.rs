@@ -12,6 +12,8 @@ use od_core::{
 };
 mod blocks;
 mod doccmd;
+mod external;
+mod inspect;
 mod review_video;
 mod serve;
 mod skillcmd;
@@ -127,6 +129,9 @@ enum Command {
         /// Show this language's translations.
         #[arg(long)]
         locale: Option<String>,
+        /// Bring the final mix to -14 (social), -16 (podcast) or -23 (broadcast) LUFS.
+        #[arg(long, allow_negative_numbers = true)]
+        loudness: Option<f64>,
     },
     /// List the store presets for videos (app previews).
     VideoPresets,
@@ -206,7 +211,7 @@ enum Command {
         /// fade_in, fade_out, bob, breathe, pulse, wobble, shake, pop_in, bounce_in, elastic_in,
         /// slide_in_left|right|up|down, fade_up, zoom_in, draw_on, orbit, stagger,
         /// animate_along_path) and the camera (camera_push_in, camera_pull_back, camera_pan,
-        /// camera_drift, camera_shake, camera_whip). `get_playbook scenery` describes them.
+        /// camera_drift, camera_shake, camera_whip, camera_burst). `get_playbook scenery` describes them.
         #[arg(long)]
         preset: String,
         /// When the move starts, from the start of the video.
@@ -218,7 +223,7 @@ enum Command {
         /// How far the move goes; 1 is as designed.
         #[arg(long, alias = "strength")]
         intensity: Option<f64>,
-        /// The ease: linear, ease_in, ease_out, ease_in_out, back, spring, elastic, bounce, ...
+        /// The ease: linear, ease_in, ease_out, ease_in_out, back, spring, elastic, bounce, power2_out, power4_out, expo_out, circ_out, sine_in_out, steps_4, ...
         #[arg(long)]
         ease: Option<String>,
         /// once, loop or pingpong (scene moves).
@@ -256,9 +261,18 @@ enum Command {
         /// stagger: the delay between one node and the next.
         #[arg(long)]
         step_ms: Option<u64>,
-        /// stagger: first, last, center or random.
+        /// stagger: first, last, center, edges or random.
         #[arg(long = "from")]
         from_end: Option<String>,
+        /// stagger: lay the nodes out as a grid this many columns wide.
+        #[arg(long)]
+        columns: Option<u32>,
+        /// stagger with --columns: manhattan or euclid distance.
+        #[arg(long)]
+        metric: Option<String>,
+        /// stagger with --columns: index in --nodes of the cell the wave starts from.
+        #[arg(long)]
+        start_index: Option<u32>,
         #[arg(long)]
         agent: Option<String>,
     },
@@ -335,6 +349,14 @@ enum Command {
     ImportSvgVector(vector::ImportSvgVector),
     /// Review a video for animation quality: motion, layers, sound, a score and the top fixes.
     ReviewVideo(review_video::ReviewVideo),
+    /// Speech to text with the user's whisper program; optionally sets the words as captions.
+    Transcribe(external::Transcribe),
+    /// Cut a subject out of a project image with the user's rembg.
+    RemoveBackground(external::RemoveBackground),
+    /// Which external programs (ffmpeg, whisper, rembg) are installed, and how to install the rest.
+    Doctor(external::Doctor),
+    /// Look closely at a video: a strip of frames, a crop at full size, a coordinate grid, a diff. Writes a PNG to exports/.
+    Inspect(inspect::Inspect),
     /// Sound tracks, pauses and waveforms of a video.
     Sound {
         #[command(subcommand)]
@@ -711,19 +733,26 @@ fn run(cli: Cli) -> Result<(), CliError> {
             file,
             preset,
             locale,
+            loudness,
         } => {
             let ws = Workspace::open(&dir)?;
             let id = NodeId::parse(&video)?;
+            let loudness = loudness
+                .map(od_agent::tools::loudness_target)
+                .transpose()
+                .map_err(|e| CliError::Invalid(e.0))?;
             let src = od_agent::video_export::Source::of(&ws);
             let ffmpeg =
                 od_media::Ffmpeg::locate().map_err(|e| CliError::Invalid(e.to_string()))?;
-            let out = od_agent::video_export::export_video(
+            let out = od_agent::video_export::export_video_mastered(
                 &src,
                 &id,
                 &file,
                 locale.as_deref(),
                 preset.as_deref(),
                 &ffmpeg,
+                od_render::export::default_workers(),
+                loudness,
                 &mut |done, total| {
                     if done % 30 == 0 || done == total {
                         eprint!("\rframe {done} of {total}");
@@ -881,6 +910,9 @@ fn run(cli: Cli) -> Result<(), CliError> {
             nodes,
             step_ms,
             from_end,
+            columns,
+            metric,
+            start_index,
             agent,
         } => {
             let mut session = project::load(&dir)?;
@@ -909,6 +941,9 @@ fn run(cli: Cli) -> Result<(), CliError> {
                     ),
                     ("step_ms", step_ms.map(serde_json::Value::from)),
                     ("from", from_end.map(serde_json::Value::from)),
+                    ("columns", columns.map(serde_json::Value::from)),
+                    ("metric", metric.map(serde_json::Value::from)),
+                    ("start_index", start_index.map(serde_json::Value::from)),
                 ];
                 for (name, value) in extras {
                     if let (Some(v), Some(o)) = (value, args.as_object_mut()) {
@@ -1021,6 +1056,10 @@ fn run(cli: Cli) -> Result<(), CliError> {
         Command::Blocks { action } => blocks::run(action)?,
         Command::ImportSvgVector(args) => vector::run(args)?,
         Command::ReviewVideo(args) => review_video::run(args)?,
+        Command::Transcribe(args) => external::transcribe(args)?,
+        Command::RemoveBackground(args) => external::remove_background(args)?,
+        Command::Doctor(args) => external::doctor(args),
+        Command::Inspect(args) => inspect::run(args)?,
         Command::Sound { action } => sound::sound(action)?,
         Command::Captions { action } => sound::captions(action)?,
         Command::Skill { action } => skillcmd::run(action)?,

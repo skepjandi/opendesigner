@@ -213,6 +213,8 @@ pub struct VideoRow {
     pub animations: Vec<crate::animation::Animation>,
     /// Pictures blended per frame for motion blur (0 is off).
     pub motion_blur: u32,
+    /// Frames each drawing is held for (1 draws every frame, 2 is "on twos").
+    pub hold_frames: u32,
     /// What happens, in order, in words: the clips with their motion and how each one arrives,
     /// then the overlays by start time, then what is animated.
     pub story: Vec<String>,
@@ -341,6 +343,12 @@ fn story_of(doc: &Document, v: &crate::video::Video) -> Vec<String> {
             v.motion_blur
         ));
     }
+    if v.hold_frames > 1 {
+        out.push(format!(
+            "held frames: every drawing is held for {} frames",
+            v.hold_frames
+        ));
+    }
     if let Some(a) = &v.audio {
         let fades = match (a.fade_in_ms, a.fade_out_ms) {
             (0, 0) => String::new(),
@@ -461,6 +469,7 @@ pub fn videos(doc: &Document) -> Vec<VideoRow> {
                 },
                 animations: v.animations.clone(),
                 motion_blur: v.motion_blur,
+                hold_frames: v.hold_frames,
                 story: story_of(doc, v),
             }
         })

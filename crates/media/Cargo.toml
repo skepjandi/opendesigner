@@ -13,6 +13,7 @@ publish.workspace = true
 name = "od_media"
 
 [dependencies]
+serde_json.workspace = true
 thiserror.workspace = true
 
 [lints]
