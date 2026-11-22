@@ -6,6 +6,66 @@ All notable changes to OpenDesigner are documented here.
 >
 > **Wiki**: the [GitHub Wiki](https://github.com/skepjandi/opendesigner/wiki) is the public-facing main wiki — architecture, document format, agent integration, security model, roadmap. Source-controlled editing surface is `docs/wiki/` in this repo; CI (`.github/workflows/sync-wiki.yml`) mirrors it to the GitHub Wiki on every merge to `main`. New single-PR changes belong here, not as new wiki pages.
 
+## 2026-11-30
+
+### feat(agent): style packs, a locked palette and the linter that holds it
+
+**Area:** `feat(agent)`, `feat(core)`, `feat(skill)`, `docs(wiki)`
+
+- **Eight packs.** A style pack is a palette, a type scale, a shape posture, a motion personality, the rules that hold them together and the anti-patterns that keep the slop out: `deep-space-flat`, `paper-craft`, `swiss-kinetic`, `neon-night`, `soft-clay`, `editorial-ink`, `sunny-explainer`, `mono-terminal`. They are data in the crate, not files to load at run time. A test checks every pack's WCAG contrast (text 4.5:1 on the ground and on the surface, the accent 3:1) and that the eight differ from each other in OKLab.
+- **Three tools.** `list_style_packs` (id, name, mood, swatches, motion personality), `get_style_pack {id}` (the whole pack, the rules written as guidance) and `apply_style_pack {id, overrides?}`, which writes the palette into the document as the tokens `bg`, `surface`, `fg`, `muted`, `border`, `accent`, `accent_2` and `shadow`, adds the `palette_locked` marker and records the pack's id and motion personality in the workspace brief — one attributed, checkpointed, undoable step, so undoing it takes the palette with it.
+- **The palette lock.** New lint rule `OD092 palette-lock` (warn): with the marker in the document, a fill or a stroke that is neither a token, nor within 0.04 of a palette colour in OKLab, nor a blend of two palette colours at 25, 50 or 75 percent, is flagged with the node and the nearest palette colour. Without the marker the rule is off, so a project that never chose a pack behaves as before.
+- **Playbook.** New topic `packs`: choosing a pack from the brief, saying which one was chosen and why, never mixing two, the 80/20 rule, the motion personality mapped to eases, durations and stagger, and the anti-slop list adapted to motion.
+
+## 2026-11-29
+
+### feat(agent): the motion and scene gates, and a review that says what it could not check
+
+**Area:** `feat(agent)`, `docs(wiki)`
+
+- **Three tools.** `verify_motion` samples every animation track (the camera's too) at least 5 moments and compares the value the track says with the value the renderer's pipeline draws (G1), checks that every value is finite and legal (G2) and that a track which repeats ends where it starts (G3: rotation 0.5 degrees, position 0.01 of the frame height, scale and opacity 0.005, that last one uncalibrated so it only warns). With `classify` it measures every moving node in fractions of the frame height and names the motion (idle, in-place, walk, run, dash, jump, leap, planted, gesture); ambient life must read as idle or it warns. `scene_check` runs the geometry gates of a plan: bleed under every camera pose, the gap between a child and its parent, chirality, part coverage, the motion roster and the shapes frozen after the shapes pass. `hit_test` lists the node ids under a point, topmost first.
+- **A track that drives nothing.** Finding `RV020`: the node does not exist, the property does not apply to that kind of node, its scene is not on screen while the track plays, the node is hidden or at opacity 0, the track starts after the video ends, or the picture does not show the value the track says. It is an error; a track whose keyframes all hold one value is the same finding as a warning.
+- **Unevaluated is not a pass.** Every gate answers `pass`, `fail` or `unevaluated` with its reasons. The review report names the gates it could not evaluate (the beat without a tempo, the flash scan of a video with footage) and says why; `ready` is false while one stands, unless the caller passes `allow_unevaluated`.
+
+## 2026-11-28
+
+### feat(agent): kinetic type, a text node split into pieces and brought in one by one
+
+**Area:** `feat(agent)`, `feat(skill)`, `docs(wiki)`
+
+- **Splitting.** `split_text {node, by, wrap?, mode?}` turns a text node into a group of one text node per character, word or line, each drawn where the original glyphs were: the lines are the ones the renderer's own wrapping breaks to, and the positions come from that layout rather than from a guess. The pieces keep the font, size, weight, line height, fill and stroke, spaces are not nodes, and the ids come back in reading order. `wrap` puts each piece in its own clipping mask so it can rise or slide in from outside the box; `mode: keep` hides the original, `replace` removes it, and one undo puts the text back.
+- **Reveals.** `text_reveal {video, node, style}` splits and animates in one turn: rise (450 ms, `power4_out`, masked), fade (400 ms, `ease_out`), pop (350 ms, `back_out`), slide (500 ms, `power4_out`) and typewriter (33 ms per character), staggered 40 ms per character, 90 per word and 140 per line. The result gives every piece's start and end, when the reveal ends, and how long the text must stay to be readable (1 s plus 0.4 s per short word, the `RV015` rule).
+- **Playbook and wiki.** A "Kinetic type" section in the motion playbook (when to split by words and when by characters, the stagger bands, never per character for body copy, the hold) and a wiki section with the tools, their defaults and what a split cannot do (the kerning between two pieces, ligatures, the alignment, right-to-left text).
+
+### feat(agent): sequencing, springs and a stagger that measures the real nodes
+
+**Area:** `feat(agent)`, `feat(skill)`, `docs(wiki)`
+
+- **A position grammar.** `sequence` places a list of moves against each other in one turn and one undo step: every step says where it starts, as a number or as a phrase against what is already there (`<` the end of the step before, `<<` its start, `<+=50` an overlap, `intro+=200` after a named step). A label that does not exist yet, an empty position and a start before zero are refused; the result echoes the resolved start and end of every step, and `fit_to_ms` scales the whole sequence to a length.
+- **Stagger v2.** The `stagger` object adds value staggers (`range`: each node's intensity multiplied by its value), an index or a point for the origin, a grid measured by `euclid`, `manhattan` or `chebyshev`, an `axis`, an eased or reversed distribution, a seeded `jitter_ms` and `spatial` (distances between the nodes' real centres, in units of the nearest pair). The older `step_ms`, `from`, `columns`, `metric` and `start_index` still work. The seeded generator is Mulberry32, bit for bit, so a seed gives the same jitter and the same shuffle every run.
+- **Springs.** `spring_to` sends one property to a value on a spring and says when it looks done and when it has really stopped, so the next beat can be placed after it. A tuned spring ease on an entrance stretches the move to the time the spring needs to rest, and the result says by how much.
+- **Playbook and wiki.** A "Sequencing and springs" section in the motion playbook with the numbers (stagger 40 to 120 ms, overlap 40 to 80 ms, anticipation 6 to 10 percent, the spring presets), and the scene motion page of the wiki documents the tools and their arguments.
+
+## 2026-11-27
+
+### feat(agent): the SceneSpec, the locked build passes and the review ledger
+
+**Area:** `feat(agent)`, `feat(skill)`, `docs(wiki)`
+
+- **Plan first.** A SceneSpec per video in `scene_specs/<name>.json` inside the project: brief, routing, complexity tier, palette tokens, layer plan, detail inventory, feature targets, motion plan, audio plan, budgets, build passes, freeze, review history, calibration. Unknown fields are kept, not rejected.
+- **Tools.** `scene_spec_new` (a starter whose placeholders fail strict validation on purpose), `scene_spec_write`, `scene_spec_validate {strict}`, `scene_status` (current pass, loop counters, `active`/`stopped` with the reason, the missing evidence and the exact next call) and `record_review` (one of `continue`, `refine-spec`, `refine-code`, `request-input`, `stop`).
+- **Locked passes.** A pass completes only with a `continue` that has the evidence files in `exports/`, an `ai_score` of at least 0.7, the five layer scores and every critical feature at its minimum; a pass cannot be continued before the one before it. Correction limits: 3 per pass, 6 in total, counted from the file and never from memory.
+- **Fail-closed rules.** Routing needs a known kind, confidence 0.82 and an evidence reference; the feature gate uses the tiers 0.8 / 0.65 / 0.5 with at most 5 critical and 3 important per pass; the detail inventory needs 3, 6, 10 or 16 entries by tier.
+- **Playbook.** New topic `build` and the wiki page `docs/wiki/scene-spec.md`.
+
+### feat(core,agent): tunable eases, springs with a clock, and pixel verification
+
+**Area:** `feat(core)`, `feat(agent)`, `docs(wiki)`
+
+- **An ease is still one string, and now it can be tuned.** The curves moved to `od_core::ease`: the old names keep their shapes, and `cubic(x1,y1,x2,y2)` (the CSS `cubic-bezier`), `spring(visual_ms,bounce)`, `back_in|back_out|back_in_out(overshoot)`, `elastic_in|elastic_out(amplitude,period)`, `power_in|power_out|power_in_out|power_out_in(exponent)`, `steps(n)` and `anticipate` join them. The numbers are kept in thousandths, so an ease stays `Copy` and a file never holds a float that prints differently the next time it is saved; older projects load unchanged.
+- **A spring has a clock.** `spring(visual_ms,bounce)` is a damped spring with no starting speed, read over the stretch between its two keys: it is mostly done after its visual duration and rings by its bounce (0 none, 0.3 playful, 0.5 bouncy, negative slow). What is left at the end of a short stretch is spread over it, so the value always lands exactly on its key. `Spring::settle_ms` says how long a stretch must be for the swings to show, and the presets `spring_snappy`, `spring_smooth`, `spring_playful`, `spring_bouncy` and `spring_heavy` are ready names.
+- **Pixel verification.** A tool that changes the picture answers `pixel_verified: false` until the agent has called a tool that draws a picture it can see (a render, a review, a contact sheet), and the exports warn when changes went unseen. Nothing is refused: it only says what the agent has not looked at.
+
 ## 2026-11-26
 
 ### feat: hand-made looks, richer acting, self-review tools, speech and cutouts, time feel

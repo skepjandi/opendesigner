@@ -40,11 +40,16 @@ pub enum Kind {
     Tick,
     Beat,
     Stinger,
+    Key,
+    Blip,
+    Pad,
+    Impact,
+    Scratch,
 }
 
 impl Kind {
     /// The names the tool accepts, one per kind.
-    pub const NAMES: [&'static str; 12] = [
+    pub const NAMES: [&'static str; 17] = [
         "click",
         "pop",
         "whoosh",
@@ -57,9 +62,14 @@ impl Kind {
         "tick",
         "beat",
         "stinger",
+        "key",
+        "blip",
+        "pad",
+        "impact",
+        "scratch",
     ];
 
-    /// A kind by name; `impact` is `hit` and `pad` is `drone`.
+    /// A kind by name.
     pub fn parse(name: &str) -> Option<Kind> {
         Some(match name {
             "click" => Kind::Click,
@@ -68,12 +78,17 @@ impl Kind {
             "swoosh_up" => Kind::SwooshUp,
             "swoosh_down" => Kind::SwooshDown,
             "riser" => Kind::Riser,
-            "hit" | "impact" => Kind::Hit,
+            "hit" => Kind::Hit,
             "chime" => Kind::Chime,
-            "drone" | "pad" => Kind::Drone,
+            "drone" => Kind::Drone,
             "tick" => Kind::Tick,
             "beat" => Kind::Beat,
             "stinger" => Kind::Stinger,
+            "key" => Kind::Key,
+            "blip" => Kind::Blip,
+            "pad" => Kind::Pad,
+            "impact" => Kind::Impact,
+            "scratch" => Kind::Scratch,
             _ => return None,
         })
     }
@@ -91,6 +106,11 @@ impl Kind {
             Kind::Drone => 8_000,
             Kind::Beat => 4_000,
             Kind::Stinger => 1_200,
+            Kind::Key => 120,
+            Kind::Blip => 140,
+            Kind::Pad => 6_000,
+            Kind::Impact => 1_600,
+            Kind::Scratch => 700,
         }
     }
 
@@ -108,7 +128,21 @@ impl Kind {
             Kind::Tick => "tick",
             Kind::Beat => "beat",
             Kind::Stinger => "stinger",
+            Kind::Key => "key",
+            Kind::Blip => "blip",
+            Kind::Pad => "pad",
+            Kind::Impact => "impact",
+            Kind::Scratch => "scratch",
         }
+    }
+
+    /// Whether the kind goes through the mastering pass (a common level and a limiter) instead of
+    /// the plain peak normalisation.
+    pub fn mastered(self) -> bool {
+        matches!(
+            self,
+            Kind::Key | Kind::Blip | Kind::Pad | Kind::Impact | Kind::Scratch
+        )
     }
 }
 
@@ -230,11 +264,16 @@ fn vary_by_seed(spec: &mut Spec) {
             Kind::Drone => 110.0,
             Kind::Tick => 1_500.0,
             Kind::Stinger => 523.25,
+            Kind::Key => 1_400.0,
+            Kind::Blip => 880.0,
+            Kind::Pad => 220.0,
+            Kind::Impact => 62.0,
+            Kind::Scratch => 900.0,
             _ => 0.0,
         };
         if base > 0.0 {
             // a low thump stays low: its steps go down an octave instead of up
-            let step = if spec.kind == Kind::Hit {
+            let step = if matches!(spec.kind, Kind::Hit | Kind::Impact) {
                 step % 12.0
             } else {
                 step
@@ -304,11 +343,20 @@ pub fn render(spec: &Spec) -> Result<Rendered, String> {
             spec.bars.unwrap_or(1),
         ),
         Kind::Stinger => stinger(n, &mut rng, spec.pitch_hz),
+        Kind::Key => key(n, &mut rng, spec.pitch_hz),
+        Kind::Blip => blip(n, &mut rng, spec.pitch_hz),
+        Kind::Pad => pad(n, &mut rng, spec.pitch_hz),
+        Kind::Impact => impact(n, &mut rng, spec.pitch_hz),
+        Kind::Scratch => scratch(n, &mut rng, spec.pitch_hz),
     };
     // A loopable drone starts and ends at zero by construction: a 2 ms fade is all it needs.
     let fade_ms = if spec.kind == Kind::Drone { 2.0 } else { 8.0 };
     fade(&mut mono, fade_ms);
-    normalize(&mut mono)?;
+    if spec.kind.mastered() {
+        master(&mut mono)?;
+    } else {
+        normalize(&mut mono)?;
+    }
     let channels = if spec.stereo {
         let delay = (SAMPLE_RATE as usize * 11 / 1000).min(n / 2);
         let mut right = vec![0.0; delay];
@@ -333,6 +381,58 @@ fn fade(x: &mut [f32], ms: f32) {
         x[i] *= g;
         x[n - 1 - i] *= g;
     }
+}
+
+/// The loudness of a sound: how loud its loudest sample is and how loud it sounds on average,
+/// both in dBFS (0 dBFS is full scale).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Loudness {
+    pub peak_dbfs: f64,
+    pub rms_dbfs: f64,
+}
+
+/// Measures a sound. A silent sound reads as -120 dBFS rather than as an error.
+pub fn measure_loudness(samples: &[f32]) -> Loudness {
+    let peak = samples.iter().fold(0.0f32, |m, v| m.max(v.abs()));
+    let rms = if samples.is_empty() {
+        0.0
+    } else {
+        (samples.iter().map(|v| v * v).sum::<f32>() / samples.len() as f32).sqrt()
+    };
+    Loudness {
+        peak_dbfs: to_dbfs(peak as f64),
+        rms_dbfs: to_dbfs(rms as f64),
+    }
+}
+
+/// A level in dBFS; silence is -120 dBFS.
+fn to_dbfs(value: f64) -> f64 {
+    if value <= 1e-6 {
+        -120.0
+    } else {
+        20.0 * value.log10()
+    }
+}
+
+/// Softens the loudest part of a sound before it is scaled: the samples above the knee are bent
+/// back with a curve that never passes full scale, so the result has the punch of the original
+/// without the harsh edge.
+fn soften(x: &mut [f32], knee: f32) {
+    for v in x.iter_mut() {
+        let a = v.abs();
+        if a > knee {
+            let over = (a - knee) / (1.0 - knee);
+            let bent = knee + (1.0 - knee) * over / (1.0 + over);
+            *v = v.signum() * bent;
+        }
+    }
+}
+
+/// The master stage: the sound is softened and then brought to a peak of [`PEAK`], so it never
+/// clips and sits at the same level as the other sounds.
+fn master(x: &mut [f32]) -> Result<(), String> {
+    soften(x, 0.55);
+    normalize(x)
 }
 
 /// Scales to a peak of [`PEAK`]; a silent result is an error, never a silent file.
@@ -588,6 +688,120 @@ fn stinger(n: usize, rng: &mut Rng, pitch: Option<f32>) -> Vec<f32> {
     out
 }
 
+/// A typing click: a short noise burst over a woody body, humanized by the seed (the pitch of
+/// the click and the moment it lands move a little).
+fn key(n: usize, rng: &mut Rng, pitch: Option<f32>) -> Vec<f32> {
+    let base = pitch.unwrap_or(1_400.0);
+    let total = secs(n);
+    let tau = (total / 5.0).min(0.03);
+    let mut phase = 0.0f32;
+    let mut filter = Svf::new();
+    (0..n)
+        .map(|i| {
+            let t = secs(i);
+            let f = base * (1.0 + 0.05 * (t / total.max(1e-4)));
+            phase += TAU * f / SAMPLE_RATE as f32;
+            let (_, band, _) = filter.step(rng.noise(), 2_600.0);
+            let click = band * exp_decay(t, tau * 0.35);
+            let body = (phase.sin() + 0.4 * (2.0 * phase).sin()) * exp_decay(t, tau);
+            0.75 * click + 0.5 * body
+        })
+        .collect()
+}
+
+/// A UI blip: a short tone that steps up and falls away. The seed moves the step and the colour.
+fn blip(n: usize, rng: &mut Rng, pitch: Option<f32>) -> Vec<f32> {
+    let base = pitch.unwrap_or(880.0);
+    let total = secs(n);
+    let tau = (total / 4.0).min(0.05);
+    let step = 0.4 + 0.5 * rng.next() as f32 / u64::MAX as f32;
+    let colour = 2.0 + rng.below(3) as f32;
+    let mut phase = 0.0f32;
+    (0..n)
+        .map(|i| {
+            let t = secs(i);
+            let p = (t / total.max(1e-4)).min(1.0);
+            let f = base * (1.0 + step * p);
+            phase += TAU * f / SAMPLE_RATE as f32;
+            let attack = (t / 0.002).min(1.0);
+            let tone = (phase.sin() + 0.25 * (colour * phase).sin()) * exp_decay(t, tau);
+            attack * tone
+        })
+        .collect()
+}
+
+/// A slow chord bed: a root, its fifth and its octave, each with a detuned twin, swelling slowly.
+/// The seed moves the detuning and the swell.
+fn pad(n: usize, rng: &mut Rng, pitch: Option<f32>) -> Vec<f32> {
+    let root = pitch.unwrap_or(220.0);
+    let total = secs(n);
+    let detune = 0.002 + 0.004 * rng.next() as f32 / u64::MAX as f32;
+    let cycles = |f: f32| (f * total).round().max(1.0);
+    let voices: Vec<(f32, f32)> = [
+        (1.0, 1.0),
+        (1.0 + detune, 0.85),
+        (1.5, 0.7),
+        (1.5 - detune, 0.6),
+        (2.0, 0.45),
+        (2.0 + detune, 0.4),
+    ]
+    .iter()
+    .map(|(r, a)| (cycles(root * r), *a))
+    .collect();
+    let swell = (total / 3.0).round().max(1.0);
+    (0..n)
+        .map(|i| {
+            let p = i as f32 / n as f32;
+            let lfo = 0.8 + 0.2 * (TAU * swell * p).sin();
+            lfo * voices
+                .iter()
+                .map(|(c, a)| a * (TAU * c * p).sin())
+                .sum::<f32>()
+        })
+        .collect()
+}
+
+/// A heavy impact: a deep thump that drops, with a crack of noise on top and a long tail.
+fn impact(n: usize, rng: &mut Rng, pitch: Option<f32>) -> Vec<f32> {
+    let low = pitch.unwrap_or(62.0);
+    let total = secs(n);
+    let tau = (total / 4.0).min(1.2);
+    let mut phase = 0.0f32;
+    let mut filter = Svf::new();
+    (0..n)
+        .map(|i| {
+            let t = secs(i);
+            let f = low * (1.0 + 3.0 * exp_decay(t, 0.05));
+            phase += TAU * f / SAMPLE_RATE as f32;
+            let thump = (2.2 * phase.sin()).tanh() * exp_decay(t, tau);
+            let (_, _, high) = filter.step(rng.noise(), 1_600.0);
+            let crack = (high + 0.4 * rng.noise()) * exp_decay(t, 0.04);
+            thump + 0.4 * crack
+        })
+        .collect()
+}
+
+/// A record scratch: noise dragged through a band that moves, over a rising tone.
+fn scratch(n: usize, rng: &mut Rng, pitch: Option<f32>) -> Vec<f32> {
+    let base = pitch.unwrap_or(900.0);
+    let total = secs(n);
+    let tau = (total / 3.0).min(0.25);
+    let mut phase = 0.0f32;
+    let mut filter = Svf::new();
+    (0..n)
+        .map(|i| {
+            let t = secs(i);
+            let p = (t / total.max(1e-4)).min(1.0);
+            let f = base * (0.7 + 1.4 * p);
+            phase += TAU * f / SAMPLE_RATE as f32;
+            let fc = 700.0 * 6.0f32.powf(p);
+            let (_, band, _) = filter.step(rng.noise(), fc);
+            let tone = (phase.sin() + 0.3 * (2.0 * phase).sin()) * exp_decay(t, tau);
+            0.8 * band * (1.0 - 0.3 * p) + 0.35 * tone
+        })
+        .collect()
+}
+
 /// The sound as a WAV file: 16-bit PCM, 44.1 kHz, the channels interleaved.
 pub fn wav_bytes(channels: &[Vec<f32>]) -> Vec<u8> {
     let frames = channels.first().map_or(0, Vec::len);
@@ -667,9 +881,16 @@ pub fn make(project: &Path, spec: &Spec, name: Option<&str>) -> Result<Made, Str
     };
     let sidecar_name = format!("{stem}{SIDECAR_SUFFIX}");
     let text = serde_json::to_string_pretty(&sidecar).map_err(|e| e.to_string())?;
-    if let Err(e) = write_new(&media.join(&sidecar_name), text.as_bytes()) {
+    let synth_path = media.join(&sidecar_name);
+    if let Err(e) = write_new(&synth_path, text.as_bytes()) {
         let _ = std::fs::remove_file(&wav_path);
         return Err(e);
+    }
+    let license = crate::sound_license::Sidecar::synthesized(spec.kind.name(), &bytes);
+    if let Err(e) = crate::sound_license::write_sidecar(&media, &stem, &license) {
+        let _ = std::fs::remove_file(&wav_path);
+        let _ = std::fs::remove_file(&synth_path);
+        return Err(e.to_string());
     }
     Ok(Made {
         file: format!("media/{stem}.wav"),
@@ -710,8 +931,10 @@ fn free_stem(media: &Path, stem: &str) -> Result<String, String> {
         } else {
             format!("{stem}-{n}")
         };
+        let license = format!("{candidate}{}", crate::sound_license::SIDECAR_SUFFIX);
         if !media.join(format!("{candidate}.wav")).exists()
             && !media.join(format!("{candidate}{SIDECAR_SUFFIX}")).exists()
+            && !media.join(license).exists()
         {
             return Ok(candidate);
         }
@@ -764,7 +987,7 @@ mod tests {
             // noise changes fast by nature, so it is left out
             let tonal = matches!(
                 kind,
-                Kind::Chime | Kind::Drone | Kind::Pop | Kind::Stinger | Kind::Tick
+                Kind::Chime | Kind::Drone | Kind::Pop | Kind::Stinger | Kind::Tick | Kind::Blip
             );
             let step = x
                 .windows(2)
@@ -780,6 +1003,55 @@ mod tests {
                 "{name} end is loud"
             );
         }
+    }
+
+    #[test]
+    fn every_new_kind_is_deterministic_and_another_seed_another_sound() {
+        for kind in [
+            Kind::Key,
+            Kind::Blip,
+            Kind::Pad,
+            Kind::Impact,
+            Kind::Scratch,
+        ] {
+            let mut first = spec(kind, 700);
+            first.seed = 7;
+            let mut same = first.clone();
+            same.seed = 7;
+            assert_eq!(
+                wav_bytes(&render(&first).unwrap().channels),
+                wav_bytes(&render(&same).unwrap().channels),
+                "{kind:?} is not deterministic"
+            );
+            let mut other = first.clone();
+            other.seed = 8;
+            assert_ne!(
+                wav_bytes(&render(&first).unwrap().channels),
+                wav_bytes(&render(&other).unwrap().channels),
+                "{kind:?} gives the same sound for every seed"
+            );
+            let x = mono(kind, 700);
+            let peak = x.iter().fold(0.0f32, |m, v| m.max(v.abs()));
+            assert!(peak < 1.0, "{kind:?} clips at {peak}");
+            let loud = measure_loudness(&x);
+            assert!(
+                loud.peak_dbfs < 0.0 && loud.peak_dbfs > -6.0,
+                "{kind:?}: {loud:?}"
+            );
+            assert!(loud.rms_dbfs < loud.peak_dbfs, "{kind:?}: {loud:?}");
+        }
+    }
+
+    #[test]
+    fn a_mastered_sound_sits_at_the_same_level_as_the_others() {
+        let hit = mono(Kind::Hit, 700);
+        let pad = mono(Kind::Pad, 700);
+        let hit = measure_loudness(&hit);
+        let pad = measure_loudness(&pad);
+        assert!(
+            (hit.peak_dbfs - pad.peak_dbfs).abs() < 0.5,
+            "{hit:?} {pad:?}"
+        );
     }
 
     #[test]
@@ -923,8 +1195,8 @@ mod tests {
         s.bpm = Some(40.0);
         s.bars = Some(16);
         assert!(render(&s).unwrap_err().contains("longest"));
-        assert_eq!(Kind::parse("impact"), Some(Kind::Hit));
-        assert_eq!(Kind::parse("pad"), Some(Kind::Drone));
+        assert_eq!(Kind::parse("impact"), Some(Kind::Impact));
+        assert_eq!(Kind::parse("pad"), Some(Kind::Pad));
         assert_eq!(Kind::parse("laser"), None);
     }
 

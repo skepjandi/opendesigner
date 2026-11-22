@@ -71,6 +71,8 @@ pub struct Turns {
     seen: HashSet<String>,
     /// For each frame, how long the history was when `review_frame` last looked at it.
     reviewed: HashMap<NodeId, usize>,
+    /// How many changes went by since the agent last looked at a render.
+    pub(crate) looks: crate::looked::Looks,
 }
 
 pub struct CallCtx<'a> {
@@ -92,7 +94,7 @@ pub(crate) fn tool(
 }
 
 /// A tool that reaches the network: it says so with `openWorldHint`.
-fn tool_net(
+pub(crate) fn tool_net(
     name: &str,
     description: &str,
     props: Value,
@@ -127,15 +129,20 @@ fn tool_full(
 pub fn definitions() -> Vec<Value> {
     let mut all = core_definitions();
     all.extend(crate::motion::definitions());
+    all.extend(crate::sequence::definitions());
+    all.extend(crate::text_split::definitions());
     all.extend(crate::blocks::definitions());
     all.extend(crate::doctools::definitions());
     all.extend(crate::audio_tools::definitions());
+    all.extend(crate::scene_spec::definitions());
     all.extend(crate::assets::tools::definitions());
     all.extend(crate::assets::logo::definitions());
     all.extend(crate::vector_tools::definitions());
     all.extend(crate::review_video::definitions());
+    all.extend(crate::scene_checks::definitions());
     all.extend(crate::external_tools::definitions());
     all.extend(crate::inspect::definitions());
+    all.extend(crate::style_pack::definitions());
     all.extend(showcase_definitions());
     all
 }
@@ -167,9 +174,11 @@ fn core_definitions() -> Vec<Value> {
              charts and motion, and when to use one), scenery (layered flat-vector scenes: scenery blocks, parallax, idle loops, scene moves and the camera), characters (flat-vector characters, bubbles and animated props), sketch (hand-made looks: pen sketches and hatching, line boil, watercolor washes, film grain, grass and wind strokes, hand-drawn emphasis), explainer (anything animated: animation, scenes, \
              explainers, motion graphics, cartoons, 2D illustration, Kurzgesagt or In a Nutshell style; read it \
              FIRST, a jpg backdrop with moving text is never an animated scene), review (look at your own video \
-             harshly: strips, crops, grids, diffs, the checklist). Call it with no topic for the \
+             harshly: strips, crops, grids, diffs, the checklist), packs (style packs: commit to one look \
+             before you draw: choosing it from the brief, applying its palette, the 80/20 rule, the motion \
+             personality). Call it with no topic for the \
              list; read the ones that apply before you build, not after.",
-            json!({"topic": {"type": "string", "enum": ["design", "style", "video", "motion", "3d", "formats", "logo", "blocks", "scenery", "characters", "sketch", "explainer", "review"]}}),
+            json!({"topic": {"type": "string", "enum": ["design", "style", "video", "motion", "3d", "formats", "logo", "blocks", "scenery", "characters", "sketch", "explainer", "review", "packs"]}}),
             &[],
             true,
         ),
@@ -351,7 +360,8 @@ fn core_definitions() -> Vec<Value> {
              and camera_rotation (degrees the scene turns clockwise about the center) take the VIDEO's id as node and move every node of a \
              clip's frame by its depth (nodes at depth 0 and overlays stay); a single key holds a camera still; keys:[] removes it; \
              animate_preset writes some of these for you). Eases: linear, ease_in, ease_out, ease_in_out (also ease_in_out_cubic), \
-             back (overshoots; also ease_out_back), spring (overshoots and settles), elastic (rings past the end) or bounce (bounces off the end); power2_in|out|in_out and power4_in|out|in_out (stronger cubic-like curves), expo_in|out|in_out, circ_in|out|in_out, sine_in|out|in_out (the gentlest); steps_2, steps_3, steps_4, steps_6, steps_8 and steps_12 (no in-between: the value holds each of that many poses, jumping between them, for the stepped feel of drawn animation). \
+             back (overshoots; also ease_out_back), spring (overshoots and settles), elastic (rings past the end) or bounce (bounces off the end); power2_in|out|in_out and power4_in|out|in_out (stronger cubic-like curves), expo_in|out|in_out, circ_in|out|in_out, sine_in|out|in_out (the gentlest); steps_2, steps_3, steps_4, steps_6, steps_8 and steps_12 (no in-between: the value holds each of that many poses, jumping between them, for the stepped feel of drawn animation); anticipate (pulls back a little, then goes). \
+             Tuned eases are text with numbers: spring(visual_ms,bounce) is a real spring that looks done after visual_ms and rings by the bounce (0 none, 0.3 playful, 0.5 bouncy, negative slow and heavy; it is read over the stretch between its two keys, so give that stretch about 2 to 3 times visual_ms for the swings to show, and the presets spring_snappy, spring_smooth, spring_playful, spring_bouncy, spring_heavy are spring(250,0), (400,0), (450,0.3), (500,0.5), (800,0.1)); cubic(x1,y1,x2,y2) is the CSS cubic-bezier; back_in|back_out|back_in_out(overshoot) (1.7 is the classic, 0.5 subtle); elastic_out|elastic_in(amplitude,period); steps(n) for any n from 2 to 64. \
              Colors are '#rrggbb', '#rrggbbaa' or \
              '{token.name}'. Template variables (see list_variables): {op:'declare_variable', variable:{id, kind, label, description?, \
              portrays?, default, enum_values?, binds?:[{node, prop}]}} with kind one of string, number, color, bool, enum, image, font \
@@ -602,37 +612,6 @@ fn core_definitions() -> Vec<Value> {
             &[],
             true,
         ),
-        tool_net(
-            "search_sounds",
-            "Find music and sound effects on Freesound (https://freesound.org) for a video. \
-             Returns each sound's id, name, length, license, author and a preview to listen to. \
-             Freesound sounds are licensed by their authors, not by us: the license in the result \
-             is the license the user must obey, and you must show the attribution the result \
-             carries (title, author, license, link) wherever the sound is used. Prefer CC0. \
-             Needs the user's Freesound token (the Connect tab); without one the call says so.",
-            json!({
-                "query": id("Words to search for, for example \"soft piano loop\"."),
-                "duration_max_ms": {"type": "integer", "minimum": 1, "maximum": 600000, "description": "Keep only sounds no longer than this."},
-                "page": {"type": "integer", "minimum": 1, "maximum": 20, "description": "Which page of results (1 is the first)."}
-            }),
-            &["query"],
-            true,
-        ),
-        tool_net(
-            "import_sound",
-            "Download one Freesound sound (the preview recording, not the original file) into \
-             this project's media/ folder and write what it is next to it. Returns the media/ \
-             reference and the one line the user must show: \"Title by Author, License, link\". \
-             The license must be honoured: say who made it, under which license, and where it \
-             came from. The file is never overwritten. Then put it under a video with set_video \
-             prop {name: \"audio\", value: {file, start_ms, gain, fade_in_ms, fade_out_ms}}.",
-            json!({
-                "id": {"type": "integer", "minimum": 1, "description": "The id of a sound from search_sounds."},
-                "name": id("A plain file name for the sound, without the .mp3 ending.")
-            }),
-            &["id"],
-            false,
-        ),
         tool(
             "list_sounds",
             "All the sounds in this project's media/ folder (.mp3 .wav .m4a .aac .ogg), whether \
@@ -649,11 +628,14 @@ fn core_definitions() -> Vec<Value> {
             "Make a sound effect or a simple loop yourself, with no download and no licence to \
              honour (it is synthesized and written to media/<name>.wav, normalized, with short \
              fades so it never clicks). Use it for the basics: click, pop, tick, whoosh, \
-             swoosh_up, swoosh_down, riser (builds into a cut), hit (impact: put it on a cut or a \
-             reveal), chime (a notification or a finish), stinger (a 2 to 3 note sting), drone \
-             (a soft pad that loops) and beat (4-on-the-floor kick and hat at `bpm`, `bars` bars). \
-             It cannot make real music or speech: for a music bed use search_sounds (Freesound, \
-             needs the user's token) or ask the user; for a voice-over use a speech MCP server if \
+             swoosh_up, swoosh_down, riser (builds into a cut), hit and impact (a thump: put it on \
+             a cut or a reveal; impact is bigger, with a crack and a tail), chime (a notification \
+             or a finish), stinger (a 2 to 3 note sting), drone (a soft pad that loops), pad (a \
+             slow chord bed that loops), key (a typing click, a little different each press: \
+             repeat it with different seeds), blip (a UI blip), scratch (a record scratch) and \
+             beat (4-on-the-floor kick and hat at `bpm`, `bars` bars). \
+             It cannot make real music or speech: for a music bed use search_sounds (Openverse, \
+             Incompetech, ccMixter or Freesound) or ask the user; for a voice-over use a speech MCP server if \
              the user added one (get_guidance lists them). The same kind, duration and seed give \
              the same sound. Then set it as the track: set_video prop {name: \"audio\", value: \
              {file, start_ms, gain, fade_in_ms, fade_out_ms}}.",
@@ -661,7 +643,7 @@ fn core_definitions() -> Vec<Value> {
                 "kind": {"type": "string", "enum": synth::Kind::NAMES, "description": "Which sound."},
                 "duration_ms": {"type": "integer", "minimum": synth::MIN_DURATION_MS, "maximum": synth::MAX_DURATION_MS, "description": "How long. Optional: each kind has a fitting default. A beat takes its length from bpm and bars."},
                 "seed": {"type": "integer", "minimum": 0, "description": "Another seed gives another variation (noise, the notes of a stinger, and the pitch or tempo when you give none). Default: a new random seed each call, returned as `seed` and kept in the sidecar. Pass the same seed to make the same sound again."},
-                "pitch_hz": {"type": "number", "minimum": 20, "maximum": 8000, "description": "The base pitch of chime, drone, tick, pop, riser, hit and stinger."},
+                "pitch_hz": {"type": "number", "minimum": 20, "maximum": 8000, "description": "The base pitch of chime, drone, pad, tick, key, blip, pop, riser, hit, impact and stinger."},
                 "bpm": {"type": "number", "minimum": 40, "maximum": 240, "description": "Beat only: tempo, default 120."},
                 "bars": {"type": "integer", "minimum": 1, "maximum": 16, "description": "Beat only: bars of four beats."},
                 "stereo": {"type": "boolean", "description": "Two channels (default one)."},
@@ -728,20 +710,30 @@ fn persist(ws: &Workspace) -> Result<(), ToolError> {
 }
 
 pub fn call(ctx: &mut CallCtx, name: &str, args: Value) -> Result<Output, ToolError> {
+    let out = dispatch(ctx, name, args)?;
+    Ok(ctx.turns.looks.annotate(name, out))
+}
+
+fn dispatch(ctx: &mut CallCtx, name: &str, args: Value) -> Result<Output, ToolError> {
     match name {
         "get_guidance" => get_guidance(ctx),
         n if crate::motion::NAMES.contains(&n) => crate::motion::call(ctx, n, args),
+        n if crate::sequence::NAMES.contains(&n) => crate::sequence::call(ctx, n, args),
+        n if crate::text_split::NAMES.contains(&n) => crate::text_split::call(ctx, n, args),
         n if crate::blocks::NAMES.contains(&n) => crate::blocks::call(ctx, n, args),
         n if crate::doctools::NAMES.contains(&n) => crate::doctools::call(ctx, n, args),
         n if crate::audio_tools::NAMES.contains(&n) => crate::audio_tools::call(ctx, n, args),
+        n if crate::scene_spec::NAMES.contains(&n) => crate::scene_spec::call(ctx, n, args),
         n if crate::assets::logo::NAMES.contains(&n) => {
             let dir = ctx.ws.dir().map(std::path::Path::to_path_buf);
             crate::assets::logo::call(dir.as_deref(), n, args)
         }
         n if crate::vector_tools::NAMES.contains(&n) => crate::vector_tools::call(ctx, n, args),
         n if crate::review_video::NAMES.contains(&n) => crate::review_video::call(ctx, n, args),
+        n if crate::scene_checks::NAMES.contains(&n) => crate::scene_checks::call(ctx, n, args),
         n if crate::external_tools::NAMES.contains(&n) => crate::external_tools::call(ctx, n, args),
         n if crate::inspect::NAMES.contains(&n) => crate::inspect::call(ctx, n, args),
+        n if crate::style_pack::NAMES.contains(&n) => crate::style_pack::call(ctx, n, args),
         n if crate::assets::tools::handles(n) => {
             let dir = ctx.ws.dir().map(std::path::Path::to_path_buf);
             crate::assets::tools::call(dir.as_deref(), n, args)
@@ -779,8 +771,6 @@ pub fn call(ctx: &mut CallCtx, name: &str, args: Value) -> Result<Output, ToolEr
         "open_workspace" => switch_workspace(ctx, parse(args)?, false),
         "find_files" => find_files(ctx, parse(args)?),
         "import_file" => import_file(ctx, parse(args)?),
-        "search_sounds" => search_sounds(parse(args)?),
-        "import_sound" => import_sound(ctx, parse(args)?),
         "list_sounds" => list_sounds(ctx),
         "make_sound" => make_sound(ctx, parse(args)?),
         "render_video_frame" => render_video_frame(ctx, parse(args)?),
@@ -1041,7 +1031,8 @@ fn get_guidance(ctx: &mut CallCtx) -> Result<Output, ToolError> {
     let brief = brief_of(ctx);
     v["brief"] = brief.to_json();
     v["before_you_build"] = json!(
-        "Call get_playbook: design (images), style (pick a named look), video and motion (video), explainer (anything animated), \
+        "Call get_playbook: design (images), style (pick a named look), packs (commit to one style \
+         pack: list_style_packs, then apply_style_pack), video and motion (video), explainer (anything animated), \
          3d (devices in 3D with captures and moves), \
          formats (sizes). Review your work with review_frame and render_preview before you say it is done."
     );
@@ -1323,6 +1314,11 @@ pub(crate) fn check_brief(ctx: &CallCtx, ops: &[Operation]) -> Result<(), ToolEr
 }
 
 pub(crate) fn apply_ops(ctx: &mut CallCtx, a: ApplyArgs) -> Result<Output, ToolError> {
+    Ok(Output::json(&apply_ops_receipt(ctx, a)?))
+}
+
+/// The receipt of an applied turn: the transaction, the checkpoint before it and what changed.
+pub(crate) fn apply_ops_receipt(ctx: &mut CallCtx, a: ApplyArgs) -> Result<Value, ToolError> {
     check_brief(ctx, &a.ops)?;
     let turn = match a.turn {
         Some(t) => t,
@@ -1348,7 +1344,7 @@ pub(crate) fn apply_ops(ctx: &mut CallCtx, a: ApplyArgs) -> Result<Output, ToolE
         .apply(ctx.actor.clone(), Some(turn.clone()), &a.ops)
         .map_err(|e| ToolError(crate::doctools::failure_text(&e)))?;
     persist(ctx.ws)?;
-    Ok(Output::json(&json!({
+    Ok(json!({
         "stage": "applied",
         "saved": ctx.ws.dir().is_some(),
         "transaction": receipt.id,
@@ -1356,7 +1352,7 @@ pub(crate) fn apply_ops(ctx: &mut CallCtx, a: ApplyArgs) -> Result<Output, ToolE
         "checkpoint_before": checkpoint,
         "created": receipt.created,
         "touched": receipt.touched,
-    })))
+    }))
 }
 
 #[derive(Deserialize)]
@@ -1941,64 +1937,6 @@ fn import_file(ctx: &mut CallCtx, a: ImportFileArgs) -> Result<Output, ToolError
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct SearchSoundsArgs {
-    query: String,
-    #[serde(default)]
-    duration_max_ms: Option<u32>,
-    #[serde(default)]
-    page: Option<u32>,
-}
-
-fn search_sounds(a: SearchSoundsArgs) -> Result<Output, ToolError> {
-    let sounds = crate::freesound::search(&a.query, a.duration_max_ms, a.page.unwrap_or(1))
-        .map_err(|e| ToolError(e.to_string()))?;
-    let rows: Vec<Value> = sounds
-        .iter()
-        .map(|s| {
-            json!({
-                "id": s.id,
-                "name": s.name,
-                "duration_ms": s.duration_ms,
-                "license": s.license,
-                "license_url": s.license_url,
-                "author": s.author,
-                "preview_url": s.preview_url,
-                "source_url": s.source_url,
-                "attribution": s.attribution(),
-            })
-        })
-        .collect();
-    Ok(Output::json(&json!({"count": rows.len(), "sounds": rows})))
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ImportSoundArgs {
-    id: u64,
-    #[serde(default)]
-    name: Option<String>,
-}
-
-fn import_sound(ctx: &mut CallCtx, a: ImportSoundArgs) -> Result<Output, ToolError> {
-    let dir = ctx
-        .ws
-        .dir()
-        .map(std::path::Path::to_path_buf)
-        .ok_or_else(|| {
-            ToolError("the project has no folder, so nowhere to put the sound".into())
-        })?;
-    let imported = crate::freesound::import(&dir, a.id, a.name.as_deref())
-        .map_err(|e| ToolError(e.to_string()))?;
-    Ok(Output::json(&json!({
-        "file": imported.file,
-        "sidecar": imported.sidecar,
-        "attribution": imported.attribution,
-        "note": "show this attribution wherever the sound is used",
-    })))
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct MakeSoundArgs {
     kind: String,
     #[serde(default)]
@@ -2065,19 +2003,11 @@ fn list_sounds(ctx: &mut CallCtx) -> Result<Output, ToolError> {
         return Ok(Output::json(&json!([])));
     };
     let ffmpeg = od_media::Ffmpeg::locate().ok();
-    let media = dir.join("media");
     let rows: Vec<Value> = crate::device::list_audio(&dir)
         .into_iter()
         .map(|(file, bytes)| {
             let name = file.trim_start_matches("media/");
             let stem = name.rsplit_once('.').map_or(name, |(s, _)| s);
-            let freesound: Option<crate::freesound::Sidecar> =
-                std::fs::read_to_string(media.join(format!("{stem}.freesound.json")))
-                    .ok()
-                    .and_then(|t| serde_json::from_str(&t).ok());
-            let synthesized = media
-                .join(format!("{stem}{}", synth::SIDECAR_SUFFIX))
-                .is_file();
             let mut row = json!({"file": file, "bytes": bytes});
             if let Some(ms) = ffmpeg.as_ref().and_then(|ff| {
                 let path = od_media::audio_path(&dir, &file).ok()?;
@@ -2085,15 +2015,35 @@ fn list_sounds(ctx: &mut CallCtx) -> Result<Output, ToolError> {
             }) {
                 row["duration_ms"] = json!(ms);
             }
-            if let Some(side) = freesound {
-                row["source"] = json!("freesound");
-                row["sidecar"] = json!(format!("media/{stem}.freesound.json"));
-                row["attribution"] = json!(side.attribution());
-            } else if synthesized {
-                row["source"] = json!("synthesized");
-                row["sidecar"] = json!(format!("media/{stem}{}", synth::SIDECAR_SUFFIX));
-            } else {
-                row["source"] = json!("imported");
+            let record = crate::sound_license::list_records(&dir)
+                .into_iter()
+                .find(|r| r.file == *row["file"].as_str().unwrap_or_default());
+            match record {
+                Some(r) if r.synthesized => {
+                    row["source"] = json!("synthesized");
+                    row["sidecar"] = json!(format!("media/{stem}{}", synth::SIDECAR_SUFFIX));
+                }
+                Some(r) => {
+                    if let Some(side) = r.sidecar {
+                        row["source"] = json!(side.source.provider);
+                        if let Some(file) = r.sidecar_file {
+                            row["sidecar"] = json!(file);
+                        }
+                        row["license"] = json!(if side.license.spdx.is_empty() {
+                            "unknown"
+                        } else {
+                            side.license.spdx.as_str()
+                        });
+                        if side.license.attribution_required && !side.credit_line.is_empty() {
+                            row["attribution"] = json!(side.credit_line);
+                        }
+                    } else {
+                        row["source"] = json!("imported");
+                    }
+                }
+                None => {
+                    row["source"] = json!("imported");
+                }
             }
             row
         })

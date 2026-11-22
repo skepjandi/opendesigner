@@ -163,6 +163,14 @@ pub fn generate() -> Vec<SkillFile> {
             path: "references/sketch-playbook.md",
             contents: playbook::topic("sketch").unwrap_or_default().to_string(),
         },
+        SkillFile {
+            path: "references/style-packs.md",
+            contents: playbook::topic("packs").unwrap_or_default().to_string(),
+        },
+        SkillFile {
+            path: "references/scene-build.md",
+            contents: playbook::topic("build").unwrap_or_default().to_string(),
+        },
     ]
 }
 
@@ -189,12 +197,12 @@ const BODY: &str = "# OpenDesigner
 Read the playbooks before you build, through the `get_playbook` tool or the files next to this one:
 `references/design-direction.md` (images), `references/style-directions.md` (pick a named look),
 `references/video-direction.md` and `references/motion-playbook.md` (video),
-`references/three-d-devices.md` (3D devices, captures and moves), `references/formats.md`
-(sizes and safe zones), `references/illustrated-explainer.md` (anything animated; read it first).
+`references/three-d-devices.md` (3D), `references/formats.md` (sizes, safe zones), `references/style-packs.md`, `references/illustrated-explainer.md` (anything animated; read it
+first) and `references/scene-build.md` (plan a scene before you build it).
 
-OpenDesigner is a design editor the user has open next to you. They guide you by **pointing**:
-selecting layers, pinning notes on the design, and fixing things by hand. You act through MCP tools;
-every change you make is attributed to you, checkpointed, outlined for the user and reversible.
+OpenDesigner is a design editor the user has open next to you. They guide you by **pointing**
+(selecting layers, pinning notes, fixing by hand). You act through MCP tools; every change is
+attributed to you, checkpointed, outlined for the user and reversible.
 
 ## Before anything: check the connection
 
@@ -219,11 +227,10 @@ project files directly: that bypasses validation, checkpoints and the user's vie
    `dry_run: true` first: you get what would change, or a stable error code and a hint, and nothing
    is applied. An applied result says `stage: applied` and names the checkpoint and the changed ids.
 4. **Check your work.** `render_preview` again. For store assets, run `export` with the right
-   `preset`. A listing is a set: use `export_set` for several frames, or lay the slides edge to
-   edge on one wide frame (so a background or a device can cross the seams) and use
-   `export_panorama`; the frame's width must divide by the slide count. Sets are validated as a
-   whole, count included, and nothing is written unless everything passes. A failed export tells
-   you exactly which rule broke; fix that, do not argue with it. For a phone or tablet around a
+   `preset`. A listing is a set: `export_set` for several frames, or lay the slides edge to edge
+   on one wide frame (a background or device can cross the seams) and use `export_panorama`; its
+   width must divide by the slide count. Sets are validated as a whole and nothing is written unless
+   everything passes. A failed export names the rule that broke; fix that, do not argue with it. For a phone or tablet around a
    screenshot, call `device_template`, put its node in `apply_ops`, and ask the user to drop the
    capture on the `Screen` (or use an image from `list_media` as the template's `image`).
 5. **Close the loop.** Call `validate_document` and fix every error and warning it reports (stable
@@ -248,10 +255,10 @@ The canvas is where you work, not where the user judges. Two panels are for them
 ## Memory between tasks
 
 Earlier runs leave notes in the project's `.opendesigner/memory/` folder (text the user can read
-and keep in git): brand facts, what the user corrected or liked, what worked, mistakes to avoid,
-decisions. `get_guidance` lists them; `read_memory` opens one. Read the relevant notes before you
-build, and before you finish `write_memory` what the next run should know (for example
-`brand.md`, `lessons.md`, `decisions.md`, `style.md`). Short and factual. Never secrets or tokens.
+and keep in git): brand facts, corrections, what worked, mistakes, decisions. `get_guidance` lists
+them; `read_memory` opens one. Read the relevant ones before you build, and before you finish
+`write_memory` what the next run should know (`brand.md`, `lessons.md`, `decisions.md`,
+`style.md`). Short and factual; never secrets or tokens.
 
 ## One workspace per deliverable
 
@@ -264,11 +271,11 @@ open one, and the user sees the switch. Check which is open before you change an
 
 ## You decide the shape
 
-The user does not draw: they point, annotate and correct. **You** decide the structure and the
-names. Give every page, frame, group, text and image a name that says what it is (\"Hero\",
-\"Headline\", \"Screen\", not \"Rectangle 14\"), pick the sizes from the store preset or the
-destination (`list_export_presets`, `list_video_presets`), start an empty project with a frame of
-the right size, and keep a set consistent (same type scale, margins and accent). If the user's task
+The user does not draw: they point, annotate and correct. **You** decide structure and names: name
+every page, frame, group, text and image for what it is (\"Hero\", \"Headline\", not \"Rectangle
+14\"), pick sizes from the store preset or destination (`list_export_presets`,
+`list_video_presets`), start an empty project with a frame of the right size, and keep a set
+consistent (type scale, margins, accent). If the user's task
 names a product, look at it first (run the app, read the repository you were started in, take real
 captures) and make the assets from what it really is. Pictures the user added to the project's
 memory are listed by `list_media`: use them when the work needs one, and say which you used.

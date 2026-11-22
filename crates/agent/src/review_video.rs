@@ -75,7 +75,8 @@ pub fn definitions() -> Vec<Value> {
         json!({
             "video": {"type": "string", "description": "Id of a video from list_videos; defaults to the first."},
             "samples": {"type": "integer", "minimum": MIN_SAMPLES, "maximum": MAX_SAMPLES, "description": "How many moments to render (default 12)."},
-            "bpm": {"type": "number", "minimum": 30, "maximum": 300, "description": "The tempo of the music, to check that cuts land on a beat (RV014). Videos have no tempo of their own."}
+            "bpm": {"type": "number", "minimum": 30, "maximum": 300, "description": "The tempo of the music, to check that cuts land on a beat (RV014). Videos have no tempo of their own."},
+            "allow_unevaluated": {"type": "boolean", "description": "Accept a gate that could not be evaluated (the beat without a tempo, the flash scan of a video with footage). The report says which gates were unevaluated; the video is not ready unless this is true."}
         }),
         &[],
         true,
@@ -86,8 +87,13 @@ pub fn call(ctx: &mut CallCtx, name: &str, args: Value) -> Result<Output, ToolEr
     match name {
         "review_video" => {
             let a: Args = parse(args)?;
-            let report =
-                review_at_tempo(&Source::of(ctx.ws), a.video.as_deref(), a.samples, a.bpm)?;
+            let report = review_at_tempo_with(
+                &Source::of(ctx.ws),
+                a.video.as_deref(),
+                a.samples,
+                a.bpm,
+                a.allow_unevaluated.unwrap_or(false),
+            )?;
             Ok(Output::json(&report.to_json()))
         }
         other => Err(ToolError(format!("unknown tool {other:?}"))),
@@ -103,6 +109,8 @@ struct Args {
     samples: Option<usize>,
     #[serde(default)]
     bpm: Option<f64>,
+    #[serde(default)]
+    allow_unevaluated: Option<bool>,
 }
 
 /// One thing wrong, with a stable code and what to do about it.
@@ -121,6 +129,41 @@ pub struct Finding {
     pub penalty: f64,
 }
 
+/// One gate of the review and what it found: `pass`, `fail` or `unevaluated`. A gate that could
+/// not look at its input says so, and is never a pass.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GateEntry {
+    pub code: &'static str,
+    pub status: &'static str,
+    pub reason: String,
+}
+
+impl GateEntry {
+    fn pass(code: &'static str) -> GateEntry {
+        GateEntry {
+            code,
+            status: "pass",
+            reason: String::new(),
+        }
+    }
+
+    fn fail(code: &'static str, reason: impl Into<String>) -> GateEntry {
+        GateEntry {
+            code,
+            status: "fail",
+            reason: reason.into(),
+        }
+    }
+
+    fn unevaluated(code: &'static str, reason: impl Into<String>) -> GateEntry {
+        GateEntry {
+            code,
+            status: "unevaluated",
+            reason: reason.into(),
+        }
+    }
+}
+
 /// A review: findings, numbers and a score.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Report {
@@ -135,6 +178,10 @@ pub struct Report {
     pub overlap: Vec<Value>,
     /// How many regions there were before the list was cut.
     pub overlap_total: usize,
+    /// What each gate found; a gate that could not look is `unevaluated`, never a pass.
+    pub gates: Vec<GateEntry>,
+    /// The caller accepts a gate that could not be evaluated.
+    pub allow_unevaluated: bool,
 }
 
 impl Report {
@@ -149,16 +196,35 @@ impl Report {
             metrics: json!({}),
             overlap: Vec::new(),
             overlap_total: 0,
+            gates: Vec::new(),
+            allow_unevaluated: false,
         }
     }
 
-    fn verdict(&self) -> &'static str {
+    /// Whether the video can ship: no error, no failed gate, no gate left unevaluated (unless
+    /// the caller says an unevaluated gate is fine) and a score of 80.
+    pub fn ready(&self) -> bool {
         if self.findings.iter().any(|f| f.severity == "error") {
+            return false;
+        }
+        if self.gates.iter().any(|g| g.status == "fail") {
+            return false;
+        }
+        if !self.allow_unevaluated && self.gates.iter().any(|g| g.status == "unevaluated") {
+            return false;
+        }
+        self.score >= 80
+    }
+
+    fn verdict(&self) -> &'static str {
+        if self.findings.iter().any(|f| f.severity == "error")
+            || self.gates.iter().any(|g| g.status == "fail")
+        {
             return "not ready";
         }
         match self.score {
-            80..=100 => "ready",
-            55..=79 => "needs work",
+            80..=100 if self.ready() => "ready",
+            55..=100 => "needs work",
             _ => "not ready",
         }
     }
@@ -172,6 +238,9 @@ impl Report {
         for (i, fix) in self.top_fixes.iter().enumerate() {
             out.push_str(&format!(" {}. {fix}", i + 1));
         }
+        for g in self.gates.iter().filter(|g| g.status != "pass") {
+            out.push_str(&format!(" {} is {}.", g.code, g.status));
+        }
         out
     }
 
@@ -181,6 +250,12 @@ impl Report {
             "summary": self.summary(),
             "score": self.score,
             "verdict": self.verdict(),
+            "ready": self.ready(),
+            "gates": self.gates.iter().map(|g| json!({
+                "code": g.code,
+                "status": g.status,
+                "reason": g.reason,
+            })).collect::<Vec<_>>(),
             "top_fixes": self.top_fixes,
             "findings": self.findings.iter().map(|f| json!({
                 "code": f.code,
@@ -256,6 +331,18 @@ pub fn review_at_tempo(
     samples: Option<usize>,
     bpm: Option<f64>,
 ) -> Result<Report, ToolError> {
+    review_at_tempo_with(src, video, samples, bpm, false)
+}
+
+/// [`review_at_tempo`] that also says whether a gate that could not be evaluated is allowed to
+/// stand: a video is not ready while anything is unevaluated unless it is.
+pub fn review_at_tempo_with(
+    src: &Source,
+    video: Option<&str>,
+    samples: Option<usize>,
+    bpm: Option<f64>,
+    allow_unevaluated: bool,
+) -> Result<Report, ToolError> {
     if let Some(b) = bpm.filter(|b| !checks::valid_bpm(*b)) {
         return Err(ToolError(format!("bpm {b} is not a tempo from 30 to 300")));
     }
@@ -287,7 +374,9 @@ pub fn review_at_tempo(
         .clamp(MIN_SAMPLES, MAX_SAMPLES);
     let sampled = sample(src, v, count)?;
     let flash = flash::scan(src, v)?;
-    Ok(build(doc, v, &scenes, &sampled, flash.as_ref(), bpm))
+    let mut report = build(doc, v, &scenes, &sampled, flash.as_ref(), bpm);
+    report.allow_unevaluated = allow_unevaluated;
+    Ok(report)
 }
 
 fn scenes_of(doc: &Document, v: &Video) -> Vec<Scene> {
@@ -380,7 +469,7 @@ fn sample(src: &Source, v: &Video, count: usize) -> Result<Vec<Sample>, ToolErro
 }
 
 /// The findings that are errors, not warnings.
-const ERROR_CODES: [&str; 1] = ["RV013"];
+const ERROR_CODES: [&str; 2] = ["RV013", "RV020"];
 /// The score a video with an error cannot rise above.
 const ERROR_SCORE_CAP: u32 = 54;
 
@@ -693,31 +782,40 @@ fn palette_draft(doc: &Document, palette: &Palette) -> Option<Draft> {
     })
 }
 
-fn finish(drafts: Vec<Draft>, scene_count: usize) -> (Vec<Finding>, u32, Vec<String>) {
+fn finish(
+    drafts: Vec<Draft>,
+    soft: Vec<Draft>,
+    scene_count: usize,
+) -> (Vec<Finding>, u32, Vec<String>) {
+    let finding = |d: Draft, severity: &'static str| {
+        let share = if d.scenes.is_empty() {
+            1.0
+        } else {
+            d.scenes.len() as f64 / scene_count as f64
+        };
+        Finding {
+            code: d.code,
+            name: d.name,
+            severity,
+            scenes: d.scenes,
+            message: d.message,
+            fix: d.fix.to_string(),
+            weight: d.weight,
+            penalty: d.weight * share,
+        }
+    };
     let mut findings: Vec<Finding> = drafts
         .into_iter()
         .map(|d| {
-            let share = if d.scenes.is_empty() {
-                1.0
+            let severity = if ERROR_CODES.contains(&d.code) {
+                "error"
             } else {
-                d.scenes.len() as f64 / scene_count as f64
+                "warning"
             };
-            Finding {
-                code: d.code,
-                name: d.name,
-                severity: if ERROR_CODES.contains(&d.code) {
-                    "error"
-                } else {
-                    "warning"
-                },
-                scenes: d.scenes,
-                message: d.message,
-                fix: d.fix.to_string(),
-                weight: d.weight,
-                penalty: d.weight * share,
-            }
+            finding(d, severity)
         })
         .collect();
+    findings.extend(soft.into_iter().map(|d| finding(d, "warning")));
     findings.sort_by(|a, b| a.code.cmp(b.code));
     let lost: f64 = findings.iter().map(|f| f.penalty).sum();
     let mut score = (100.0 - lost).round().clamp(0.0, 100.0) as u32;
@@ -816,8 +914,78 @@ fn build(
     drafts.extend(checks::thin_stretch(v, scenes));
     drafts.extend(checks::identical_scenes(doc, scenes));
     drafts.extend(checks::no_final_hold(v));
-    let (findings, score, top_fixes) = finish(drafts, scenes.len());
+    let tracks = crate::scene_checks::track_gate::analyze(
+        doc,
+        v,
+        crate::scene_checks::track_gate::DEFAULT_SAMPLES,
+        &[],
+    );
+    let (dead, idle) = tracks.rv020();
+    let mut soft: Vec<Draft> = Vec::new();
+    if !dead.is_empty() {
+        drafts.push(Draft {
+            code: "RV020",
+            name: "track-drives-nothing",
+            scenes: Vec::new(),
+            message: format!(
+                "{} tracks drive nothing: {}",
+                dead.len(),
+                dead.join("; ")
+            ),
+            fix: "Give every track a node that exists, is on screen while the track plays and is visible, or remove the track.",
+            weight: 15.0,
+        });
+    }
+    if !idle.is_empty() {
+        soft.push(Draft {
+            code: "RV020",
+            name: "track-drives-nothing",
+            scenes: Vec::new(),
+            message: format!(
+                "{} tracks hold one value all the way: {}",
+                idle.len(),
+                idle.join("; ")
+            ),
+            fix: "Give the track keys that differ, or remove it: a track that never changes is not motion.",
+            weight: 4.0,
+        });
+    }
+    let (findings, score, top_fixes) = finish(drafts, soft, scenes.len());
     let (overlap, overlap_total) = overlap::regions(doc, v, scenes);
+    let mut gates = Vec::new();
+    gates.push(if samples.is_empty() {
+        GateEntry::unevaluated(
+            "RV003",
+            "the video has no pictures to sample (it has footage, or it is too short), so its stillness was not measured",
+        )
+    } else {
+        GateEntry::pass("RV003")
+    });
+    gates.push(match flash {
+        Some(_) => GateEntry::pass("RV013"),
+        None => GateEntry::unevaluated(
+            "RV013",
+            "the video could not be scanned for flashes (it has footage, or it is shorter than a second)",
+        ),
+    });
+    gates.push(match bpm {
+        Some(_) => {
+            if findings.iter().any(|f| f.code == "RV014") {
+                GateEntry::fail("RV014", "the cuts do not land on the beat")
+            } else {
+                GateEntry::pass("RV014")
+            }
+        }
+        None => GateEntry::unevaluated(
+            "RV014",
+            "no tempo was given, so the cuts were not checked against the beat",
+        ),
+    });
+    gates.push(if dead.is_empty() {
+        GateEntry::pass("RV020")
+    } else {
+        GateEntry::fail("RV020", format!("{} tracks drive nothing", dead.len()))
+    });
     Report {
         video: Some(v.id.clone()),
         message: None,
@@ -832,6 +1000,8 @@ fn build(
         metrics: metrics_json(v, scenes, samples, &palette, doc, flash),
         overlap,
         overlap_total,
+        gates,
+        allow_unevaluated: false,
     }
 }
 
@@ -1115,5 +1285,70 @@ mod tests {
                 .iter()
                 .any(|d| d["name"] == "review_video")
         );
+    }
+
+    #[test]
+    fn a_gate_that_could_not_be_checked_is_named_and_keeps_the_video_from_being_ready() {
+        let report = review(&living_scenes(true), None, None).unwrap();
+        let beat = report
+            .gates
+            .iter()
+            .find(|g| g.code == "RV014")
+            .expect("the beat gate is named");
+        assert_eq!(beat.status, "unevaluated");
+        assert!(beat.reason.contains("tempo"), "{}", beat.reason);
+        assert!(
+            !report.ready(),
+            "a video with an unevaluated gate is not ready"
+        );
+        assert_eq!(report.verdict(), "needs work");
+        assert!(report.to_json()["gates"].as_array().unwrap().len() >= 4);
+
+        // The caller may accept a gate it knows cannot matter.
+        let accepted = review_at_tempo_with(&living_scenes(true), None, None, None, true).unwrap();
+        assert!(accepted.ready());
+        assert_eq!(accepted.verdict(), "ready");
+
+        // A tempo lets the gate look, and then it passes.
+        let with_beat = review_at_tempo(&living_scenes(true), None, None, Some(120.0)).unwrap();
+        let beat = with_beat
+            .gates
+            .iter()
+            .find(|g| g.code == "RV014")
+            .expect("the beat gate is named");
+        assert_eq!(beat.status, "pass");
+    }
+
+    #[test]
+    fn a_track_that_drives_nothing_is_an_error() {
+        let mut src = living_scenes(true);
+        src.doc.videos[0].animations.push(od_core::Animation {
+            node: NodeId::parse("n_9999").unwrap(),
+            prop: od_core::AnimProp::X,
+            keys: vec![
+                od_core::Key {
+                    at_ms: 0,
+                    value: 10.0,
+                    ease: od_core::Ease::default(),
+                },
+                od_core::Key {
+                    at_ms: 1000,
+                    value: 20.0,
+                    ease: od_core::Ease::default(),
+                },
+            ],
+            repeat: od_core::Repeat::Once,
+        });
+        let report = review(&src, None, None).unwrap();
+        let found = codes(&report);
+        assert!(found.contains(&"RV020"), "{found:?}");
+        let finding = report
+            .findings
+            .iter()
+            .find(|f| f.code == "RV020")
+            .expect("the finding is there");
+        assert_eq!(finding.severity, "error");
+        assert!(report.score <= ERROR_SCORE_CAP, "{}", report.score);
+        assert!(!report.ready());
     }
 }

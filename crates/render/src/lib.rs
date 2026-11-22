@@ -12,6 +12,7 @@ mod incremental;
 mod layers;
 mod place;
 mod text;
+pub use text::{PlacedGlyph, PlacedLine, PlacedRun};
 pub mod three_d;
 pub mod transitions;
 mod trim;
@@ -136,6 +137,19 @@ impl Ctx<'_> {
 /// no width does not wrap). `None` when the node has no text to draw.
 pub fn measure_text(node: &Node) -> Option<(f32, f32)> {
     text::measure(node)
+}
+
+/// The rows of `node`'s text as the renderer wraps them, with each glyph's position, in document
+/// units. `None` when the node has no text to draw.
+pub fn text_lines(node: &Node) -> Option<Vec<PlacedLine>> {
+    text::layout_lines(node)
+}
+
+/// The first row of `text` laid out on its own in the style of `node`: `aligned` keeps the node's
+/// own alignment (as when a line is cut out of the text) and otherwise the text is set flush
+/// left (as when a word or a character is cut out).
+pub fn text_run(node: &Node, text: &str, aligned: bool) -> Option<PlacedRun> {
+    text::layout_run(node, text, aligned)
 }
 
 /// Text in `node` and below that wraps to more rows than its box is tall. A box with no width

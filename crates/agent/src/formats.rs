@@ -228,6 +228,15 @@ pub struct Pending {
     pub reason: String,
 }
 
+/// The style pack the workspace is committed to, when one was applied.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BriefStylePack {
+    pub id: String,
+    pub name: String,
+    /// The pack's motion personality: calm, snappy, playful or cinematic.
+    pub motion: String,
+}
+
 /// What a workspace is for. A format the user chose cannot be changed without asking them.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Brief {
@@ -242,6 +251,9 @@ pub struct Brief {
     /// What the user answered to the last request, for the agent to read.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_decision: Option<String>,
+    /// The style pack the workspace is committed to, when `apply_style_pack` declared one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub style_pack: Option<BriefStylePack>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -339,6 +351,7 @@ impl Brief {
             "notes": self.notes,
             "pending_request": self.pending,
             "last_decision": self.last_decision,
+            "style_pack": self.style_pack,
             "rules": match who {
                 "user" => "The user chose this format: use it. To change it, call set_format with a reason; the user is asked and you must wait for the answer (read get_brief again).",
                 "agent" => "You chose this earlier; you may change it with set_format.",
@@ -475,6 +488,7 @@ mod tests {
             chosen_by_user: true,
             notes: "for the launch".into(),
             pending: None,
+            style_pack: None,
             last_decision: None,
         };
         save_brief(d.path(), &b).unwrap();

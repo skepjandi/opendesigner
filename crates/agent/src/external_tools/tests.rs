@@ -235,7 +235,12 @@ fn transcribe_returns_words_pauses_and_text_and_changes_nothing_without_apply() 
     media.sort();
     assert_eq!(
         media,
-        ["ggml-tiny.bin", "talk.synth.json", "talk.wav"],
+        [
+            "ggml-tiny.bin",
+            "talk.license.json",
+            "talk.synth.json",
+            "talk.wav"
+        ],
         "nothing written into the project"
     );
 }

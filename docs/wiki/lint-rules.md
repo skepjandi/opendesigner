@@ -46,6 +46,7 @@ Each finding is `{code, severity, node?, frame?, video?, message, hint}`. `sever
 | `OD082` | loop-jumps | info | A looping animation ends on a different value than it starts with, so it jumps once per cycle. |
 | `OD090` | image-backdrop-scene | warn | A clip's frame is mostly one raster image (over 60% of it) and no vector shape in it is animated: a picture with text on it, not an animation. |
 | `OD091` | text-only-motion | warn | The only things animated in a clip's frame are text and rectangles; shapes, characters and scenery do not move. |
+| `OD092` | palette-lock | warn | A colour outside the locked palette: the document's tokens are the palette, and this colour is neither one of them nor a blend of two. |
 
 `OD001` to `OD003` judge a turned or scaled node by the upright box around it after its transform and its
 parents' (`geometry::bounds_in_frame`), not by its untransformed box.
@@ -56,6 +57,24 @@ parents' (`geometry::bounds_in_frame`), not by its untransformed box.
 ## Animation rules
 
 `OD090` and `OD091` judge a clip's frame from the document alone (`od_core::scene::scene_stats`), the same facts `review_video` uses. `OD090` fires when one `image` node covers more than 60% of the frame (by its bounds) and no `path` or `ellipse` (or group holding one) of the frame is animated: a picture with text on it. `OD091` fires when something in the frame is animated but only text, rectangles and groups of them are; it does not fire together with `OD090`. Neither looks at pixels: `review_video` does, and adds what the document cannot say (still stretches, camera, sound). `[INFERENCE]` A full-bleed screenshot in a plain app preview will trigger `OD090`; it is a warning, not an error.
+
+## The locked palette
+
+A style pack (`od_agent::style_pack`) is a palette plus type, shape and motion rules. `apply_style_pack`
+writes the palette into the document as tokens — `bg`, `surface`, `fg`, `muted`, `border`, `accent` and the
+two tints derived from them, `accent_2` and `shadow` — and adds the token `palette_locked`. That token is
+the marker that turns `OD092` on: a document without it is never checked, so a project that never chose a
+pack keeps behaving as before.
+
+With the palette locked, a fill or a stroke may be
+
+- a token reference (`{accent}`), which is the palette by definition,
+- a literal colour within 0.04 of a palette colour in OKLab (`od_core::color`), or
+- a blend of two palette colours at 25, 50 or 75 percent, so gradients, tints and shadows pass.
+
+Anything else is a warning that names the node and the nearest palette colour, and says what to paint
+with instead. One run reports at most 20 of them. The rule judges the document alone, so it works the
+same in the editor, in `validate_document` and in `opendesigner lint`.
 
 ## What the linter does not know
 

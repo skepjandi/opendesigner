@@ -60,6 +60,18 @@ const fn rule(
 /// One image covering more of a scene than this makes it a picture, not an animation.
 const MAX_IMAGE_SHARE: f64 = 0.6;
 
+/// The token that says the palette is locked. Its presence turns `OD092` on.
+pub const PALETTE_LOCK: &str = "palette_locked";
+
+/// How far a colour may sit from the palette and still belong to it, in OKLab.
+const PALETTE_TOLERANCE: f64 = 0.04;
+
+/// The shares a blend of two palette colours may take.
+const PALETTE_BLENDS: [f64; 3] = [0.25, 0.5, 0.75];
+
+/// Most palette findings one run reports.
+const MAX_PALETTE_FINDINGS: usize = 20;
+
 pub const RULES: &[Rule] = &[
     rule(
         "OD001",
@@ -247,6 +259,12 @@ pub const RULES: &[Rule] = &[
         Severity::Warn,
         "The only things animated in a clip's frame are text and rectangles; shapes, characters and scenery do not move.",
     ),
+    rule(
+        "OD092",
+        "palette-lock",
+        Severity::Warn,
+        "A colour outside the locked palette: the document's tokens are the palette, and this colour is neither one of them nor a blend of two.",
+    ),
 ];
 
 pub fn rule_for(code: &str) -> Option<&'static Rule> {
@@ -343,6 +361,7 @@ pub fn lint(doc: &Document, opts: &LintOptions) -> Vec<Finding> {
     }
     linter.variables();
     linter.videos();
+    linter.palette_lock();
     linter.out
 }
 
@@ -1048,6 +1067,189 @@ impl Linter<'_> {
             );
         }
     }
+
+    /// The palette a locked document may draw in: its tokens, and the blends of two of them.
+    fn palette_lock(&mut self) {
+        let Some(palette) = Palette::new(self.doc) else {
+            return;
+        };
+        let mut hits: Vec<PaletteHit> = Vec::new();
+        for page in &self.doc.pages {
+            palette_page(&page.root, None, &palette, &mut hits);
+        }
+        for hit in hits.into_iter().take(MAX_PALETTE_FINDINGS) {
+            self.add(
+                "OD092",
+                At::node(&hit.node, hit.frame.as_ref()),
+                hit.message,
+                &hit.hint,
+            );
+        }
+    }
+}
+
+/// Where a locked-palette finding points.
+struct PaletteHit {
+    node: NodeId,
+    frame: Option<NodeId>,
+    message: String,
+    hint: String,
+}
+
+/// The colours a locked document may use: the tokens themselves and the blends of two of them.
+struct Palette<'a> {
+    /// Every allowed colour, with the tokens it comes from.
+    allowed: Vec<(crate::color::Rgb, PaletteOrigin<'a>)>,
+}
+
+/// What an allowed colour comes from: one token, or two blended.
+enum PaletteOrigin<'a> {
+    Token(&'a str),
+    Blend(&'a str, &'a str, f64),
+}
+
+impl PaletteOrigin<'_> {
+    /// How the colour is named in a finding.
+    fn name(&self) -> String {
+        match self {
+            PaletteOrigin::Token(name) => (*name).to_string(),
+            PaletteOrigin::Blend(a, b, share) => format!("{a} and {b} ({:.0}%)", share * 100.0),
+        }
+    }
+
+    /// What to do about it.
+    fn advice(&self) -> String {
+        match self {
+            PaletteOrigin::Token(name) => format!("Paint it with the palette token {{{name}}}."),
+            PaletteOrigin::Blend(a, b, share) => format!(
+                "Paint it with a blend of two palette tokens ({a} and {b} at {:.0}%).",
+                share * 100.0
+            ),
+        }
+    }
+}
+
+impl<'a> Palette<'a> {
+    /// The palette of a document whose tokens are locked, or `None` when they are not.
+    fn new(doc: &'a Document) -> Option<Palette<'a>> {
+        if !doc.tokens.contains_key(PALETTE_LOCK) {
+            return None;
+        }
+        let tokens: Vec<(&'a str, crate::color::Rgb)> = doc
+            .tokens
+            .iter()
+            .filter(|(name, _)| name.as_str() != PALETTE_LOCK)
+            .filter_map(|(name, value)| {
+                Rgba::parse_hex(value).ok().map(|c| (name.as_str(), rgb(c)))
+            })
+            .collect();
+        if tokens.is_empty() {
+            return None;
+        }
+        let mut allowed: Vec<(crate::color::Rgb, PaletteOrigin<'a>)> = tokens
+            .iter()
+            .map(|(name, colour)| (*colour, PaletteOrigin::Token(name)))
+            .collect();
+        for (name, colour) in &tokens {
+            for (other, other_colour) in &tokens {
+                if name == other {
+                    continue;
+                }
+                for share in PALETTE_BLENDS {
+                    allowed.push((
+                        crate::color::mix(*colour, *other_colour, share),
+                        PaletteOrigin::Blend(name, other, share),
+                    ));
+                }
+            }
+        }
+        Some(Palette { allowed })
+    }
+
+    /// The allowed colour nearest to `colour`, and how far it is.
+    fn nearest(&self, colour: crate::color::Rgb) -> (&PaletteOrigin<'a>, f64) {
+        let mut best: Option<(&PaletteOrigin<'a>, f64)> = None;
+        for (candidate, origin) in &self.allowed {
+            let gap = crate::color::distance(*candidate, colour);
+            if best.is_none_or(|(_, seen)| gap < seen) {
+                best = Some((origin, gap));
+            }
+        }
+        best.unwrap_or((&PaletteOrigin::Token(PALETTE_LOCK), f64::MAX))
+    }
+}
+
+/// Walks a page's nodes, collecting the colours that are not in the palette.
+fn palette_page<'a>(
+    node: &Node,
+    frame: Option<&NodeId>,
+    palette: &Palette<'a>,
+    hits: &mut Vec<PaletteHit>,
+) {
+    let frame = if node.kind == NodeKind::Frame {
+        Some(&node.id)
+    } else {
+        frame
+    };
+    if let Some(fill) = &node.fill {
+        palette_paint(&node.id, frame, fill, palette, hits);
+    }
+    if let Some(stroke) = &node.stroke {
+        palette_paint(&node.id, frame, &stroke.paint, palette, hits);
+    }
+    for child in &node.children {
+        palette_page(child, frame, palette, hits);
+    }
+}
+
+/// Checks one paint: a token is the palette by definition, a literal colour has to be near it.
+fn palette_paint(
+    id: &NodeId,
+    frame: Option<&NodeId>,
+    paint: &Paint,
+    palette: &Palette<'_>,
+    hits: &mut Vec<PaletteHit>,
+) {
+    match paint {
+        Paint::Color(colour) => palette_colour(id, frame, *colour, palette, hits),
+        Paint::Token(_) => {}
+        Paint::Linear { stops, .. } | Paint::Radial { stops, .. } => {
+            for stop in stops {
+                if let Paint::Color(colour) = &stop.color {
+                    palette_colour(id, frame, *colour, palette, hits);
+                }
+            }
+        }
+    }
+}
+
+/// Checks one literal colour against the palette.
+fn palette_colour(
+    id: &NodeId,
+    frame: Option<&NodeId>,
+    colour: Rgba,
+    palette: &Palette<'_>,
+    hits: &mut Vec<PaletteHit>,
+) {
+    let rgb = rgb(colour);
+    let (origin, gap) = palette.nearest(rgb);
+    if gap <= PALETTE_TOLERANCE {
+        return;
+    }
+    hits.push(PaletteHit {
+        node: id.clone(),
+        frame: frame.cloned(),
+        message: format!(
+            "{} is painted {}, which is not in the locked palette (the nearest palette colour is {}, {gap:.2} away)",
+            id,
+            colour.to_hex(),
+            origin.name(),
+        ),
+        hint: format!(
+            "{} The palette is the document's tokens; a colour of your own breaks it.",
+            origin.advice(),
+        ),
+    });
 }
 
 fn media_present(dir: &Path, reference: &str) -> bool {

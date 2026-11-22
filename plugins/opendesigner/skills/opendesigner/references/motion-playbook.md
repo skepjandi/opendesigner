@@ -79,6 +79,40 @@ whole video process; this page is about movement.
 - **Open still and quiet, close with a held end card** of 1.5 to 3 s that carries the one thing to
   remember or do.
 
+## Sequencing and springs
+
+- **Place beats against each other, not in milliseconds.** `sequence` takes a list of steps, each
+  with a `preset`, the `node` or `nodes` it moves, and an `at`: a number of milliseconds, or a
+  phrase against what is already there - `<` (the end of the step before), `<<` (its start),
+  `<+=50` (50 ms after its end), `intro+=200` (200 ms after the step named `intro`). One call is
+  one undo step, and the result echoes the resolved start and end of every step, so you can see
+  the timing you got. `fit_to_ms` scales the whole sequence to a length.
+- **Overlap the next beat by 40 to 80 ms.** `<+=50` is the follow-through: the next thing starts
+  while the last is still settling, and the two read as one movement instead of two.
+- **Stagger 40 to 120 ms per item when 3 or more arrive together.** 40 for a tight group of small
+  items, 80 for a row of words, 120 for a slow reveal of big elements; more than 120 reads as a
+  queue rather than a reveal.
+- **Anticipation 6 to 10 percent**: a small pull back before the move (a scale or an offset of 6
+  to 10% of the travel), so the eye is aimed at where the thing is going.
+- **Overshoot only on small playful elements** (a badge, a dot, an icon). Never on type or a
+  background: a big overshoot reads as a mistake.
+- **Springs** for anything that arrives with weight: `ease: spring_snappy`, `spring_smooth`,
+  `spring_playful`, `spring_bouncy`, `spring_heavy`, or `spring(visual_ms,bounce)` for your own.
+
+| preset | visual ms | bounce | use |
+|---|---|---|---|
+| `spring_snappy` | 250 | 0 | a small thing that arrives and stops |
+| `spring_smooth` | 400 | 0 | a panel or a card that settles |
+| `spring_playful` | 450 | 0.3 | a friendly badge, a soft overshoot |
+| `spring_bouncy` | 500 | 0.5 | a toy, a sticker, a celebration |
+| `spring_heavy` | 800 | 0.1 | a big panel that lands with weight |
+
+- **`spring_to` sends one property to a value on a spring** and says when it looks done
+  (`perceived_ms`) and when it has really stopped (`settle_ms`): put the next beat after
+  `settle_ms`, or overlap it when the next thing is unrelated.
+- **A spring ease stretches the move it is on.** An entrance with `ease: spring(...)` runs for as
+  long as the spring needs to rest, and the result says by how much.
+
 ## Recipes (all with overlays on a transparent frame)
 
 - **Lower third:** a frame with a name and a role in a bar at 70% height; `slide_left`, 350 ms,
@@ -94,6 +128,32 @@ whole video process; this page is about movement.
   (each 100 to 200 ms), no transition.
 - **Screen recording polish:** footage clip with a 1.00 to 1.06 push; overlays that highlight the
   area being used (a rounded rectangle outline, `fade`), titles that name the step, not the click.
+
+## Kinetic type
+
+`text_reveal` splits a text node and animates its pieces in one undoable turn; `split_text` only
+splits, so you can stagger the pieces yourself (`animate_preset` stagger with `nodes` set to its
+`ids`, or a `sequence`).
+
+- **Pick the unit by length.** Characters only for a headline moment of 12 characters or fewer on
+  one line (a brand word, a number, "NEW"). Words for a headline or a line or two (the default for
+  anything longer). Lines for a paragraph block. **Never animate body copy per character**: it
+  reads as noise and is slow to read.
+- **Stagger.** Characters 30 to 50 ms apart (40 is the default), words 80 to 120 ms (90), lines
+  about 140 ms. A whole headline should be in within about a second and a half; if it is not,
+  use a bigger unit, not a smaller `each_ms`.
+- **Styles.** `rise` (450 ms, `power4_out`) from below a mask box (`wrap`, the default for rise) is
+  the confident one for headlines; `fade` for quiet text; `pop` only for short, playful words;
+  `slide` for a label that comes from a side; `typewriter` (33 ms per character) for a command,
+  a code line or a message being typed, never for a headline.
+- **Hold it long enough.** Once the last piece is in, the text needs 1 s plus 0.4 s per short word
+  (a long word counts for more) before it leaves (review check `RV015`); `text_reveal` returns
+  `hold_ms` and `leave_no_earlier_than_ms` so you can place the exit.
+- **One reveal per text, one text moving at a time.** Do not reveal a headline and its subtitle at
+  the same moment: start the subtitle after the headline ends (`ends_at_ms`) plus a beat.
+- **Split late.** Write and review the copy and the layout as ordinary text first; split only when
+  the words are final, because the pieces no longer re-wrap if the box changes (undo the split to
+  edit the text again).
 
 ## Checks before you export
 
@@ -114,19 +174,35 @@ silence (an App Store preview autoplays muted, but still gets a track for when s
   track. With no voice, a bed at 0.4 to 0.7. Never leave it at 1.0 and hope.
 - **Fades.** `fade_in_ms` and `fade_out_ms` of 300 to 800 on the track, so it neither starts nor
   stops with a bang. The track is cut at the video's end: fade out before it.
-- **Hits on cuts.** Put accents where the picture changes: a `hit` or `pop` on a hard cut or an
-  impact, a `whoosh` or `swoosh_up/down` across a slide or zoom transition, a `riser` into a
-  reveal, a `chime` on a success state, a `click` or `tick` on a tap. One accent per event, not per
-  word. Tracks mix: put a hit or whoosh on its own `sfx` track at the cut's time (`add_sound_track`
-  with `start_ms`), or let one longer sound (`beat`, `drone`) carry the video.
+- **Hits on cuts.** Put accents where the picture changes: a `hit` or `pop` on a hard cut, an
+  `impact` (a heavier thump with a crack and a tail) on a big reveal, a `whoosh` or
+  `swoosh_up/down` across a slide or zoom transition, a `riser` into a reveal, a `chime` on a
+  success state, a `click` or `tick` on a tap, a `key` (a typing click), a `blip` (a UI blip) or a
+  `scratch` (a record scratch) where the picture shows typing or a turntable. One accent per event,
+  not per word. Tracks mix: put a hit or whoosh on its own `sfx` track at the cut's time
+  (`add_sound_track` with `start_ms`), or let one longer sound (`beat`, `drone`, `pad`) carry the
+  video.
 - **Silence is a tool.** A short gap before the reveal makes the hit land. Do not fill every moment.
-- **Vary the sound.** Never reuse one video's sounds for the next: leave `seed` out (each call is a new variation) or pick pitch and tempo for this video's mood, and check `list_sounds` so no two videos share a bed, hit or chime. Sources beyond the synth: `search_assets` kind `sound` (Kenney sound packs, once the user has installed one) and `search_sounds` (needs the Freesound token).
+- **Vary the sound.** Never reuse one video's sounds for the next: leave `seed` out (each call is a new variation) or pick pitch and tempo for this video's mood, and check `list_sounds` so no two videos share a bed, hit or chime. Sources beyond the synth: `search_assets` kind `sound` (Kenney sound packs, once the user has installed one) and `search_sounds` (Openverse, Incompetech and ccMixter need nothing; Freesound needs the user's token).
 - **Where sound comes from.** `make_sound` (kind, duration_ms, seed, pitch_hz): synthesized in the
-  project, no licence. `search_sounds` then `import_sound` for music and real recordings (needs
-  the user's Freesound token; show the attribution). `import_file` with kind audio for the user's
-  own files (`find_files` kind audio). A voice-over from a speech MCP server the user added, such
-  as minimax-mcp, if `get_guidance` lists one: write the script short, ask before spending credits
-  on long text, then import the file it makes. `list_sounds` shows what is in `media/`.
+  project, no licence. `search_sounds {query, provider?}` then `import_sound {provider, id}` for
+  music and real recordings; `provider` is `openverse` (the default when the user has no Freesound
+  token), `freesound`, `incompetech` (Kevin MacLeod's music, all CC BY 4.0) or `ccmixter`.
+  `import_file` with kind audio for the user's own files (`find_files` kind audio). A voice-over
+  from a speech MCP server the user added, such as minimax-mcp, if `get_guidance` lists one: write
+  the script short, ask before spending credits on long text, then import the file it makes.
+  `list_sounds` shows what is in `media/`.
+- **Licences decide what you may use.** A project is commercial by default: `sound_settings`
+  reads the setting and flips it (only when the user says the video is not commercial, and then
+  with their words as the reason). While it is commercial, sounds under a non-commercial, a
+  no-derivatives or an unknown licence are left out of the search and refused on import; CC0 and
+  CC BY are fine. Never change the setting to get a sound through.
+- **Show the credit.** Every imported sound carries its licence in `media/<name>.license.json`.
+  Before you finish a video that uses a sound which is not CC0 or synthesized, call
+  `sound_credits {video}`: it writes `exports/<video>-credits.txt` with the credit line of every
+  sound the video's tracks use (and notes what the video changed, as CC BY asks), and you show
+  that text with the video - in the description, on an end card or in a credits roll. A sound
+  under ShareAlike may oblige the whole video to carry the same licence; the tool names those.
 - **Setting it.** `{"op": "set_video", "video": ..., "prop": {"name": "audio", "value": {"file":
   "media/x.wav", "start_ms": 0, "gain": 0.25, "fade_in_ms": 500, "fade_out_ms": 600}}}` sets the
   one older track. For several, `add_sound_track {video, file, role, start_ms, in_ms, out_ms, gain,

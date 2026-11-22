@@ -16,11 +16,15 @@ use od_core::{
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
+use crate::freesound;
+use crate::openverse;
+use crate::sound_license::{self, Candidate, Provider, UsedSound};
+use crate::sound_sources;
 use crate::tools::{
-    ApplyArgs, CallCtx, Content, Output, ToolError, apply_ops, node_id, parse, tool,
+    ApplyArgs, CallCtx, Content, Output, ToolError, apply_ops, node_id, parse, tool, tool_net,
 };
 
-pub const NAMES: [&str; 12] = [
+pub const NAMES: [&str; 16] = [
     "add_sound_track",
     "set_sound_track",
     "remove_sound_track",
@@ -33,6 +37,10 @@ pub const NAMES: [&str; 12] = [
     "remove_caption_cue",
     "clear_captions",
     "set_caption_style",
+    "search_sounds",
+    "import_sound",
+    "sound_settings",
+    "sound_credits",
 ];
 
 const MAX_CAPTION_SOURCE_BYTES: usize = 2_000_000;
@@ -93,7 +101,7 @@ pub fn definitions() -> Vec<Value> {
         "max_lines": {"type": "integer", "minimum": 1, "maximum": 4},
         "uppercase": {"type": "boolean"}
     });
-    vec![
+    let mut all = vec![
         tool(
             "add_sound_track",
             "Add a sound track to a video, up to 8 besides the older single `audio`: music, a \
@@ -241,7 +249,9 @@ pub fn definitions() -> Vec<Value> {
             &["video"],
             false,
         ),
-    ]
+    ];
+    all.extend(sound_definitions());
+    all
 }
 
 fn merge(mut a: Value, b: Value) -> Value {
@@ -265,6 +275,10 @@ pub fn call(ctx: &mut CallCtx, name: &str, args: Value) -> Result<Output, ToolEr
         "remove_caption_cue" => remove_caption_cue(ctx, parse(args)?),
         "clear_captions" => clear_captions(ctx, parse(args)?),
         "set_caption_style" => set_caption_style(ctx, args),
+        "search_sounds" => search_sounds(ctx, parse(args)?),
+        "import_sound" => import_sound(ctx, parse(args)?),
+        "sound_settings" => sound_settings(ctx, parse(args)?),
+        "sound_credits" => sound_credits(ctx, parse(args)?),
         other => Err(ToolError(format!("unknown tool {other:?}"))),
     }
 }
@@ -840,6 +854,354 @@ fn set_caption_style(ctx: &mut CallCtx, args: Value) -> Result<Output, ToolError
         (v.captions_with_style(style.clone())?, style)
     };
     set_captions(ctx, &common, video, new, json!({"style": style}))
+}
+
+// ---- finding, importing and crediting sounds ----
+
+fn sound_definitions() -> Vec<Value> {
+    let provider = json!({
+        "type": "string",
+        "enum": Provider::NAMES,
+        "description": "Where to look: openverse (keyless; sound effects and music from Freesound, Jamendo and Wikimedia), freesound (needs the user's token; the biggest library of sound effects), incompetech (keyless; Kevin MacLeod's music, all CC BY 4.0) or ccmixter (keyless; music, CC BY). Default: freesound when the user added a token, otherwise openverse."
+    });
+    vec![
+        tool_net(
+            "search_sounds",
+            "Find music and sound effects for a video on Openverse, Freesound, Incompetech or \
+             ccMixter. Returns each sound's provider, id, title, creator, length, licence (SPDX \
+             style, with its url and whether it needs a credit), the ready-made attribution and a \
+             preview to listen to. While the project is commercial (sound_settings, the default) \
+             sounds with a non-commercial, no-derivatives or unknown licence are left out and \
+             counted in hidden_by_license. Sounds are licensed by their authors, not by us: prefer \
+             CC0, and for anything that needs a credit call sound_credits before the video is \
+             finished. Import one with import_sound, giving it this provider and id.",
+            json!({
+                "query": id("Words to search for, for example \"soft piano loop\"."),
+                "provider": provider,
+                "source": id("Openverse only: one hosting site, freesound, jamendo or wikimedia_audio."),
+                "duration_max_ms": {"type": "integer", "minimum": 1, "maximum": 600000, "description": "Keep only sounds no longer than this."},
+                "page": {"type": "integer", "minimum": 1, "maximum": 20, "description": "Which page of results (1 is the first)."}
+            }),
+            &["query"],
+            true,
+        ),
+        tool_net(
+            "import_sound",
+            "Download one sound found with search_sounds into this project's media/ folder and \
+             write its licence record, media/<name>.license.json, next to it. Pass the provider \
+             and id from the search result. Returns the media/ reference and the credit that must \
+             be shown (empty for CC0). A sound whose licence the project does not clear (see \
+             sound_settings) is refused with what to do. The file is only downloaded from the \
+             provider's own hosting sites and is never overwritten. Then put it under a video \
+             with set_video prop {name: \"audio\", value: {file, start_ms, gain, fade_in_ms, \
+             fade_out_ms}} or add_sound_track.",
+            json!({
+                "provider": provider,
+                "id": {"type": ["string", "integer"], "description": "The id of a sound from search_sounds."},
+                "name": id("A plain file name for the sound, without the ending.")
+            }),
+            &["id"],
+            false,
+        ),
+        tool(
+            "sound_settings",
+            "Read or set how this project may use sounds. `commercial` (default true: a video that \
+             may earn money or promote a business) hides and refuses sounds under non-commercial, \
+             no-derivatives or unknown licences. Set it to false only when the user says the video \
+             is not commercial, and quote them in `reason`; never change it to get a sound through. \
+             With no arguments it only reads.",
+            json!({
+                "commercial": {"type": "boolean", "description": "Whether the project's videos are commercial."},
+                "reason": id("Required with commercial false: the user's own words for why.")
+            }),
+            &[],
+            false,
+        ),
+        tool(
+            "sound_credits",
+            "Write the credits for the sounds a video uses: the credit line of every sound whose \
+             licence asks for one (CC BY and the like), with a note when the video trims, \
+             fades, lowers or re-levels it, as the licences require. Saved to \
+             exports/<video>-credits.txt and returned. Call it before finishing any video that \
+             uses a sound that is not CC0 or synthesized, and put the text in the description \
+             or the end card. Also lists sounds with no licence record and ShareAlike sounds.",
+            json!({"video": id("Id of a video from list_videos.")}),
+            &["video"],
+            false,
+        ),
+    ]
+}
+
+fn sound_error(e: impl ToString) -> ToolError {
+    ToolError(e.to_string())
+}
+
+/// Whether the project's sounds must be cleared for commercial use.
+fn commercial_of(ctx: &CallCtx) -> bool {
+    ctx.ws
+        .dir()
+        .is_none_or(|dir| sound_license::load_settings(dir).commercial)
+}
+
+/// The provider asked for; with none, Freesound for a user who gave a token and Openverse
+/// (which needs none) for everyone else.
+fn provider_of(name: Option<&str>) -> Result<Provider, ToolError> {
+    match name {
+        Some(n) => Provider::parse(n)
+            .ok_or_else(|| ToolError(format!("provider is one of {}", Provider::NAMES.join(", ")))),
+        None if freesound::has_token() => Ok(Provider::Freesound),
+        None => Ok(Provider::Openverse),
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SearchSoundsArgs {
+    query: String,
+    #[serde(default)]
+    provider: Option<String>,
+    #[serde(default)]
+    source: Option<String>,
+    #[serde(default)]
+    duration_max_ms: Option<u32>,
+    #[serde(default)]
+    page: Option<u32>,
+}
+
+fn candidate_row(c: &Candidate) -> Value {
+    json!({
+        "provider": c.provider,
+        "id": c.id,
+        "title": c.title,
+        "creator": c.creator,
+        "duration_ms": c.duration_ms,
+        "license": if c.license.spdx.is_empty() { "unknown" } else { c.license.spdx.as_str() },
+        "license_url": c.license.url,
+        "attribution_required": c.license.attribution_required,
+        "commercial_ok": c.license.commercial_ok,
+        "derivatives_ok": c.license.derivatives_ok,
+        "share_alike": c.license.share_alike,
+        "attribution": c.attribution,
+        "preview_url": c.download_url,
+        "landing_url": c.landing_url,
+        "source": c.origin,
+    })
+}
+
+fn search_sounds(ctx: &mut CallCtx, a: SearchSoundsArgs) -> Result<Output, ToolError> {
+    let commercial = commercial_of(ctx);
+    let provider = provider_of(a.provider.as_deref())?;
+    if a.source.is_some() && provider != Provider::Openverse {
+        return Err(ToolError("source only narrows an openverse search".into()));
+    }
+    let page = a.page.unwrap_or(1);
+    let (found, hidden) = match provider {
+        Provider::Freesound => {
+            let (sounds, hidden) = freesound::search(&a.query, a.duration_max_ms, page, commercial)
+                .map_err(sound_error)?;
+            (
+                sounds.iter().map(freesound::Sound::candidate).collect(),
+                hidden,
+            )
+        }
+        Provider::Openverse => openverse::search(
+            &a.query,
+            a.source.as_deref(),
+            a.duration_max_ms,
+            page,
+            commercial,
+        )
+        .map_err(sound_error)?,
+        Provider::Incompetech => (
+            sound_sources::incompetech_search(&a.query, a.duration_max_ms, page)
+                .map_err(sound_error)?,
+            0,
+        ),
+        Provider::Ccmixter => {
+            sound_sources::ccmixter_search(&a.query, a.duration_max_ms, page, commercial)
+                .map_err(sound_error)?
+        }
+    };
+    let rows: Vec<Value> = found.iter().map(candidate_row).collect();
+    let mut out = json!({
+        "provider": provider.name(),
+        "commercial": commercial,
+        "count": rows.len(),
+        "hidden_by_license": hidden,
+        "sounds": rows,
+    });
+    if hidden > 0 {
+        out["note"] = json!(format!(
+            "{hidden} sound(s) were left out: this project is commercial and their licence forbids commercial use or changes (or is unknown). See sound_settings."
+        ));
+    }
+    Ok(Output::json(&out))
+}
+
+/// A sound id as an agent writes it: Freesound's are numbers, the others text.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum SoundId {
+    Text(String),
+    Number(u64),
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ImportSoundArgs {
+    id: SoundId,
+    #[serde(default)]
+    provider: Option<String>,
+    #[serde(default)]
+    name: Option<String>,
+}
+
+fn import_sound(ctx: &mut CallCtx, a: ImportSoundArgs) -> Result<Output, ToolError> {
+    let dir = project_dir(ctx)?;
+    let commercial = commercial_of(ctx);
+    let provider = provider_of(a.provider.as_deref())?;
+    let id = match a.id {
+        SoundId::Text(t) => t.trim().to_string(),
+        SoundId::Number(n) => n.to_string(),
+    };
+    let name = a.name.as_deref();
+    let imported = match provider {
+        Provider::Freesound => {
+            let number: u64 = id
+                .parse()
+                .map_err(|_| ToolError("a Freesound id is a number".into()))?;
+            freesound::import(&dir, number, name, commercial).map_err(sound_error)?
+        }
+        Provider::Openverse => {
+            openverse::import(&dir, &id, name, commercial).map_err(sound_error)?
+        }
+        Provider::Incompetech => {
+            sound_sources::incompetech_import(&dir, &id, name, commercial).map_err(sound_error)?
+        }
+        Provider::Ccmixter => {
+            sound_sources::ccmixter_import(&dir, &id, name, commercial).map_err(sound_error)?
+        }
+    };
+    let note = if imported.attribution_required {
+        "this sound needs a credit: call sound_credits before the video is finished and show the text"
+    } else {
+        "no credit is required for this licence"
+    };
+    Ok(Output::json(&json!({
+        "file": imported.file,
+        "sidecar": imported.sidecar,
+        "attribution": imported.attribution,
+        "license": imported.license,
+        "attribution_required": imported.attribution_required,
+        "note": note,
+    })))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SoundSettingsArgs {
+    #[serde(default)]
+    commercial: Option<bool>,
+    #[serde(default)]
+    reason: Option<String>,
+}
+
+fn sound_settings(ctx: &mut CallCtx, a: SoundSettingsArgs) -> Result<Output, ToolError> {
+    let dir = project_dir(ctx)?;
+    let settings = match a.commercial {
+        None => sound_license::load_settings(&dir),
+        Some(commercial) => {
+            let reason = a.reason.as_deref().unwrap_or("").trim();
+            if !commercial && reason.is_empty() {
+                return Err(ToolError(
+                    "reason: quote the user saying why this project is not commercial".into(),
+                ));
+            }
+            sound_license::set_commercial(&dir, commercial, reason).map_err(sound_error)?
+        }
+    };
+    let meaning = if settings.commercial {
+        "commercial: search and import skip sounds under non-commercial, no-derivatives or unknown licences"
+    } else {
+        "not commercial: every licence is offered, including non-commercial ones; credits are still owed"
+    };
+    Ok(Output::json(&json!({
+        "commercial": settings.commercial,
+        "reason": settings.reason,
+        "changed_at": settings.changed_at,
+        "meaning": meaning,
+    })))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SoundCreditsArgs {
+    video: String,
+}
+
+fn sound_credits(ctx: &mut CallCtx, a: SoundCreditsArgs) -> Result<Output, ToolError> {
+    let dir = project_dir(ctx)?;
+    let id = node_id(&a.video)?;
+    let video = video_of(ctx, &id)?;
+    let tracks = video.sound_tracks();
+    let used: Vec<UsedSound> = tracks
+        .iter()
+        .map(|t| UsedSound {
+            file: t.file.clone(),
+            modifications: sound_license::modifications_of(t),
+        })
+        .collect();
+    // What the video did to each sound is written into that sound's licence record, as the
+    // licences ask for it.
+    for sound in &used {
+        let stem = sound.file.rsplit('/').next().unwrap_or(&sound.file);
+        let stem = stem.rsplit_once('.').map_or(stem, |(s, _)| s);
+        sound_license::record_modifications(&dir.join("media"), stem, &sound.modifications)
+            .map_err(sound_error)?;
+    }
+    let report = sound_license::credits_report(&dir, &used);
+    let file = if report.text.is_empty() {
+        None
+    } else {
+        Some(write_credits(&dir, id.as_str(), &report.text)?)
+    };
+    let note = if report.credited == 0 && report.unlicensed.is_empty() {
+        "no sound in this video asks for a credit"
+    } else if report.credited == 0 {
+        "no credit is owed by the sounds with a licence record; the unlicensed ones are not known here: ask the user where they came from"
+    } else {
+        "show this text with the video (description, end card or credits roll)"
+    };
+    Ok(Output::json(&json!({
+        "video": id,
+        "file": file,
+        "text": report.text,
+        "credited": report.credited,
+        "unlicensed": report.unlicensed,
+        "share_alike": report.share_alike,
+        "note": note,
+    })))
+}
+
+/// Writes `exports/<video>-credits.txt`, replacing the last one; a link in its place is refused.
+fn write_credits(dir: &Path, video: &str, text: &str) -> Result<String, ToolError> {
+    let stem = sound_license::clean_name(video).map_err(sound_error)?;
+    let exports = dir.join("exports");
+    if std::fs::symlink_metadata(&exports).is_ok_and(|m| m.file_type().is_symlink()) {
+        return Err(ToolError(
+            "exports/ is a link; refusing to write there".into(),
+        ));
+    }
+    std::fs::create_dir_all(&exports).map_err(sound_error)?;
+    let name = format!("{stem}-credits.txt");
+    let path = exports.join(&name);
+    if std::fs::symlink_metadata(&path).is_ok_and(|m| m.file_type().is_symlink()) {
+        return Err(ToolError(format!(
+            "exports/{name} is a link; refusing to write there"
+        )));
+    }
+    std::fs::write(&path, text).map_err(|e| ToolError(format!("{}: {e}", path.display())))?;
+    Ok(format!("exports/{name}"))
 }
 
 #[cfg(test)]
