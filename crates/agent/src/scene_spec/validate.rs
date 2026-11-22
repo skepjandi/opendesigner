@@ -5,6 +5,7 @@ use std::collections::BTreeSet;
 
 use serde_json::{Value, json};
 
+use super::beats::{MAX_GAP_MS, beat_name};
 use super::features::{cap_problems, detail_inventory_problems, targets_for};
 use super::loop_policy::LoopLimits;
 use super::routing::{self, RoutingStatus};
@@ -126,6 +127,7 @@ pub fn validate(spec: &SceneSpec) -> Report {
     check_features(spec, &known, &mut r);
     check_motion(spec, &known, &mut r);
     check_audio(spec, &known, &mut r);
+    check_beats(spec, &known, &mut r);
     check_history(spec, &mut r);
     check_strict(spec, &known, &mut r);
     r
@@ -480,6 +482,75 @@ fn check_audio(spec: &SceneSpec, known: &Known, r: &mut Report) {
                 format!("audio_plan.cues[{i}].sync_to"),
                 format!("motion {s:?} does not exist"),
             ));
+        }
+    }
+}
+
+fn check_beats(spec: &SceneSpec, known: &Known, r: &mut Report) {
+    let beats = &spec.beat_map;
+    if beats.is_empty() {
+        return;
+    }
+    let duration = spec.brief.duration_ms;
+    let mut names = BTreeSet::new();
+    for (i, b) in beats.iter().enumerate() {
+        let at = |f: &str| format!("beat_map[{i}].{f}");
+        if !names.insert(beat_name(b, i)) {
+            r.errors.push(issue(at("id"), "beat names must be unique"));
+        }
+        if b.takeaway.trim().is_empty() {
+            r.errors
+                .push(issue(at("takeaway"), "say what the viewer takes from it"));
+        }
+        if i > 0 && b.at_ms <= beats[i - 1].at_ms {
+            r.errors.push(issue(
+                at("at_ms"),
+                format!("{} ms is not after the beat before it", b.at_ms),
+            ));
+        }
+        if duration > 0 && b.at_ms >= duration {
+            r.errors.push(issue(
+                at("at_ms"),
+                format!("{} ms is not inside the {duration} ms video", b.at_ms),
+            ));
+        }
+        if let Some(f) = &b.focal_node
+            && !known.layers.contains(f)
+        {
+            r.errors.push(issue(
+                at("focal_node"),
+                format!("{f:?} is not in layer_plan"),
+            ));
+        }
+        if let Some(exit) = b.exit_ms {
+            if exit <= b.at_ms {
+                r.errors.push(issue(
+                    at("exit_ms"),
+                    format!("{exit} ms is not after at_ms ({} ms)", b.at_ms),
+                ));
+            } else if duration > 0 && exit > duration {
+                r.errors.push(issue(
+                    at("exit_ms"),
+                    format!("{exit} ms is past the end of the {duration} ms video"),
+                ));
+            }
+        }
+    }
+    if duration > 0 {
+        let mut last = 0;
+        let edges = beats.iter().map(|b| b.at_ms).chain([duration]);
+        for at in edges {
+            if at.saturating_sub(last) > MAX_GAP_MS {
+                r.errors.push(issue(
+                    "beat_map",
+                    format!(
+                        "no beat between {last} ms and {at} ms: at least one beat every {} s",
+                        MAX_GAP_MS / 1000
+                    ),
+                ));
+                break;
+            }
+            last = at;
         }
     }
 }

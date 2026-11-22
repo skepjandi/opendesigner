@@ -466,6 +466,16 @@ Agents judge their own animation from pictures, so these return one PNG image bl
 
 The `review` playbook (`get_playbook review`, `crates/agent/skill/review-playbook.md`) is the process around them: a contact sheet, strips of every key motion, crops of every face and contact, at most three automatic rounds and then ask the user, harsh critique (a flaw is what you see, at which second, why), and a checklist (legibility, clarity, density, motion, photosensitivity, rhythm, origin and physics, continuity, composition, ending as poster, detail at 1:1). The `explainer` final gate and the `video` quality gate point to it.
 
+### Depth layers from a picture: `layer_image`
+
+> **Status: Built** (`crates/agent/src/layer_image.rs`, `layer_image/planes.rs`). `[INFERENCE]` Tested on synthetic pictures only; not tried on real photographs or with a real depth model.
+
+`layer_image {file, mask | depth, bands?, invert_depth?, mask_threshold?, grow?, feather?, parent, name?, x?, y?, width?, overscan?}` cuts one picture in `media/` into depth layers for a camera move (2.5D parallax). The grey plane that says what is near comes from the user's own programs, as `transcribe` and `remove_background` do: a `mask` (a subject mask or a transparent cut-out, from `remove_background` with `mask_only`) makes two layers, a `depth` map (brighter is nearer, or `invert_depth`) makes `bands` layers (2 to 6) of equal area. Equal depths share a band, so a flat map is refused ("only one level").
+
+Each band becomes `media/<name>-layer-<n>.png` (never overwriting; a `<name>-layers.json` records the source, plane and settings) and an image node of one group, far layer first, with `depth` from 0.15 (far) to 1 (near), so `camera_pan`, `camera_push_in` and `camera_drift` move the near layers further. A layer holds its own pixels, plus the colours grown out of its edge under the nearer bands (`grow`, default 40 px, a breadth-first fill from the band's own pixels, so nothing is invented), so a move does not uncover a hole; the lowest layer is grown to fill the picture. The edge towards a farther band is softened over `feather` pixels (default 1). Layers are overscanned by 6 percent so a camera move has room. Pictures over 24 million pixels are refused. One attributed, undoable turn.
+
+Licences: the weights of the programs the user runs have their own terms. `rembg`'s newer default model is CC BY-NC 4.0, so for a commercial project name `isnet-general-use` or `u2net`; Depth Anything V2 Small is Apache-2.0 and the larger sizes are non-commercial. Nothing is downloaded or uploaded by OpenDesigner.
+
 ### Kinetic type: `split_text`, `text_reveal`
 
 Status: **Built** (`crates/agent/src/text_split.rs`, the layout read is `od_render::text_lines`). Both tools write ordinary nodes and ordinary keyframes in one attributed transaction, so one undo puts the text back.
@@ -474,6 +484,49 @@ Status: **Built** (`crates/agent/src/text_split.rs`, the layout read is `od_rend
 - **`text_reveal {video, node, style, by?, wrap?, mode?, each_ms?, at_ms?, duration_ms?, ease?, turn?, summary?}`**: splits the node as above (or animates a group `split_text` made earlier as it is) and writes the keys. `style` and its defaults: `rise` (450 ms, `power4_out`, `y` from one line below the mask to rest; masked by default; unmasked it also fades in over 60% of the time), `fade` (400 ms, `ease_out`), `pop` (350 ms, `back_out(1.2)`, `scale` 0.5 to 1 and a fade over the first 40%), `slide` (500 ms, `power4_out`, `x` from one font size to the left, or from the mask's width when masked), `typewriter` (each piece's opacity jumps 0 to 1 within 1 ms). Stagger between pieces: 40 ms per character, 90 per word, 140 per line (typewriter 33, 120, 400). `by` defaults to characters for a one-line headline of 12 characters or fewer, else words (lines past 4 lines or 40 words); typewriter defaults to characters up to 80 of them. The tracks replace any a piece already has. It answers with the resolved timing (every piece's `start_ms` and `end_ms`, `ends_at_ms`), `hold_ms` (1 s plus 0.4 s per short word, the `RV015` rule, over the whole text) and `leave_no_earlier_than_ms`, plus `warnings` when characters are revealed one by one on more than 12 characters, or `each_ms` is outside 30 to 50 ms (characters) or 80 to 120 ms (words).
 
 What it cannot do: kerning between two pieces is lost when splitting by characters (words and lines keep theirs inside the piece); a ligature (`fi`) is one glyph and so one character piece; pieces are left-aligned at their drawn position, so centre or right alignment is baked into the positions and a later edit of the box width does not re-wrap them; right-to-left and mixed-direction text is ordered by logical position and only pure runs are checked `[INFERENCE]`; a text bound to a template variable or a localised string is split from the text it shows now and the pieces no longer follow it; position is rounded to whole pixels, so an at-rest split matches the original to within sub-pixel anti-aliasing, not bit for bit (the test allows a few percent of ink pixels to differ for characters, fewer for words and lines).
+
+### Layers and layout moves: `animate_to`, `snapshot_layout`, `transition_layout`
+
+Status: **Built** (`crates/agent/src/layering.rs`, `crates/agent/src/layout_transition.rs`; semantics in [Video editing](./video-editing.md#additive-layers-and-implicit-from)). All three write ordinary `animate` operations in one attributed, undoable turn.
+
+- **`animate_to {video, node?, prop, to, at_ms, duration_ms, ease?, keep_later?, turn?, summary?}`**: starts from the value at `at_ms` (the node's track, else the node's own value) and replaces the old track's keys from there. `to` is a number, or a `'#rrggbb[aa]'` string for `fill_color`; the camera props need no `node`. Returns `from`, `to`, `keys`, `replaced_keys` and the usual receipt. Refused: a looping track, a value it is already at, a prop the node lacks.
+- **`snapshot_layout {frame, name?}`** and **`transition_layout {video, snapshot, at_ms, duration_ms?, ease?, stagger?, turn?, summary?}`**: record where the nodes of a frame are, edit, then animate from the record to the live document (moved, resized, entering and leaving nodes are listed in the result's `table`). Snapshots are JSON files in the project's `layout-snapshots/` folder with plain names, no links, size and count caps.
+- **Additive layers** need no tool of their own: `apply_ops` `animate` takes `additive: true`, and `animate_preset` takes `layer: "additive"`.
+
+Not verified: that agents choose `animate_to` over rewriting keys by hand, and the transition of turned or scaled nodes `[INFERENCE]`.
+
+### Paths and morphing: `animate_arc`, `animate_keyframes`, `text_on_path`, `morph_to`
+
+Status: **Built** (`crates/agent/src/path_motion.rs`; semantics in [Video editing](./video-editing.md#paths-and-morphing), the shape data in [Document format](./document-format.md#vector-shapes)). Each is one attributed, undoable turn; the first two write ordinary keys.
+
+- **`animate_arc {video, node, from?, to, at_ms, duration_ms, ease?, arc?, orient?, turn?, summary?}`**: a quadratic-Bezier travel sampled into x/y keys every ~33 ms; `arc` is `{strength, peak, direction auto|cw|ccw}`; `orient` adds a tangent-following rotation (unwrapped). `animate_preset` takes the same `arc` object for scene moves that travel in x or y (`slide_in_*`, `bounce_in`, `fade_up`) and refuses it for the rest.
+- **`animate_keyframes {video, node?, keyframes, at_ms?, duration_ms, ease?, allow_over?, turn?, summary?}`**: `{"0%": {"x": 0}, "40%": {"x": 200, "ease": "ease_out"}, "100%": {"x": 400}}` over several properties; a keyframe's ease shapes the move that leaves it; the result says when an ease is unused.
+- **`text_on_path {text_node, path_node, start_offset?, align?, mode?, reveal?, turn?, summary?}`**: one text node per glyph standing on the path's curve, rotated to its tangent, in a group; `reveal {video, preset?, each_ms?, at_ms?, duration_ms?, ease?}` staggers a scene move over the letters. Reports `ids`, `count` and `off_the_end` (glyphs that fell off an open path).
+- **`morph_to {video, node, to_path, at_ms, duration_ms, ease?, reset?, turn?, summary?}`**: sets the node's `path_morph` (equal-length point lists of both shapes) and a `morph_progress` track; call it again after the first ends to continue to a third shape. The result lists `points`, `contours`, `stops` and the progress keys.
+
+Not verified: that agents reach for `animate_arc` and `morph_to` rather than hand-written keys or swapped path nodes `[INFERENCE]`.
+
+### Scene seeds: `list_seeds`, `apply_seed`
+
+Status: **Built** (`crates/agent/src/seeds.rs`, the data in `seeds/`, playbook topic `seeds`). Six starter scenes, each a deterministic recipe over the blocks `add_block` already has (`apply_seed` calls the same code path), plus the 3D phone node and `animate_preset`:
+
+| Seed | Builds | Length |
+|---|---|---|
+| `explainer-opener` | `sky_gradient`, `clouds`, `parallax_hills`, `particles`, `eyebrow_label`, `kinetic_headline`, `character` (waving), `speech_bubble` | 9 s |
+| `product-reveal` | `sky_gradient`, `particles`, `eyebrow_label`, `kinetic_headline`, a `device3d` phone (`hero_reveal`, then `float`), `badge_pill`, `cta_button` | 9 s |
+| `kinetic-quote` | `sky_gradient`, `particles`, `eyebrow_label`, `kinetic_headline`, `lower_third` | 8 s |
+| `stats-callout` | `sky_gradient`, `grid_floor`, `particles`, `eyebrow_label`, `stat_callout`, `donut_chart`, `highlight_ring` | 9 s |
+| `before-after` | `sky_gradient`, `clouds`, `particles`, two `badge_pill`, two `progress_bar`, `connector`, `stat_callout`, `highlight_ring` | 10 s |
+| `logo-sting` | `starfield`, `particles`, `logo_sting`, a `camera_push_in` | 6 s |
+
+- **`list_seeds {}`** returns each seed's id, what it is for, its length, its blocks, its beats and its layout notes (the `seeds/layouts/<id>.md` file: where each element sits as a fraction of the frame, and what to swap).
+- **`apply_seed {id, video?, brand?}`** is one attributed turn (one `turn` id, one "before" checkpoint, so one undo or one `restore_checkpoint` removes the whole scene). It creates a frame (placed beside existing frames), a video in the workspace's chosen video format (else 1280x720 at 30 fps) or uses the empty `video` you name (its size is used; a video with clips is refused), one clip of the seed's length, then the blocks, an ambient `camera_drift` (or a `camera_push_in`) and a SceneSpec in `scene_specs/<id>.json` (`<id>-2`, `<id>-3` for later applications, so applying twice never collides). Block colors are the applied style pack's tokens (`{bg}`, `{fg}`, `{accent}`, `{muted}`) when the workspace brief names a pack and the document has them, else the block defaults; `brand.accent`, `brand.background` and `brand.foreground` (`#rrggbb`) override either, and `brand.name`, `headline`, `tagline`, `cta` replace the seed's copy. If any step fails the turn is restored to its checkpoint and the error says so.
+- **The spec** has `seed`, the palette (the pack's eight tokens, else bg, fg, accent, muted), `layer_plan` (a layer per block with its node id, level, role, depth and `expects_motion`), `motion_plan`, `detail_inventory`, two feature targets, `audio_plan` (a music track and a cue per beat that names one) and a `beat_map` of 3 to 4 beats, all `built`. Its routing is resolved from the seed's kind.
+- **The result** returns `layers` (layer id to node id), `beat_times`, the `layouts` notes, `p0_gates` (`validate_document` and `scene_spec_validate` run at build time; the strict check too, which every seed passes, any open finding listed; `review_video`, the contact sheet, the copy swap and the sound as to do) and the `scene_status` (`null` without a project folder, where the spec is not saved either).
+
+The seeds use no picture backdrop on purpose: `aurora_backdrop`, `gradient_wash`, `grid_backdrop` and `noise_backdrop` are full-frame pictures and trip `RV001`; the seeds take vector scenery (`sky_gradient`, `grid_floor`, `clouds`) instead.
+
+What it does not do: it does not render or look at the scene, add sound, or import images (a `device3d` has no capture until you set one). `review_video` is not run inside the tool, because it renders a sample of frames; the tests run it on every seed and require no RV001 and no RV002. [INFERENCE] A seed's motion is calm and generic: it is a starting point, and a scene with a brief of its own should change its beats.
 
 ### Agent plugin
 

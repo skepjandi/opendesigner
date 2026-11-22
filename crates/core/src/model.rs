@@ -11,9 +11,10 @@ use crate::vector::{FillRule, LineCap, LineJoin, ViewBox};
 /// Version of the on-disk project format. A loader refuses a newer one. Version 2 added 3D
 /// devices and keyframe animations; version 3 added sound tracks, captions, clip speed and grades,
 /// transitions and template variables; version 4 added vector paths, gradients, 2D transforms,
-/// effects, looping keyframes and the camera; version 5 added `Video.hold_frames`. Every older project is a valid version 5 project, because
-/// each addition is an optional field.
-pub const FORMAT_VERSION: u32 = 5;
+/// effects, looping keyframes and the camera; version 5 added `Video.hold_frames`; version 6 added
+/// additive animation tracks (`Animation.additive`). Every older project is a valid version 6
+/// project, because each addition is an optional field.
+pub const FORMAT_VERSION: u32 = 6;
 
 /// Stable identifier of a node or page. Never reused within a document.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
@@ -240,6 +241,10 @@ pub struct Node {
     /// Unset means nonzero.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fill_rule: Option<FillRule>,
+    /// The shapes a path node morphs through (`crate::morph`); its `morph_progress` animation
+    /// moves along them. Present only on path nodes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub morph: Option<crate::morph::PathMorph>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub children: Vec<Node>,
 }
@@ -300,6 +305,7 @@ impl Node {
             path: None,
             view_box: None,
             fill_rule: None,
+            morph: None,
             rotation: 0.0,
             scale_x: 1.0,
             scale_y: 1.0,

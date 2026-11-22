@@ -89,6 +89,8 @@ pub enum Property {
     ViewBox(Option<ViewBox>),
     /// Which side of a self-crossing path is inside (`null`: nonzero).
     FillRule(Option<FillRule>),
+    /// The shapes a path node morphs through (`null` for none); see `crate::morph`.
+    PathMorph(Option<crate::morph::PathMorph>),
     /// The stroke's width (the node must have a stroke); what a stroke-width keyframe moves.
     StrokeWidth(f64),
     /// Where along the outline the stroke starts, 0 to 1 (the node must have a stroke).
@@ -170,6 +172,7 @@ impl Property {
             Property::Path(_) => "path",
             Property::ViewBox(_) => "view_box",
             Property::FillRule(_) => "fill_rule",
+            Property::PathMorph(_) => "path_morph",
             Property::StrokeWidth(_) => "stroke_width",
             Property::TrimStart(_) => "trim_start",
             Property::TrimEnd(_) => "trim_end",
@@ -205,7 +208,10 @@ impl Property {
             | Property::StrokeWidth(_)
             | Property::TrimStart(_)
             | Property::TrimEnd(_) => matches!(kind, Frame | Rect | Ellipse | Path),
-            Property::Path(_) | Property::ViewBox(_) | Property::FillRule(_) => kind == Path,
+            Property::Path(_)
+            | Property::ViewBox(_)
+            | Property::FillRule(_)
+            | Property::PathMorph(_) => kind == Path,
             Property::CornerRadius(_) => matches!(kind, Frame | Rect | Image),
             Property::Text(_)
             | Property::FontSize(_)
@@ -337,6 +343,7 @@ fn apply_property(
         vector_prop @ (Property::Path(_)
         | Property::ViewBox(_)
         | Property::FillRule(_)
+        | Property::PathMorph(_)
         | Property::StrokeWidth(_)
         | Property::TrimStart(_)
         | Property::TrimEnd(_)) => crate::vector::apply_property(node, vector_prop)?,
@@ -752,6 +759,10 @@ pub enum Operation {
         keys: Vec<Key>,
         #[serde(default, skip_serializing_if = "Repeat::is_once")]
         repeat: Repeat,
+        /// Adds the keys' values to the node's value instead of replacing it; see
+        /// [`crate::animation::Animation::additive`].
+        #[serde(default, skip_serializing_if = "crate::animation::not_additive")]
+        additive: bool,
     },
     /// Put back an overlay. Written by the history; front ends cannot issue it.
     RestoreOverlay {
@@ -976,6 +987,9 @@ pub fn apply(
             })
         }
         Operation::Set { id, prop } => {
+            if let Property::PathMorph(morph) = prop {
+                crate::morph::check_progress_keys(doc, id, morph.as_ref())?;
+            }
             let loc = node_loc(doc, id)?;
             immutable_if_root(doc, &loc)?;
             let tokens = doc.tokens.clone();
@@ -1038,7 +1052,19 @@ pub fn apply(
             prop,
             keys,
             repeat,
-        } => crate::animation::apply(doc, video, node, *prop, keys, *repeat, allow_internal),
+            additive,
+        } => crate::animation::apply(
+            doc,
+            crate::animation::Animate {
+                video,
+                node,
+                prop: *prop,
+                keys,
+                repeat: *repeat,
+                additive: *additive,
+            },
+            allow_internal,
+        ),
         Operation::SetToken { name, value } => set_token(doc, name, value.as_deref()),
         Operation::SetLocalizedText { locale, id, text } => {
             let old = doc.set_locale_text(locale, id, text.as_deref())?;
@@ -1169,6 +1195,7 @@ fn current_value(node: &Node, prop: &Property) -> Property {
         Property::Path(_) => Property::Path(node.path.clone().unwrap_or_default()),
         Property::ViewBox(_) => Property::ViewBox(node.view_box),
         Property::FillRule(_) => Property::FillRule(node.fill_rule),
+        Property::PathMorph(_) => Property::PathMorph(node.morph.clone()),
         Property::StrokeWidth(_) | Property::TrimStart(_) | Property::TrimEnd(_) => {
             crate::vector::current_stroke_value(node, prop)
         }

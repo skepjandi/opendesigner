@@ -3269,6 +3269,7 @@ mod tests {
             }])
             .unwrap();
         s.apply_user(&[Operation::Animate {
+            additive: false,
             video: ids[0].clone(),
             node: parse_id(&id).unwrap(),
             prop: od_core::animation::AnimProp::RotateY,

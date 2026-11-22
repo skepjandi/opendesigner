@@ -335,6 +335,7 @@ pub fn status(spec: &SceneSpec, dir: &Path, name: &str) -> Value {
         "missing_evidence": missing,
         "next_call": next.call,
         "next_instruction": next.instruction,
+        "next_beat": super::beats::next_unbuilt(spec),
         "uncalibrated": &spec.calibration.uncalibrated,
         "note": "Loop limits are safety limits, not targets: stop earlier on success, a repeated defect, oscillation or a plateau.",
     })

@@ -68,6 +68,9 @@ pub enum AnimProp {
     Blur,
     ShadowDx,
     ShadowDy,
+    /// How far a path node is through its morph (`crate::morph`): 0 is its own shape, 1 the
+    /// second stop, and so on. The node must hold a `morph`.
+    MorphProgress,
     ShadowBlur,
     /// The camera props move the video's camera, not a node: their `node` is the video's id.
     CameraX,
@@ -99,7 +102,7 @@ impl AnimProp {
         })
     }
 
-    pub const ALL: [AnimProp; 38] = [
+    pub const ALL: [AnimProp; 39] = [
         AnimProp::X,
         AnimProp::Y,
         AnimProp::Width,
@@ -136,6 +139,7 @@ impl AnimProp {
         AnimProp::ShadowBlur,
         AnimProp::CameraX,
         AnimProp::CameraY,
+        AnimProp::MorphProgress,
         AnimProp::CameraZoom,
         AnimProp::CameraRotation,
     ];
@@ -180,6 +184,7 @@ impl AnimProp {
             AnimProp::CameraY => "camera_y",
             AnimProp::CameraZoom => "camera_zoom",
             AnimProp::CameraRotation => "camera_rotation",
+            AnimProp::MorphProgress => "morph_progress",
         }
     }
 
@@ -195,6 +200,7 @@ impl AnimProp {
             AnimProp::ShadowDy => Property::ShadowDy(value),
             AnimProp::ShadowBlur => Property::ShadowBlur(value),
             camera if camera.is_camera() => return None,
+            AnimProp::MorphProgress => return None,
             AnimProp::X => Property::X(value),
             AnimProp::Y => Property::Y(value),
             AnimProp::Width => Property::Width(value),
@@ -245,6 +251,7 @@ impl AnimProp {
             AnimProp::ScreenScroll => d.map(|d| d.screen_scroll.unwrap_or(0.5)),
             AnimProp::TrimStart => node.stroke.as_ref().map(|s| s.trim_start),
             AnimProp::TrimEnd => node.stroke.as_ref().map(|s| s.trim_end),
+            AnimProp::MorphProgress => node.morph.as_ref().map(|_| 0.0),
             AnimProp::StrokeWidth => node.stroke.as_ref().map(|s| s.width),
             AnimProp::FillColor => match node.fill {
                 Some(crate::paint::Paint::Color(c)) => Some(c.pack()),
@@ -282,6 +289,7 @@ impl AnimProp {
             | AnimProp::ScreenScroll
             | AnimProp::TrimStart
             | AnimProp::TrimEnd => (0.0, 1.0),
+            AnimProp::MorphProgress => (0.0, (crate::morph::MAX_STOPS - 1) as f64),
             AnimProp::StrokeWidth => (0.0, crate::limits::MAX_STROKE_WIDTH),
             AnimProp::FillColor => (0.0, f64::from(u32::MAX)),
             AnimProp::RotateX | AnimProp::RotateY | AnimProp::RotateZ => {
@@ -335,6 +343,10 @@ impl Repeat {
     }
 }
 
+pub(crate) fn not_additive(additive: &bool) -> bool {
+    !*additive
+}
+
 /// One number of one node moving through its keys. For the camera properties the node is the
 /// video itself.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -346,6 +358,11 @@ pub struct Animation {
     /// What happens after the last key; a cycle starts at the first key's time.
     #[serde(default, skip_serializing_if = "Repeat::is_once")]
     pub repeat: Repeat,
+    /// An additive track adds its value to the node's value, as the track that replaces it (or the
+    /// node itself) gives it, so a `bob` can ride on a travel. Its keys are offsets; it is never
+    /// a colour. At most one replacing and one additive track per node and property.
+    #[serde(default, skip_serializing_if = "not_additive")]
+    pub additive: bool,
 }
 
 impl Animation {
@@ -392,11 +409,36 @@ impl Animation {
         let (a, b) = (self.keys[i - 1], self.keys[i]);
         let span = (b.at_ms - a.at_ms) as f64;
         let p = b.ease.apply_in((time_ms - a.at_ms as f64) / span, span);
-        let (lo, hi) = self.prop.range();
+        let (lo, hi) = self.limits();
         if self.prop == AnimProp::FillColor {
             return Some(crate::paint::Rgba::mix_packed(a.value, b.value, p));
         }
         Some((a.value + (b.value - a.value) * p).clamp(lo, hi))
+    }
+
+    /// The range this track's values are held to: the property's own, or for an additive track
+    /// the offsets that could ever move the value across it.
+    pub fn limits(&self) -> (f64, f64) {
+        let (lo, hi) = self.prop.range();
+        if self.additive {
+            (lo - hi, hi - lo)
+        } else {
+            (lo, hi)
+        }
+    }
+
+    /// The value this track gives when `current` is what stands under it: its own value for a
+    /// replacing track, the sum held to the property's range for an additive one.
+    pub fn compose(&self, current: f64, time_ms: f64) -> f64 {
+        let Some(v) = self.value_at(time_ms) else {
+            return current;
+        };
+        if self.additive {
+            let (lo, hi) = self.prop.range();
+            (current + v).clamp(lo, hi)
+        } else {
+            v
+        }
     }
 
     /// Whether the value changes around `time_ms`: inside a stretch between two keys that differ.
@@ -449,6 +491,9 @@ fn resolve_keys(
     keys: &[Key],
     tokens: &BTreeMap<String, String>,
 ) -> Result<Vec<Key>, OpError> {
+    if prop == AnimProp::MorphProgress {
+        return resolve_morph_keys(node, keys);
+    }
     check_keys(keys)?;
     let mut scratch = node.clone();
     scratch.children.clear();
@@ -461,6 +506,53 @@ fn resolve_keys(
             let value = prop
                 .read(&scratch)
                 .ok_or_else(|| OpError::Internal("animated value vanished".into()))?;
+            Ok(Key { value, ..*k })
+        })
+        .collect()
+}
+
+/// The keys of a morph: each value from the first stop to the last the node's `morph` holds.
+fn resolve_morph_keys(node: &Node, keys: &[Key]) -> Result<Vec<Key>, OpError> {
+    check_keys(keys)?;
+    let Some(morph) = &node.morph else {
+        return Err(OpError::NotApplicable {
+            property: AnimProp::MorphProgress.as_str(),
+            kind: node.kind.as_str(),
+        });
+    };
+    keys.iter()
+        .map(|k| {
+            let value = finite_in("morph_progress", k.value, 0.0, morph.max_progress())?;
+            Ok(Key { value, ..*k })
+        })
+        .collect()
+}
+
+/// The keys of an additive track: offsets from the node's value, within the range the property
+/// could span, rounded as `set` rounds. Colours cannot be added.
+fn resolve_additive_keys(
+    node: Option<&Node>,
+    prop: AnimProp,
+    keys: &[Key],
+) -> Result<Vec<Key>, OpError> {
+    check_keys(keys)?;
+    if prop == AnimProp::FillColor {
+        return Err(OpError::OutOfBounds {
+            what: "additive",
+            detail: "fill_color is a colour and cannot be added to".to_string(),
+        });
+    }
+    if let Some(n) = node.filter(|n| prop.read(n).is_none()) {
+        return Err(OpError::NotApplicable {
+            property: prop.as_str(),
+            kind: n.kind.as_str(),
+        });
+    }
+    let (lo, hi) = prop.range();
+    let span = hi - lo;
+    keys.iter()
+        .map(|k| {
+            let value = finite_in(prop.as_str(), k.value, -span, span)?;
             Ok(Key { value, ..*k })
         })
         .collect()
@@ -487,11 +579,11 @@ pub(crate) fn check_animations(v: &Video) -> Result<(), OpError> {
     }
     if v.animations
         .windows(2)
-        .any(|w| (&w[0].node, w[0].prop) >= (&w[1].node, w[1].prop))
+        .any(|w| (&w[0].node, w[0].prop, w[0].additive) >= (&w[1].node, w[1].prop, w[1].additive))
     {
         return Err(OpError::OutOfBounds {
             what: "animations",
-            detail: "must be sorted by node and property, one per pair".to_string(),
+            detail: "must be sorted by node and property, a replacing track before an additive one, one of each per pair".to_string(),
         });
     }
     if v.motion_blur == 1 || v.motion_blur > MAX_MOTION_BLUR {
@@ -531,12 +623,20 @@ impl Document {
     pub(crate) fn validate_animations(&self, v: &Video) -> Result<(), OpError> {
         for a in &v.animations {
             let resolved = if a.prop.is_camera() {
-                resolve_camera_keys(a.prop, &a.keys)?
+                if a.additive {
+                    resolve_additive_keys(None, a.prop, &a.keys)?
+                } else {
+                    resolve_camera_keys(a.prop, &a.keys)?
+                }
             } else {
                 let node = self
                     .node(&a.node)
                     .ok_or_else(|| OpError::NoSuchNode(a.node.to_string()))?;
-                resolve_keys(node, a.prop, &a.keys, &self.tokens)?
+                if a.additive {
+                    resolve_additive_keys(Some(node), a.prop, &a.keys)?
+                } else {
+                    resolve_keys(node, a.prop, &a.keys, &self.tokens)?
+                }
             };
             if resolved != a.keys {
                 return Err(OpError::OutOfBounds {
@@ -565,36 +665,50 @@ impl Document {
     /// The document as it looks at `time_ms` into `video`: every animated node shows its value
     /// at that moment. `None` when the video animates nothing.
     pub fn at_time(&self, video: &Video, time_ms: f64) -> Option<Document> {
-        let mut values: HashMap<&NodeId, Vec<(AnimProp, f64)>> = HashMap::new();
+        let mut values: HashMap<&NodeId, Vec<&Animation>> = HashMap::new();
         for a in video.animations.iter().filter(|a| !a.prop.is_camera()) {
-            if let Some(v) = a.value_at(time_ms) {
-                values.entry(&a.node).or_default().push((a.prop, v));
-            }
+            values.entry(&a.node).or_default().push(a);
         }
         if values.is_empty() {
             return None;
         }
         fn walk(
             n: &mut Node,
-            values: &HashMap<&NodeId, Vec<(AnimProp, f64)>>,
+            values: &HashMap<&NodeId, Vec<&Animation>>,
             tokens: &BTreeMap<String, String>,
+            time_ms: f64,
         ) {
             if let Some(list) = values.get(&n.id) {
-                for (prop, v) in list {
+                for a in list {
+                    if a.prop == AnimProp::MorphProgress {
+                        let shape = n
+                            .morph
+                            .as_ref()
+                            .zip(a.value_at(time_ms))
+                            .map(|(m, p)| (m.path_data_at(p), m.view_box()));
+                        if let Some((d, view_box)) = shape {
+                            n.path = Some(d);
+                            n.view_box = Some(view_box);
+                        }
+                        continue;
+                    }
+                    let Some(current) = a.prop.read(n) else {
+                        continue;
+                    };
                     // values were checked when the keys were set; a clamped overshoot stays valid
-                    if let Some(set) = prop.property(*v) {
+                    if let Some(set) = a.prop.property(a.compose(current, time_ms)) {
                         let _ = set_property(n, set, tokens);
                     }
                 }
             }
             for c in &mut n.children {
-                walk(c, values, tokens);
+                walk(c, values, tokens, time_ms);
             }
         }
         let mut doc = self.clone();
         let tokens = doc.tokens.clone();
         for page in &mut doc.pages {
-            walk(&mut page.root, &values, &tokens);
+            walk(&mut page.root, &values, &tokens, time_ms);
         }
         Some(doc)
     }
@@ -605,15 +719,13 @@ impl Video {
     pub fn camera_at(&self, time_ms: f64) -> Camera {
         let mut camera = Camera::default();
         for a in self.animations.iter().filter(|a| a.prop.is_camera()) {
-            let Some(v) = a.value_at(time_ms) else {
-                continue;
+            let slot = match a.prop {
+                AnimProp::CameraX => &mut camera.x,
+                AnimProp::CameraY => &mut camera.y,
+                AnimProp::CameraZoom => &mut camera.zoom,
+                _ => &mut camera.rotation,
             };
-            match a.prop {
-                AnimProp::CameraX => camera.x = v,
-                AnimProp::CameraY => camera.y = v,
-                AnimProp::CameraZoom => camera.zoom = v,
-                _ => camera.rotation = v,
-            }
+            *slot = a.compose(*slot, time_ms);
         }
         camera
     }
@@ -622,18 +734,50 @@ impl Video {
     pub fn has_camera(&self) -> bool {
         self.animations.iter().any(|a| a.prop.is_camera())
     }
+
+    /// The track of `prop` on `node` that replaces its value, not the additive one.
+    pub fn base_track(&self, node: &NodeId, prop: AnimProp) -> Option<&Animation> {
+        self.animations
+            .iter()
+            .find(|a| &a.node == node && a.prop == prop && !a.additive)
+    }
+
+    /// What `prop` of `node` shows at `time_ms` as the tracks give it: the replacing track's value
+    /// (or `base`, the node's own, without one) with the additive track added.
+    pub fn animated_value(&self, node: &NodeId, prop: AnimProp, time_ms: f64, base: f64) -> f64 {
+        self.animations
+            .iter()
+            .filter(|a| &a.node == node && a.prop == prop)
+            .fold(base, |current, a| a.compose(current, time_ms))
+    }
+}
+
+/// What `animate` asks of one track.
+#[derive(Clone, Copy)]
+pub(crate) struct Animate<'a> {
+    pub video: &'a NodeId,
+    pub node: &'a NodeId,
+    pub prop: AnimProp,
+    pub keys: &'a [Key],
+    pub repeat: Repeat,
+    /// Picks the track that adds to the value over the one that replaces it.
+    pub additive: bool,
 }
 
 /// Applies `animate`: replaces the keys of one node's property in a video (none removes them).
 pub(crate) fn apply(
     doc: &mut Document,
-    video: &NodeId,
-    node: &NodeId,
-    prop: AnimProp,
-    keys: &[Key],
-    repeat: Repeat,
+    request: Animate,
     allow_internal: bool,
 ) -> Result<AppliedOp, OpError> {
+    let Animate {
+        video,
+        node,
+        prop,
+        keys,
+        repeat,
+        additive,
+    } = request;
     let snapped;
     let keys = match doc.videos.iter().find(|v| &v.id == video) {
         Some(v) if !allow_internal => {
@@ -657,7 +801,11 @@ pub(crate) fn apply(
                 ),
             });
         }
-        resolve_camera_keys(prop, keys)?
+        if additive {
+            resolve_additive_keys(None, prop, keys)?
+        } else {
+            resolve_camera_keys(prop, keys)?
+        }
     } else {
         let loc = doc
             .locate(node)
@@ -669,10 +817,15 @@ pub(crate) fn apply(
         let target = doc
             .node_at(&loc)
             .ok_or_else(|| OpError::NoSuchNode(node.to_string()))?;
-        resolve_keys(target, prop, keys, &doc.tokens)?
+        if additive {
+            resolve_additive_keys(Some(target), prop, keys)?
+        } else {
+            resolve_keys(target, prop, keys, &doc.tokens)?
+        }
     };
     let list = &mut doc.videos[at].animations;
-    let slot = list.binary_search_by(|a| (&a.node, a.prop).cmp(&(node, prop)));
+    let slot =
+        list.binary_search_by(|a| (&a.node, a.prop, a.additive).cmp(&(node, prop, additive)));
     let old = match (slot, resolved.is_empty()) {
         (Ok(i), true) => {
             let gone = list.remove(i);
@@ -698,6 +851,7 @@ pub(crate) fn apply(
                     prop,
                     keys: resolved.clone(),
                     repeat,
+                    additive,
                 },
             );
             (Vec::new(), Repeat::Once)
@@ -709,6 +863,7 @@ pub(crate) fn apply(
         prop,
         keys,
         repeat,
+        additive,
     };
     Ok(AppliedOp {
         forward: op(resolved, repeat),
@@ -848,6 +1003,18 @@ pub fn preset_ops(
     node: &NodeId,
     req: PresetRequest,
 ) -> Result<Vec<Operation>, OpError> {
+    preset_ops_layered(doc, video, node, req, false)
+}
+
+/// [`preset_ops`] onto the node's replacing tracks, or with `additive` onto its additive ones as
+/// offsets from where the move starts: a `float` laid over a travel bobs along the travel.
+pub fn preset_ops_layered(
+    doc: &Document,
+    video: &NodeId,
+    node: &NodeId,
+    req: PresetRequest,
+    additive: bool,
+) -> Result<Vec<Operation>, OpError> {
     let v = doc
         .video(video)
         .ok_or_else(|| OpError::NoSuchVideo(video.to_string()))?;
@@ -875,17 +1042,24 @@ pub fn preset_ops(
             detail: format!("ends at {end} ms, after the longest video"),
         });
     }
-    let base = |prop: AnimProp| -> f64 {
+    let track_of = |prop: AnimProp, additive: bool| {
         v.animations
             .iter()
-            .find(|a| &a.node == node && a.prop == prop)
+            .find(|a| &a.node == node && a.prop == prop && a.additive == additive)
+    };
+    let base = |prop: AnimProp| -> f64 {
+        track_of(prop, false)
             .and_then(|a| a.value_at(req.start_ms as f64))
             .or_else(|| prop.read(n))
             .unwrap_or(0.0)
     };
     let tracks = preset_tracks(req, n, is_device, &base);
     let mut ops = Vec::new();
-    for (prop, values) in tracks {
+    for (prop, mut values) in tracks {
+        if additive {
+            let rest = base(prop);
+            values.iter_mut().for_each(|value| *value -= rest);
+        }
         if values.windows(2).all(|w| (w[0] - w[1]).abs() < 1e-9) {
             continue;
         }
@@ -895,10 +1069,7 @@ pub fn preset_ops(
             req.duration_ms,
             req.ease.unwrap_or(req.preset.default_ease()),
         );
-        let mut keys: Vec<Key> = v
-            .animations
-            .iter()
-            .find(|a| &a.node == node && a.prop == prop)
+        let mut keys: Vec<Key> = track_of(prop, additive)
             .map(|a| {
                 a.keys
                     .iter()
@@ -909,17 +1080,14 @@ pub fn preset_ops(
             .unwrap_or_default();
         keys.extend(fresh);
         keys.sort_by_key(|k| k.at_ms);
-        let repeat = v
-            .animations
-            .iter()
-            .find(|a| &a.node == node && a.prop == prop)
-            .map_or(Repeat::Once, |a| a.repeat);
+        let repeat = track_of(prop, additive).map_or(Repeat::Once, |a| a.repeat);
         ops.push(Operation::Animate {
             video: video.clone(),
             node: node.clone(),
             prop,
             keys,
             repeat,
+            additive,
         });
     }
     Ok(ops)
@@ -1076,6 +1244,7 @@ mod tests {
                 .map(|&(at_ms, value, ease)| Key { at_ms, value, ease })
                 .collect(),
             repeat: Repeat::Once,
+            additive: false,
         }
     }
 

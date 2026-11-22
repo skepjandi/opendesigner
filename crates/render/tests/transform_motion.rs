@@ -502,6 +502,7 @@ fn showcase() -> (Session, NodeId) {
     let ops: Vec<Operation> = [spinner_turn, float, pop, push]
         .into_iter()
         .map(|(node, prop, keys, repeat)| Operation::Animate {
+            additive: false,
             video: video.clone(),
             node,
             prop,

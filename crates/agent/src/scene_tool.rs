@@ -91,6 +91,7 @@ pub fn extra_properties() -> Map<String, Value> {
         "radius": num("orbit: the radius when there is no center."),
         "path": id("animate_path: id of the path node to follow."),
         "orient": {"type": "boolean", "description": "animate_path: turn the node to face along the path."},
+        "arc": crate::path_motion::arc::schema(),
         "of": id("stagger: the move to apply to each node (any move name except stagger)."),
         "nodes": {"type": "array", "items": {"type": "string"}, "maxItems": MAX_STAGGERED, "description": "stagger: ids of the nodes, in order."},
         "step_ms": {"type": "integer", "minimum": 0, "maximum": 5000, "description": "stagger: delay between one node and the next."},
@@ -138,6 +139,8 @@ pub struct SceneArgs {
     #[serde(default)]
     orient: Option<bool>,
     #[serde(default)]
+    arc: Option<crate::path_motion::arc::ArcSpec>,
+    #[serde(default)]
     of: Option<String>,
     #[serde(default)]
     nodes: Vec<String>,
@@ -153,6 +156,8 @@ pub struct SceneArgs {
     start_index: Option<usize>,
     #[serde(default)]
     stagger: Option<StaggerArgs>,
+    #[serde(default)]
+    layer: crate::layering::Layer,
     #[serde(default)]
     turn: Option<String>,
     #[serde(default)]
@@ -331,6 +336,11 @@ impl Request<'_> {
     ) -> Result<Vec<Operation>, ToolError> {
         let spec = self.spec(Some(named), start_ms, seed)?;
         if named.is_camera() {
+            if self.a.arc.is_some() {
+                return Err(ToolError(
+                    "`arc` bends a node's move; a camera move cannot take it".into(),
+                ));
+            }
             let camera = self.video.camera_at(start_ms as f64);
             let cam = CameraPose {
                 x: camera.x,
@@ -357,6 +367,12 @@ impl Request<'_> {
                 )));
             }
             _ => node_tracks(named, &spec, &pose),
+        };
+        let tracks = match &self.a.arc {
+            Some(arc) => {
+                crate::path_motion::arc::bend(tracks, arc, self.video.fps, (pose.x, pose.y))?
+            }
+            None => tracks,
         };
         Ok(self.operations(&n.id, tracks, &spec))
     }
@@ -414,6 +430,11 @@ impl Request<'_> {
             return Err(ToolError(format!("{} is not a path node", curve.id)));
         }
         let spec = self.spec(None, self.a.start_ms, self.a.seed.unwrap_or(0))?;
+        if self.a.arc.is_some() {
+            return Err(ToolError(
+                "animate_along_path already follows a curve; `arc` does not apply".into(),
+            ));
+        }
         let points = self.path_points(curve, n)?;
         let pose = self.pose(n, spec.start_ms);
         let tracks = follow(&spec, &pose, &points, self.a.orient.unwrap_or(false));
@@ -451,9 +472,7 @@ impl Request<'_> {
     fn pose(&self, n: &Node, at: u64) -> Pose {
         let base = |prop: AnimProp, fallback: f64| {
             self.video
-                .animations
-                .iter()
-                .find(|a| a.node == n.id && a.prop == prop)
+                .base_track(&n.id, prop)
                 .and_then(|a| a.value_at(at as f64))
                 .or_else(|| prop.read(n))
                 .unwrap_or(fallback)
@@ -480,11 +499,16 @@ impl Request<'_> {
             .into_iter()
             .map(|mut t| {
                 self.snap(&mut t);
+                let additive = self.a.layer == crate::layering::Layer::Additive;
+                if additive {
+                    let rest = self.rest_of(node, t.prop, spec.start_ms);
+                    t.keys.iter_mut().for_each(|k| k.value -= rest);
+                }
                 let existing = self
                     .video
                     .animations
                     .iter()
-                    .find(|a| &a.node == node && a.prop == t.prop);
+                    .find(|a| &a.node == node && a.prop == t.prop && a.additive == additive);
                 let (keys, repeat) = match existing {
                     Some(e) if t.repeat == Repeat::Once => {
                         let (first, last) = window(&t.keys, spec);
@@ -501,6 +525,7 @@ impl Request<'_> {
                     _ => (t.keys, t.repeat),
                 };
                 Operation::Animate {
+                    additive,
                     video: self.video.id.clone(),
                     node: node.clone(),
                     prop: t.prop,
@@ -509,6 +534,15 @@ impl Request<'_> {
                 }
             })
             .collect()
+    }
+
+    /// Where the node's property rests when the move starts: the offsets of an additive layer
+    /// are measured from it.
+    fn rest_of(&self, node: &NodeId, prop: AnimProp, at_ms: u64) -> f64 {
+        self.video
+            .base_track(node, prop)
+            .and_then(|a| a.value_at(at_ms as f64))
+            .unwrap_or_else(|| crate::layering::rest_value(self.doc, node, prop).unwrap_or(0.0))
     }
 }
 

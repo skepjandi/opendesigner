@@ -14,6 +14,9 @@ use serde_json::{Value, json};
 
 use crate::tools::{CallCtx, Output, ToolError, node_id, parse, tool};
 
+#[cfg(test)]
+mod beat_tests;
+pub mod beats;
 pub mod calibration;
 pub mod features;
 pub mod loop_policy;

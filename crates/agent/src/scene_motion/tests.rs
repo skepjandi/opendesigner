@@ -33,6 +33,7 @@ fn camera() -> CameraPose {
 
 fn animation(t: &Track) -> Animation {
     Animation {
+        additive: false,
         node: NodeId::parse("n_1").unwrap(),
         prop: t.prop,
         keys: t.keys.clone(),

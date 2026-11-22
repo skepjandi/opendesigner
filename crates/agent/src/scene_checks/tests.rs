@@ -197,6 +197,7 @@ fn a_track_that_drives_nothing_is_caught() {
     let ghost = NodeId::parse("n_9999").unwrap();
     let mut src = d.source();
     src.doc.videos[0].animations.push(od_core::Animation {
+        additive: false,
         node: ghost,
         prop: od_core::AnimProp::X,
         keys: vec![
@@ -714,6 +715,7 @@ fn the_freeze_gate_catches_a_changed_shape() {
     // A track a later pass added changes nothing.
     let mut added = doc.clone();
     added.videos[0].animations.push(od_core::Animation {
+        additive: false,
         node: other.clone(),
         prop: od_core::AnimProp::Opacity,
         keys: vec![

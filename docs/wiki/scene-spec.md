@@ -45,12 +45,39 @@ a newer agent still loads.
 | `feature_targets` | the systems that must read: `tier` (`critical`, `important`, `detail`), `pass_ids`, `minimum_score`, `must_pass` |
 | `motion_plan` | what moves, the three-state `loop` (`true`, `false`, `null`), the `stance` of a walk, the camera limits |
 | `audio_plan` | the tracks, the ducking, the cues, the loudness |
+| `beat_map` | the beats the scene is planned around: `id`, `at_ms`, `takeaway`, `focal_node`, `transformation`, `copy`, `audio_cue`, `exit_ms`, `built` (see [Beat map](#beat-map)) |
+| `seed` | the id of the scene seed the spec came from (`apply_seed`), when it did |
 | `budgets` | node, path, blur, shadow and frame-time limits |
 | `build_passes` | the passes to run, in order |
 | `limits` | the correction limits: `max_per_pass` (3), `max_total` (6) |
 | `freeze` | the pass after which the shapes are hashed |
 | `review_history` | the ledger, written by `record_review` and never by the agent |
 | `calibration` | which thresholds are `measured`, `derived` or `uncalibrated` |
+
+## Beat map
+
+Open Design's order of a short video is *time, takeaway, focal object, transformation, copy or
+audio, exit*. `beat_map` records it, one entry per beat:
+
+| Field | Meaning |
+|---|---|
+| `id` | the beat's name (`hook`, `reveal`); a beat with none is `beat-<n>` |
+| `at_ms` | when it lands, from the start of the video |
+| `takeaway` | what the viewer must take from it (required) |
+| `focal_node` | a `layer_plan` id, or a layer's `node_ref`, the eye is led to |
+| `transformation` | the change that shows it |
+| `copy`, `audio_cue` | the words and the sound with it |
+| `exit_ms` | when the focal object leaves |
+| `built` | set once the beat is on the timeline |
+
+`scene_spec_validate` reports as **errors** (only when `beat_map` is not empty): names not unique,
+an empty takeaway, `at_ms` not strictly after the beat before it, `at_ms` at or past the video's
+length (when `brief.duration_ms` is set), a `focal_node` that is not in `layer_plan`, `exit_ms` not
+after `at_ms` or past the end, and any stretch longer than 8 s (the start to the first beat, between
+beats, the last beat to the end) with no beat. `scene_spec::beats::beat_times(spec)` returns every
+name with its millisecond, so a sound cue can be placed on a beat by name. `scene_status` adds
+`next_beat`: the first beat with `built: false`, with its time, takeaway, focal node,
+transformation, copy, cue and exit, and how many are left (`null` when every beat is built).
 
 ## The tools
 

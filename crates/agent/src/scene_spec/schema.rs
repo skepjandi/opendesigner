@@ -69,6 +69,9 @@ pub struct SceneSpec {
     pub feature_targets: Vec<FeatureTarget>,
     pub motion_plan: Vec<Motion>,
     pub audio_plan: AudioPlan,
+    pub beat_map: Vec<Beat>,
+    /// The seed this spec came from (`apply_seed`), when it did.
+    pub seed: Option<String>,
     pub budgets: Budgets,
     pub build_passes: Vec<String>,
     pub limits: Limits,
@@ -94,6 +97,8 @@ impl Default for SceneSpec {
             feature_targets: Vec::new(),
             motion_plan: Vec::new(),
             audio_plan: AudioPlan::default(),
+            beat_map: Vec::new(),
+            seed: None,
             budgets: Budgets::default(),
             build_passes: PASSES.iter().map(|p| (*p).to_string()).collect(),
             limits: Limits::default(),
@@ -361,6 +366,25 @@ pub struct AudioCue {
     pub sfx: String,
     pub sync_to: Option<String>,
     pub tolerance_ms: Option<u64>,
+}
+
+/// One moment the viewer must take something from: time, takeaway, focal object, the change that
+/// shows it, the words and sound with it, and when it leaves.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Beat {
+    /// The beat's name; sound cues are placed by it (`beat_times`). Defaults to `beat-<n>`.
+    pub id: String,
+    pub at_ms: u64,
+    pub takeaway: String,
+    /// A `layer_plan` id (or its node_ref) the eye is led to.
+    pub focal_node: Option<String>,
+    pub transformation: String,
+    pub copy: Option<String>,
+    pub audio_cue: Option<String>,
+    pub exit_ms: Option<u64>,
+    /// Set once the beat is on the timeline; `scene_status` points at the first that is not.
+    pub built: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

@@ -475,6 +475,7 @@ fn animated_line() -> (Session, NodeId) {
                 motion: None,
             },
             Operation::Animate {
+                additive: false,
                 video: video.clone(),
                 node: node.clone(),
                 prop: AnimProp::TrimEnd,

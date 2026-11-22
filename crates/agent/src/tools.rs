@@ -129,8 +129,13 @@ fn tool_full(
 pub fn definitions() -> Vec<Value> {
     let mut all = core_definitions();
     all.extend(crate::motion::definitions());
+    all.extend(crate::layer_image::definitions());
+    all.extend(crate::layering::definitions());
+    all.extend(crate::layout_transition::definitions());
     all.extend(crate::sequence::definitions());
+    all.extend(crate::path_motion::definitions());
     all.extend(crate::text_split::definitions());
+    all.extend(crate::seeds::definitions());
     all.extend(crate::blocks::definitions());
     all.extend(crate::doctools::definitions());
     all.extend(crate::audio_tools::definitions());
@@ -718,8 +723,15 @@ fn dispatch(ctx: &mut CallCtx, name: &str, args: Value) -> Result<Output, ToolEr
     match name {
         "get_guidance" => get_guidance(ctx),
         n if crate::motion::NAMES.contains(&n) => crate::motion::call(ctx, n, args),
+        n if crate::layer_image::NAMES.contains(&n) => crate::layer_image::call(ctx, n, args),
+        n if crate::layering::NAMES.contains(&n) => crate::layering::call(ctx, n, args),
+        n if crate::layout_transition::NAMES.contains(&n) => {
+            crate::layout_transition::call(ctx, n, args)
+        }
         n if crate::sequence::NAMES.contains(&n) => crate::sequence::call(ctx, n, args),
+        n if crate::path_motion::NAMES.contains(&n) => crate::path_motion::call(ctx, n, args),
         n if crate::text_split::NAMES.contains(&n) => crate::text_split::call(ctx, n, args),
+        n if crate::seeds::NAMES.contains(&n) => crate::seeds::call(ctx, n, args),
         n if crate::blocks::NAMES.contains(&n) => crate::blocks::call(ctx, n, args),
         n if crate::doctools::NAMES.contains(&n) => crate::doctools::call(ctx, n, args),
         n if crate::audio_tools::NAMES.contains(&n) => crate::audio_tools::call(ctx, n, args),

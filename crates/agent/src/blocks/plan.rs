@@ -333,6 +333,7 @@ fn move_ops(
         } => {
             let node = target_id(target, root, names)?;
             Ok(vec![Operation::Animate {
+                additive: false,
                 video: video.clone(),
                 node,
                 prop: *prop,

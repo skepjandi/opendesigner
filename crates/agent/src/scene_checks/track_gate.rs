@@ -488,6 +488,24 @@ fn visible_while_running(tl: &mut Timeline, a: &Animation, node: &Node) -> Resul
     }
 }
 
+/// What the track's property should show at `t_ms`: the track's value, or with an additive layer
+/// over the node's own value the sum the pipeline draws.
+fn expected_value(tl: &Timeline, a: &Animation, t_ms: f64) -> Option<f64> {
+    a.value_at(t_ms)?;
+    let base = if a.prop.is_camera() {
+        let c = od_core::transform::Camera::default();
+        match a.prop {
+            AnimProp::CameraX => c.x,
+            AnimProp::CameraY => c.y,
+            AnimProp::CameraZoom => c.zoom,
+            _ => c.rotation,
+        }
+    } else {
+        a.prop.read(tl.doc.node(&a.node)?)?
+    };
+    Some(tl.video.animated_value(&a.node, a.prop, t_ms, base))
+}
+
 /// What the renderer's pipeline holds for the track's property at `t_ms`, and the most its
 /// rounding can have moved it.
 fn pipeline_value(tl: &mut Timeline, a: &Animation, t_ms: f64) -> Option<(f64, f64)> {
@@ -526,7 +544,7 @@ fn bind(tl: &mut Timeline, a: &Animation, samples: usize, report: &mut TrackRepo
     let mut max_delta = 0.0f64;
     let mut seen_unreachable = false;
     for &t in &times {
-        let Some(tv) = a.value_at(t) else {
+        let Some(tv) = expected_value(tl, a, t) else {
             continue;
         };
         let Some((pv, quantum)) = pipeline_value(tl, a, t) else {
