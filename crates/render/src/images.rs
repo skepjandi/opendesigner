@@ -266,3 +266,20 @@ pub fn dimensions(path: &Path) -> Result<(u32, u32), String> {
         .into_dimensions()
         .map_err(|e| e.to_string())
 }
+
+/// An image file as straight (not premultiplied) RGBA bytes, with its size, for tools that cut a
+/// picture into layers. Pictures over `max_pixels` are refused.
+pub fn decode_rgba(path: &Path, max_pixels: u64) -> Result<(u32, u32, Vec<u8>), String> {
+    let (w, h) = dimensions(path)?;
+    if u64::from(w) * u64::from(h) > max_pixels.min(MAX_PIXELS) {
+        return Err(format!("{w}x{h} is too many pixels"));
+    }
+    let rgba = ImageReader::open(path)
+        .map_err(|e| e.to_string())?
+        .with_guessed_format()
+        .map_err(|e| e.to_string())?
+        .decode()
+        .map_err(|e| e.to_string())?
+        .into_rgba8();
+    Ok((w, h, rgba.into_raw()))
+}

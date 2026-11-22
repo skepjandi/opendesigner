@@ -125,16 +125,11 @@ pub(super) fn reading_ms(text: &str) -> u64 {
 
 /// The longest stretch inside the scene during which the text is visible enough to read.
 fn shown_ms(v: &Video, n: &Node, p: &Placed) -> u64 {
-    let opacity = v
-        .animations
-        .iter()
-        .find(|a| a.node == n.id && a.prop == AnimProp::Opacity);
+    let opacity_at = |at: u64| v.animated_value(&n.id, AnimProp::Opacity, at as f64, n.opacity);
     let (mut best, mut run) = (0, 0);
     let mut at = p.start_ms;
     while at < p.end_ms {
-        let level = opacity
-            .and_then(|a| a.value_at(at as f64))
-            .unwrap_or(n.opacity);
+        let level = opacity_at(at);
         if level >= TEXT_SHOWN_OPACITY {
             run += TEXT_STEP_MS;
             best = best.max(run);

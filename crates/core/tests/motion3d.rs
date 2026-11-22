@@ -67,6 +67,7 @@ fn key(at_ms: u64, value: f64, ease: Ease) -> Key {
 
 fn animate(video: &NodeId, device: &NodeId, prop: AnimProp, keys: Vec<Key>) -> Operation {
     Operation::Animate {
+        additive: false,
         video: video.clone(),
         node: device.clone(),
         prop,
@@ -221,6 +222,7 @@ fn animation_keys_are_validated_against_the_node() {
     let rotate_a_frame = apply(
         &mut f.s,
         &[Operation::Animate {
+            additive: false,
             video: f.video.clone(),
             node: f.frame.clone(),
             prop: AnimProp::RotateY,
@@ -373,7 +375,7 @@ fn devices_and_animations_round_trip_through_a_project_folder() {
     let dir = tempfile::tempdir().unwrap();
     project::save(dir.path(), &f.s).unwrap();
     let manifest = std::fs::read_to_string(dir.path().join("od.toml")).unwrap();
-    assert!(manifest.contains("format = 5"));
+    assert!(manifest.contains("format = 6"));
     let loaded = project::load(dir.path()).unwrap();
     assert_eq!(loaded.document(), f.s.document());
 }
@@ -393,7 +395,7 @@ fn a_version_one_project_still_loads() {
     project::save(dir.path(), &f.s).unwrap();
     let manifest = dir.path().join("od.toml");
     let text = std::fs::read_to_string(&manifest).unwrap();
-    std::fs::write(&manifest, text.replace("format = 5", "format = 1")).unwrap();
+    std::fs::write(&manifest, text.replace("format = 6", "format = 1")).unwrap();
     let loaded = project::load(dir.path()).unwrap();
-    assert_eq!(loaded.document().format, 5);
+    assert_eq!(loaded.document().format, 6);
 }

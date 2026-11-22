@@ -78,6 +78,7 @@ fn animate(
     repeat: Repeat,
 ) -> Operation {
     Operation::Animate {
+        additive: false,
         video: video.clone(),
         node: node.clone(),
         prop,

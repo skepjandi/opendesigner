@@ -55,10 +55,7 @@ pub fn call(ctx: &mut CallCtx, args: Value) -> Result<Output, ToolError> {
     let Ease::Tuned(spring) = ease else {
         return Err(ToolError("a spring ease is needed here".into()));
     };
-    let existing = video
-        .animations
-        .iter()
-        .find(|track| track.node == target && track.prop == a.prop);
+    let existing = video.base_track(&target, a.prop);
     let at = a
         .at_ms
         .unwrap_or_else(|| existing.and_then(|a| a.keys.last()).map_or(0, |k| k.at_ms));
@@ -94,6 +91,7 @@ pub fn call(ctx: &mut CallCtx, args: Value) -> Result<Output, ToolError> {
         keys = kept;
     }
     let op = Operation::Animate {
+        additive: false,
         video: video_id.clone(),
         node: target.clone(),
         prop: a.prop,

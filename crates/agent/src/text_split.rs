@@ -687,6 +687,7 @@ fn reveal_text(ctx: &mut CallCtx, a: RevealArgs) -> Result<Output, ToolError> {
                 props.push(name);
             }
             ops.push(Operation::Animate {
+                additive: false,
                 video: video.clone(),
                 node: piece.id.clone(),
                 prop,

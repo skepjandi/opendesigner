@@ -6,6 +6,49 @@ All notable changes to OpenDesigner are documented here.
 >
 > **Wiki**: the [GitHub Wiki](https://github.com/skepjandi/opendesigner/wiki) is the public-facing main wiki — architecture, document format, agent integration, security model, roadmap. Source-controlled editing surface is `docs/wiki/` in this repo; CI (`.github/workflows/sync-wiki.yml`) mirrors it to the GitHub Wiki on every merge to `main`. New single-PR changes belong here, not as new wiki pages.
 
+## Unreleased
+
+### feat(agent): a picture as depth layers
+
+**Area:** `feat(agent)`, `feat(render)`, `docs(wiki)`
+
+- **`layer_image`.** Cuts one picture into depth layers for a camera move: a subject mask (two layers) or a depth map (2 to 6 layers of equal area), from the user's own programs. Each layer is an image node of one group with a `depth`, carries colours grown out of its own edge under the nearer layers so a move does not uncover a hole, and is overscanned 6 percent. New `od_render::decode_rgba`. Playbook section "A picture as depth layers"; `remove_background` now says which model weights are non-commercial.
+
+
+
+### feat(core,agent): arcs, percentage keyframes, text on a path and shape morphing
+
+**Area:** `feat(core)`, `feat(agent)`, `feat(skill)`, `docs(wiki)`
+
+- **`animate_arc` and `arc`.** A node travels on a quadratic Bezier (control point = start + run x `peak` + perpendicular x `strength` x distance; `direction` auto bulges up, or right on a vertical move, whichever way it goes, `cw`/`ccw` pick the sweep) sampled into x/y keys every ~33 ms on the frame grid; `orient` adds a tangent rotation unwrapped so it never jumps a turn. `animate_preset` takes the same `arc` object for scene moves that travel in x or y (`slide_in_*`, `bounce_in`, `fade_up`: the other axis is bent from the node's rest) and refuses it for a camera move, `animate_along_path`, looping moves and moves that do not travel.
+- **`animate_keyframes`.** CSS-style `{"0%": {...}, "40%": {...}}` over several properties (camera and `fill_color` included), with the leaving-ease rule of CSS and anime.js (a keyframe's ease shapes the move that leaves it), a first keyframe after 0% starting from the current value, `allow_over` for percentages past 100, and an error when two keyframes land on one frame.
+- **`text_on_path`.** One text node per glyph (the renderer's own advances, as `split_text` uses) standing on a path node's flattened curve by arc length and rotated to its tangent, in a group; `align`, `start_offset`, `mode`, optional `reveal` through the scene-move stagger; glyphs off the end of an open path are left out and counted.
+- **`morph_to` and `path_morph`.** Core gains `Node::morph` (`crates/core/src/morph.rs`: equal-length point lists per contour and stop), `Property::PathMorph`, and the `morph_progress` animation, which `Document::at_time` turns into polyline path data, so the renderer needed no change. Both outlines are cut by arc length into `max(ceil(length x 0.33), 16)` (at most 256) points, rings get matching windings and the least-travel start point, contours are paired largest first (an unpaired one shrinks to its middle), a second `morph_to` continues to a third shape and `reset` starts over. A `set` that would strand `morph_progress` keys is refused so a saved project always loads.
+- **Docs.** Wiki: video-editing ("Paths and morphing"), agent-integration, document-format (path morph); playbook section "Paths and morphing".
+
+**Not verified:** how morphs between very different shapes look, text on tight curves, ancestors that are turned or scaled (their transforms are ignored when placing glyphs and morph targets), right-to-left text on a path, and whether agents prefer these tools to hand-written keys.
+
+### feat(core,agent): additive layers, `animate_to` and layout-diff transitions
+
+**Area:** `feat(core)`, `feat(agent)`, `feat(skill)`, `docs(wiki)`
+
+- **Additive layers.** A track may be `additive: true`: its keys are offsets added to the node's value as the replacing track gives it, held to the property's range, so a `bob` rides on a travel. One replacing and one additive track per node and property, applied in list order; a colour cannot be additive. `Operation::Animate` gains `additive` (left out when false), `animate_preset` takes `layer: "additive"` (scene moves and older moves alike), and `Document::at_time`, `Video::camera_at`, `Video::animated_value`, the signature, the review tools and the track gate all see the layer. Project format version 6 (older projects load unchanged).
+- **`animate_to`.** Sends a property to a value from where it is at `at_ms` (the track's value, else the node's own), replaces the old track's keys from there (`keep_later` keeps the later ones) and bakes a cut curved segment into 8 linear pieces, so interrupting a move never jumps.
+- **`snapshot_layout` and `transition_layout`.** Record the nodes of a frame to a plain JSON file in the project's `layout-snapshots/` folder, edit, then write x, y, width, height, opacity and fill_color keys from the recorded values to the live ones (new nodes fade in, a reparented node starts where it was on the page, a deleted node is reported because it cannot be animated), with the scene-move stagger, as one attributed undoable turn and a table of what each node does.
+- **Docs.** Wiki: video-editing (additive layers, layout transitions), agent-integration, document-format; playbook section "Layers and layout moves".
+
+**Not verified:** transitions of turned or scaled nodes and parents; whether agents prefer these tools to hand-written keys.
+
+### feat(agent): scene seeds and the beat map
+
+**Area:** `feat(agent)`, `feat(skill)`, `docs(wiki)`
+
+- **Six seeds.** `list_seeds` and `apply_seed {id, video?, brand?}`: explainer opener, product reveal (a 3D phone), kinetic type quote, stats callout, before and after, logo sting. Each is a deterministic recipe over the blocks `add_block` already has (same code path), with ambient loops and a camera move, built as one attributed, undoable turn; a failed step restores the turn's checkpoint. Colors are the applied style pack's tokens when there is one. The result carries the layout notes, the beat times, the open P0 gates and the next call. Applying twice makes a second scene and `<id>-2` spec.
+- **Beat map.** `SceneSpec.beat_map` (`id`, `at_ms`, `takeaway`, `focal_node`, `transformation`, `copy`, `audio_cue`, `exit_ms`, `built`) and `seed`. `scene_spec_validate` checks strictly increasing times inside the video, focal nodes in `layer_plan`, `exit_ms` after `at_ms`, unique names and a beat at least every 8 s. `scene_status` returns `next_beat`; `beats::beat_times` maps names to milliseconds.
+- **Docs.** Playbook topic `seeds`; wiki: scene-spec (Beat map), agent-integration (Scene seeds).
+
+**Not verified:** how the seeds look (tests check structure, lint, spec and `review_video` findings, not pictures); `review_video` is not run inside `apply_seed`.
+
 ## 2026-11-30
 
 ### feat(agent): style packs, a locked palette and the linter that holds it

@@ -113,6 +113,73 @@ whole video process; this page is about movement.
 - **A spring ease stretches the move it is on.** An entrance with `ease: spring(...)` runs for as
   long as the spring needs to rest, and the result says by how much.
 
+## Layers and layout moves
+
+- **Put a bob on a travel with the additive layer.** A track with `additive: true` (`apply_ops`
+  `animate`) or `animate_preset ... layer: "additive"` is an offset added on top of the node's own
+  track, so `bob`, `breathe`, `shake` or `float` can run over a `rise_in`, a `slide_in_left` or an
+  `animate_to` without fighting it. The move's values become offsets from where it starts, so it
+  adds nothing at rest. One replacing and one additive track per node and property; a second
+  additive move on the same property replaces the first, so give another property its own. The
+  sum is held to the property's range; a colour cannot be additive.
+- **Interrupt a move with `animate_to`, not by rewriting keys.** `animate_to {video, node, prop,
+  to, at_ms, duration_ms, ease?}` starts from the value the node has at `at_ms`, so there is no
+  jump, and replaces the keys from there on (`keep_later: true` keeps what came after). Use it
+  for "now go there", a hover, a reaction to a beat; use `spring_to` when the arrival should
+  spring.
+- **Re-layout with a diff.** For a slide that rearranges (a card grid becomes a list, a panel
+  grows): `snapshot_layout {frame}` first, edit the document as the end state, then
+  `transition_layout {video, snapshot, at_ms, duration_ms: 350, ease: "ease_in_out", stagger:
+  {each_ms: 40}}`. Moved and resized nodes glide from where they were; new nodes fade in; the
+  table in the result says what each node does.
+- **A deleted node cannot fade out.** `transition_layout` reports it as leaving and animates
+  nothing for it. To fade a node out, do not delete it: leave it in the document for the
+  transition, animate its `opacity` to 0 (`animate_to`), and set `visible` false afterwards.
+- **Re-snapshot before each edit round.** A snapshot holds the document's values, not what a
+  video makes of them, and the keys a node already had on x, y, width, height, opacity or
+  fill_color from `at_ms` on are replaced by the transition.
+
+## Paths and morphing
+
+- **Nothing alive travels in a straight line.** A thrown ball, a hand, an icon flying to a
+  corner follow an arc. `animate_arc {video, node, from?, to, at_ms, duration_ms, ease?, arc?,
+  orient?}` moves the node's x and y along a curve (`from` and `to` are the node's x and y, its
+  top left; `from` defaults to where it is). `arc: {strength: 0.5, peak: 0.5, direction:
+  "auto"}`: strength is how far it bulges as a share of the distance (0.2 is a gentle drift, 0.5
+  a clear lob, 1 a wide swing), peak where along the run the bulge sits (0.3 early, 0.7 late).
+  `auto` bulges up whichever way the node goes; use `cw` or `ccw` when
+  the story wants a side. The same `arc` works on `animate_preset` for a `slide_in_*`,
+  `bounce_in` or `fade_up`, so an entrance can swoop in.
+- **`orient: true` for things that point where they go** (a plane, an arrow, a dart); leave it
+  off for things that stay upright (a card, a badge, a logo). The rotation never spins a turn
+  at the seam.
+- **Percentage keyframes for one choreographed gesture.** `animate_keyframes {video, node,
+  duration_ms, keyframes: {"0%": {x: 0, y: 0}, "40%": {x: 200, y: -80, ease: "ease_out"},
+  "100%": {x: 400, y: 0}}}` keys several properties from one table. A keyframe's `ease` shapes
+  the move that leaves it (the last one's is unused), and a property that first appears at 40%
+  starts from where it is. Use it for a gesture with one rhythm (a jump: y up fast, down on a
+  gravity ease, scale squashing at the landing); use `sequence` to place different moves
+  against each other.
+- **Type on a curve for a stamp, a badge, a logo ring or a swoosh.** `text_on_path {text_node,
+  path_node, align: "center"}` stands each glyph on the path (draw the path first, put it where
+  the text should sit, then hide or style it). Keep it short: a word or a line, never a
+  paragraph, and at a size where letters do not collide on a tight curve (letters crowd on the
+  inside of a tight bend: look at a frame). Add `reveal: {video, preset:
+  "pop_in", each_ms: 40}` to bring it in letter by letter; a text that does not fit an open path
+  loses its last letters and the result says how many (`off_the_end`), so shorten it or move
+  `start_offset`.
+- **Morph between shapes that mean the same thing.** `morph_to {video, node, to_path, at_ms,
+  duration_ms, ease?}` turns a path node into another: a circle into a heart, a play button into
+  a pause, a blob into a blob. It works best between shapes of a similar size and silhouette,
+  both single closed outlines; a shape with a hole keeps its hole or shrinks it away. Give it
+  400 to 700 ms with `ease_in_out`. The target node stays where it is (hide it with `visible`
+  false, or set its opacity to 0 for the length of the morph) and the node lands where it is.
+  Fill and stroke are the morphing node's own: animate `fill_color` beside it to change colour.
+- **A second `morph_to` continues; `reset` starts over.** Call it again after the first ends to
+  go on to a third shape (the first morph's contours stay); if the shapes were edited since, pass
+  `reset: true`. Edit the path node's own `path` only before the first morph: a later edit is not
+  followed.
+
 ## Recipes (all with overlays on a transparent frame)
 
 - **Lower third:** a frame with a name and a role in a bar at 70% height; `slide_left`, 350 ms,
@@ -215,3 +282,16 @@ silence (an App Store preview autoplays muted, but still gets a track for when s
   `remove_pauses {video, clip}` cuts them out of a footage clip as one undoable step (the clip
   becomes several; overlays, captions and tracks keep their times, so move them after), and
   `get_waveform {file}` gives peaks to find where a hit should land. They need ffmpeg.
+
+## A picture as depth layers
+
+A still photo or illustration becomes a camera move with `layer_image`. Get the grey plane from the
+user's own programs first (`get_capabilities` says what they have): `remove_background` with
+`mask_only` for a subject and its background (two layers), or a depth map from their depth program
+(brighter is nearer; `bands` 3 to 5 reads best). Then `layer_image {file, mask|depth, parent}`,
+and move the camera: `camera_push_in` 3 percent, or `camera_pan` an eighth of the frame, over 3 to 6
+seconds, `power4_out` or `ease_in_out`. Keep the move small: the layers are overscanned 6 percent
+and grown behind each other by 40 px, so a push of more than about 4 percent or a pan of more than
+a tenth of the width shows edges. Look at the first, middle and last frame with `video_strip`, and
+at any seam with `video_crop`. If a layer shows a hole or a halo, raise `grow` or `feather`, or
+fix the mask. For a commercial project ask for rembg's `isnet-general-use` or `u2net`.

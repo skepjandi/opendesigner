@@ -222,6 +222,7 @@ fn transitions_footage_in_points_overlays_and_keys_are_snapped_too() {
             Actor::User,
             None,
             &[Operation::Animate {
+                additive: false,
                 video: f.video.clone(),
                 node,
                 prop: AnimProp::X,
@@ -391,6 +392,7 @@ fn an_image_node_carries_a_grade_that_keyframes_can_move() {
         Actor::User,
         None,
         &[Operation::Animate {
+            additive: false,
             video: f.video.clone(),
             node: img.clone(),
             prop: AnimProp::GradeBlur,

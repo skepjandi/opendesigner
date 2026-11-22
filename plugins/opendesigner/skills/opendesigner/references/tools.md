@@ -423,6 +423,7 @@ Animate a node with a named move, measured from its designed pose, as keyframes 
 Arguments:
 
 - `amount` (number) camera_pan, camera_whip and camera_burst: how far the camera goes, in document units.
+- `arc` (object) Bend the straight run into an arc: a quadratic Bezier whose control point is the start plus the run times `peak` plus the perpendicular times `strength` times the distance. Sampled into x/y keys every ~33 ms, so the node curves instead of sliding straight.
 - `center_x` (number) orbit: the middle of the circle, in the node's parent coordinates.
 - `center_y` (number) orbit: the middle of the circle, in the node's parent coordinates.
 - `columns` (integer) stagger: lay the nodes out as a grid this many columns wide, row by row, and delay by distance from the start cell.
@@ -431,6 +432,7 @@ Arguments:
 - `ease` (string) Overrides the preset's own ease: one of linear, ease_in, ease_out, ease_in_out, back, spring, ease_in_out_cubic, ease_out_back, elastic, bounce, steps_2, steps_3, steps_4, steps_6, steps_8, steps_12, power2_in, power2_out, power2_in_out, power4_in, power4_out, power4_in_out, expo_in, expo_out, expo_in_out, circ_in, circ_out, circ_in_out, sine_in, sine_out, sine_in_out, anticipate, bounce_in, bounce_in_out, spring_snappy, spring_smooth, spring_playful, spring_bouncy, spring_heavy or a tuned one: cubic(x1,y1,x2,y2) with x1 and x2 from 0 to 1, y1 and y2 from -2 to 3; spring(visual_ms,bounce) with visual_ms 50 to 5000 and bounce from -0.9 (slow, no overshoot) to 0.95 (very bouncy); back_in|back_out|back_in_out(overshoot) from 0 to 5; elastic_out|elastic_in(amplitude,period) with amplitude 1 to 5 and period 0.05 to 2; steps(n) with n from 2 to 64; anticipate (pulls back first, then goes).
 - `from` (string) stagger: which node goes first (edges: both ends together, then inward; in a grid, the outer ring first).
 - `intensity` (number) How far the move goes; 1 is as designed (the same as strength).
+- `layer` (string) replace (default) writes the node's own tracks; additive writes an offset track added on top of them, measured from where the move starts: a bob, float or shake laid over a travel or a rise.
 - `metric` (string) stagger with columns: how distance is measured (default euclid).
 - `node` (string) Id of the node to move (a device3d for the 3D moves); the video's camera moves need none.
 - `nodes` (array) stagger: ids of the nodes, in order.
@@ -480,6 +482,70 @@ Arguments:
 - `to_ms` (integer) 
 - `video` (string, required) Id of a video from list_videos.
 
+## `layer_image`
+
+Cut a picture into depth layers for a camera move (a 2.5D parallax): the far layer first, the near layer last, each an image node of one group with a `depth` (0.15 far to 1 near), so camera_pan, camera_push_in or camera_drift move the near ones more. Give the picture (`file`, media/<name>) and exactly one grey plane from the user's own programs: `mask` (media/<name>, a subject mask or a cut-out with transparency, from remove_background with mask_only: two layers, the background and the subject) or `depth` (media/<name>, a depth map where brighter is nearer, or `invert_depth` when darker is nearer: `bands` layers of equal area). Each layer also carries `grow` pixels of the colours behind the nearer ones, grown out of its own edge, so a move does not uncover a hole, and the lowest layer fills the whole picture. The layers are overscanned by `overscan` (default 6 percent) so the camera has room. Layers are written to media/<name>-layer-<n>.png and never overwrite a file. Pictures over 24 million pixels are refused. Model licences are the user's to check: when the project is commercial, ask for rembg's isnet-general-use or u2net, and a depth model such as Depth Anything V2 Small (Apache-2.0), not the larger non-commercial ones.
+
+Arguments:
+
+- `bands` (integer) How many layers a depth map is cut into (default 4).
+- `depth` (string) media/<name> of a depth map (brighter is nearer): `bands` layers.
+- `feather` (integer) Pixels an outer edge is softened over (default 1).
+- `file` (string, required) media/<name> of the picture (png, jpg or webp).
+- `grow` (integer) Pixels of hidden colour grown behind each nearer layer (default 40).
+- `invert_depth` (boolean) The depth map is darker where nearer.
+- `mask` (string) media/<name> of a subject mask or a cut-out: two layers.
+- `mask_threshold` (integer) How bright a mask pixel must be to count as the subject (default 128).
+- `name` (string) Name of the group (default: the picture's name).
+- `overscan` (number) Extra size around the picture, as a share of it (default 0.06).
+- `parent` (string, required) Id of the frame or group to put the layers in.
+- `summary` (string) One line, in the user's terms, naming what this turn does.
+- `turn` (string) Groups related calls into one turn; omit and each call is its own turn.
+- `width` (number) Width of the picture in document units (default: the parent's width); the height follows.
+- `x` (number) Left of the group in the parent (default 0).
+- `y` (number) Top of the group in the parent (default 0).
+
+## `animate_to`
+
+Send one property of a node to a value over a stretch of time, starting from the value it has at at_ms: what its track gives there, or the node's own value when it has none. There is no jump when it is interrupted. The keys the node's track has from at_ms on are replaced (keep_later keeps those after the new move ends), a segment of the old track that is cut in the middle keeps its shape (a non-linear one is baked into 8 linear pieces), and the result is one ordinary animate, so it is attributed, checkpointed and undoable in one step. Returns the value it started from and how many old keys it replaced. A track that loops (repeat) is refused: use apply_ops animate. The additive layer is untouched; add one with apply_ops animate additive:true or animate_preset layer:additive. A colour prop (fill_color) takes a '#rrggbb[aa]' string. A camera prop needs no node.
+
+Arguments:
+
+- `at_ms` (integer, required) When the move starts, from the start of the video.
+- `duration_ms` (integer, required) How long the move takes.
+- `ease` (string) One of linear, ease_in, ease_out, ease_in_out, back, spring, ease_in_out_cubic, ease_out_back, elastic, bounce, steps_2, steps_3, steps_4, steps_6, steps_8, steps_12, power2_in, power2_out, power2_in_out, power4_in, power4_out, power4_in_out, expo_in, expo_out, expo_in_out, circ_in, circ_out, circ_in_out, sine_in, sine_out, sine_in_out, anticipate, bounce_in, bounce_in_out, spring_snappy, spring_smooth, spring_playful, spring_bouncy, spring_heavy or a tuned one: cubic(x1,y1,x2,y2) with x1 and x2 from 0 to 1, y1 and y2 from -2 to 3; spring(visual_ms,bounce) with visual_ms 50 to 5000 and bounce from -0.9 (slow, no overshoot) to 0.95 (very bouncy); back_in|back_out|back_in_out(overshoot) from 0 to 5; elastic_out|elastic_in(amplitude,period) with amplitude 1 to 5 and period 0.05 to 2; steps(n) with n from 2 to 64; anticipate (pulls back first, then goes). Default ease_in_out.
+- `keep_later` (boolean) Keep the old keys after the new move ends (default: they are replaced).
+- `node` (string) Id of the node (omit for the camera_* props).
+- `prop` (string, required) 
+- `summary` (string) One line, in the user's terms, naming what this turn does.
+- `to` (any, required) The value to reach: a number, or a '#rrggbb[aa]' colour for fill_color.
+- `turn` (string) Groups related calls into one turn.
+- `video` (string, required) Id of a video from list_videos.
+
+## `snapshot_layout`
+
+Record where every node inside a frame (or group) is right now: its box in the frame, its size, opacity and solid fill, the parent it sits in. Stored as a small JSON file in the project's layout-snapshots folder (at most 500 nodes, 24 snapshots; the oldest is dropped). Then edit the document (move, resize, add, restyle, reparent) and call transition_layout to animate from the recorded state to the new one. Needs a project folder. Returns the snapshot name.
+
+Arguments:
+
+- `frame` (string, required) Id of the frame or group to record.
+- `name` (string) A plain name: a-z, 0-9, '.', '_' and '-', up to 48 characters. Default snap-1, snap-2, ...
+
+## `transition_layout`
+
+Animate from a snapshot_layout record to the document as it is now, matching nodes by id. A node that moved or resized gets x, y, width and height keys from its old values to its live ones (a change under 0.01 for a position or 1 for a size writes nothing); a changed opacity or solid fill_color is carried the same way; a node that is new (or newly visible) fades in, opacity 0 to its own; a node that moved to another parent is started where it was on the page. A node that was deleted cannot be animated: it is reported as leaving (keep a node you want to fade out and set visible false after the move instead of deleting it). The keys from at_ms on that the node's tracks already had on these properties are replaced. One attributed, undoable turn; returns a table of what each node does. The node's value before at_ms is its old one, after the move its live one.
+
+Arguments:
+
+- `at_ms` (integer, required) When the transition starts, from the start of the video.
+- `duration_ms` (integer) How long each node takes (default 350).
+- `ease` (string) One of linear, ease_in, ease_out, ease_in_out, back, spring, ease_in_out_cubic, ease_out_back, elastic, bounce, steps_2, steps_3, steps_4, steps_6, steps_8, steps_12, power2_in, power2_out, power2_in_out, power4_in, power4_out, power4_in_out, expo_in, expo_out, expo_in_out, circ_in, circ_out, circ_in_out, sine_in, sine_out, sine_in_out, anticipate, bounce_in, bounce_in_out, spring_snappy, spring_smooth, spring_playful, spring_bouncy, spring_heavy or a tuned one: cubic(x1,y1,x2,y2) with x1 and x2 from 0 to 1, y1 and y2 from -2 to 3; spring(visual_ms,bounce) with visual_ms 50 to 5000 and bounce from -0.9 (slow, no overshoot) to 0.95 (very bouncy); back_in|back_out|back_in_out(overshoot) from 0 to 5; elastic_out|elastic_in(amplitude,period) with amplitude 1 to 5 and period 0.05 to 2; steps(n) with n from 2 to 64; anticipate (pulls back first, then goes). Default ease_in_out.
+- `snapshot` (string, required) Name returned by snapshot_layout.
+- `stagger` (object) Spreads the starts over the nodes that move, and over those that enter, in document order: each_ms (default 40), from, reversed, ease, grid, columns, jitter_ms, seed, start_ms.
+- `summary` (string) One line, in the user's terms, naming what this turn does.
+- `turn` (string) Groups related calls into one turn.
+- `video` (string, required) Id of a video from list_videos.
+
 ## `sequence`
 
 Several moves placed against each other in time, written as one turn and one undo step. Give each step a `preset`, the `node` or `nodes` it moves, and where it starts: a number of milliseconds, or a phrase against what is already there (`<` the end of the step before, `<<` its start, `<+=50` to overlap it by 50 ms, `intro+=200` after a step named intro). A step may name itself with `label` and spread its own nodes with a `stagger` object. `fit_to_ms` scales the whole sequence to a length. The result echoes the table of resolved starts and ends, so the agent can see the timing it got.
@@ -507,6 +573,71 @@ Arguments:
 - `turn` (string) Groups related calls into one turn; omit and each call is its own turn.
 - `video` (string, required) Id of a video from list_videos.
 - `visual_ms` (integer) How long the spring looks like it takes (default 400).
+
+## `animate_arc`
+
+Move a node from one point to another along an arc instead of a straight line: a quadratic Bezier whose control point is the start plus the run times `peak` plus the perpendicular times `strength` times the distance, sampled into ordinary x and y keys every ~33 ms on the video's frame grid. The bulge stays on one side whichever way the node goes (up by default). `from` and `to` are the node's x and y (its top left). `orient` also turns the node to face along the curve (rotation by the heading, unwrapped, so it never jumps by a turn). `ease` shapes how far along the curve the node is at each moment. Keys outside the move are kept, so moves chain. The same `arc` object on animate_preset bends any scene move that travels in x and y.
+
+Arguments:
+
+- `arc` (object) Bend the straight run into an arc: a quadratic Bezier whose control point is the start plus the run times `peak` plus the perpendicular times `strength` times the distance. Sampled into x/y keys every ~33 ms, so the node curves instead of sliding straight.
+- `at_ms` (integer, required) When the move starts.
+- `duration_ms` (integer, required) How long it runs.
+- `ease` (string) How far along the curve the node is over time (default ease_in_out). One of linear, ease_in, ease_out, ease_in_out, back, spring, ease_in_out_cubic, ease_out_back, elastic, bounce, steps_2, steps_3, steps_4, steps_6, steps_8, steps_12, power2_in, power2_out, power2_in_out, power4_in, power4_out, power4_in_out, expo_in, expo_out, expo_in_out, circ_in, circ_out, circ_in_out, sine_in, sine_out, sine_in_out, anticipate, bounce_in, bounce_in_out, spring_snappy, spring_smooth, spring_playful, spring_bouncy, spring_heavy or a tuned one: cubic(x1,y1,x2,y2) with x1 and x2 from 0 to 1, y1 and y2 from -2 to 3; spring(visual_ms,bounce) with visual_ms 50 to 5000 and bounce from -0.9 (slow, no overshoot) to 0.95 (very bouncy); back_in|back_out|back_in_out(overshoot) from 0 to 5; elastic_out|elastic_in(amplitude,period) with amplitude 1 to 5 and period 0.05 to 2; steps(n) with n from 2 to 64; anticipate (pulls back first, then goes).
+- `from` (any) Where the move starts, [x, y] or {x, y} (default: where the node is at at_ms).
+- `node` (string, required) Id of the node to move.
+- `orient` (boolean) Turn the node to face along the curve.
+- `summary` (string) One line, in the user's terms, naming what this turn does.
+- `to` (any, required) Where the move ends, [x, y] or {x, y}.
+- `turn` (string) Groups related calls into one turn; omit and each call is its own turn.
+- `video` (string, required) Id of a video from list_videos.
+
+## `animate_keyframes`
+
+CSS-style percentage keyframes over several properties of one node, written as ordinary keys. `keyframes` maps '0%', '40%', '100%' (also 'from' and 'to') to the values the properties have there: {"0%": {"x": 0, "y": 0}, "40%": {"x": 200, "y": -80, "ease": "ease_out"}, "100%": {"x": 400, "y": 0}}. Each property has its own keys: a keyframe that leaves a property out does not touch it. A keyframe's `ease` shapes the move that LEAVES it (as in CSS); the last keyframe's ease is unused (the result says so). A property whose first keyframe is after 0% starts from its current value and goes there over the time before it. Percentages are of duration_ms; past 100% needs `allow_over`. Camera properties (camera_x...) need no node. fill_color takes '#rrggbb'.
+
+Arguments:
+
+- `allow_over` (boolean) Allow percentages past 100% (the move runs longer than duration_ms).
+- `at_ms` (integer) When 0% is (default 0).
+- `duration_ms` (integer, required) How long 100% takes.
+- `ease` (string) The ease of a segment whose leaving keyframe names none (default ease_in_out). One of linear, ease_in, ease_out, ease_in_out, back, spring, ease_in_out_cubic, ease_out_back, elastic, bounce, steps_2, steps_3, steps_4, steps_6, steps_8, steps_12, power2_in, power2_out, power2_in_out, power4_in, power4_out, power4_in_out, expo_in, expo_out, expo_in_out, circ_in, circ_out, circ_in_out, sine_in, sine_out, sine_in_out, anticipate, bounce_in, bounce_in_out, spring_snappy, spring_smooth, spring_playful, spring_bouncy, spring_heavy or a tuned one: cubic(x1,y1,x2,y2) with x1 and x2 from 0 to 1, y1 and y2 from -2 to 3; spring(visual_ms,bounce) with visual_ms 50 to 5000 and bounce from -0.9 (slow, no overshoot) to 0.95 (very bouncy); back_in|back_out|back_in_out(overshoot) from 0 to 5; elastic_out|elastic_in(amplitude,period) with amplitude 1 to 5 and period 0.05 to 2; steps(n) with n from 2 to 64; anticipate (pulls back first, then goes).
+- `keyframes` (object, required) Percentage -> {property: value, ease?}, e.g. {"0%": {"x": 0}, "100%": {"x": 400}}.
+- `node` (string) Id of the node (not needed when only camera properties are keyed).
+- `summary` (string) One line, in the user's terms, naming what this turn does.
+- `turn` (string) Groups related calls into one turn; omit and each call is its own turn.
+- `video` (string, required) Id of a video from list_videos.
+
+## `text_on_path`
+
+Lay a line of text along a path node's curve: each glyph (the renderer's own shaping and advances, as split_text uses) becomes a text node placed by arc length and turned to the curve's tangent, standing on it. The pieces are a group named like the text, in reading order, spaces keeping their width but not being nodes. `align` is start (default), center or end along the path; `start_offset` shifts the start in document units. A closed path wraps; on an open one a glyph that would fall off the end is left out (the result counts them). `reveal` brings the letters in one by one with a scene move (default pop_in, 40 ms apart, from `video`); animate the group afterwards. The original is removed (`mode: replace`) or hidden (`keep`). Place and style the path node first: the glyphs follow its flattened curve in the text's parent's coordinates (an ancestor's rotation or scale is not applied).
+
+Arguments:
+
+- `align` (string) Where the text sits along the path (default start).
+- `mode` (string) keep hides the original text; replace (default) removes it and the group takes its name.
+- `path_node` (string, required) Id of the path node to follow.
+- `reveal` (object) Bring the letters in one by one.
+- `start_offset` (number) Document units from where align puts the start (default 0).
+- `summary` (string) One line, in the user's terms, naming what this turn does.
+- `text_node` (string, required) Id of the text node.
+- `turn` (string) Groups related calls into one turn; omit and each call is its own turn.
+
+## `morph_to`
+
+Turn one path node into another over time. Both outlines are cut by arc length into the same number of points (about one per 3 document units, at least 16, at most 256); two closed shapes get matching windings and the start point that moves the points least, so the shape does not twist; contours are paired largest first and one with no partner shrinks to its middle (or grows from it). The node keeps its own path data and gains the shapes it morphs through (`path_morph`) and a `morph_progress` animation: 0 is its own shape, 1 the target's, drawn as a polyline of those points, so it looks the same everywhere frames are made. The target stays where it is: the node's shape lands on the target's place. Calling morph_to again on the same node (starting after the first ends) continues the morph to a third shape, with the same contours. The morph does not follow later edits of the node's path: run it again (with `reset`) after changing it. `ease` shapes the progress.
+
+Arguments:
+
+- `at_ms` (integer, required) When the morph starts.
+- `duration_ms` (integer, required) How long it runs.
+- `ease` (string) How the morph progresses over time (default ease_in_out). One of linear, ease_in, ease_out, ease_in_out, back, spring, ease_in_out_cubic, ease_out_back, elastic, bounce, steps_2, steps_3, steps_4, steps_6, steps_8, steps_12, power2_in, power2_out, power2_in_out, power4_in, power4_out, power4_in_out, expo_in, expo_out, expo_in_out, circ_in, circ_out, circ_in_out, sine_in, sine_out, sine_in_out, anticipate, bounce_in, bounce_in_out, spring_snappy, spring_smooth, spring_playful, spring_bouncy, spring_heavy or a tuned one: cubic(x1,y1,x2,y2) with x1 and x2 from 0 to 1, y1 and y2 from -2 to 3; spring(visual_ms,bounce) with visual_ms 50 to 5000 and bounce from -0.9 (slow, no overshoot) to 0.95 (very bouncy); back_in|back_out|back_in_out(overshoot) from 0 to 5; elastic_out|elastic_in(amplitude,period) with amplitude 1 to 5 and period 0.05 to 2; steps(n) with n from 2 to 64; anticipate (pulls back first, then goes).
+- `node` (string, required) Id of the path node that morphs.
+- `reset` (boolean) Start over from the node's own path, dropping an earlier morph and its progress keys.
+- `summary` (string) One line, in the user's terms, naming what this turn does.
+- `to_path` (string, required) Id of the path node whose shape it becomes.
+- `turn` (string) Groups related calls into one turn; omit and each call is its own turn.
+- `video` (string, required) Id of a video from list_videos.
 
 ## `split_text`
 
@@ -539,6 +670,24 @@ Arguments:
 - `turn` (string) Groups related calls into one turn.
 - `video` (string, required) Id of a video from list_videos.
 - `wrap` (boolean) Put each piece in its own clipping group (a mask box the size of the piece's line) so it can rise or slide in from outside the box. The animated node is then the text inside the mask.
+
+## `list_seeds`
+
+The six scene seeds: starter scenes built from blocks (explainer opener with scenery and a character, product reveal with a 3D phone, kinetic type quote, stats callout, before and after, logo sting). Each says what it builds, how long it is, the beats it is planned around and its layout notes. apply_seed builds one. Read get_playbook seeds.
+
+Read-only.
+
+No arguments.
+
+## `apply_seed`
+
+Build a seed as ONE attributed, undoable turn: a frame, a video with one clip, the seed's blocks (the add_block code path, with the applied style pack's tokens when one is set), ambient motion and a slow camera drift, and a SceneSpec in scene_specs/ with the layer plan, beat map and palette. Returns the layouts notes, the beat times (place sounds by beat name), the open P0 gates and the next call. Applying twice makes a second, separate scene. Then swap the copy, check with validate_document and review_video, and record the review.
+
+Arguments:
+
+- `brand` (object) Copy and colors to swap in; a seed's own words fill what you leave out. Colors are #rrggbb.
+- `id` (string, required) A seed id from list_seeds.
+- `video` (string) Id of an existing EMPTY video to put the scene in (its size is used). Omit to create one (the workspace's chosen video format, else 1280x720 at 30 fps).
 
 ## `list_blocks`
 

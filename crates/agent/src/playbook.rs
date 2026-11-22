@@ -120,6 +120,11 @@ pub const TOPICS: &[(&str, &str, &str)] = &[
         "style packs: choosing one look from the brief, applying its palette as tokens, the 80/20 rule, the motion personality, and the anti-slop list",
         include_str!("../skill/style-packs.md"),
     ),
+    (
+        "seeds",
+        "scene seeds and the beat map: six starter scenes built from blocks (explainer opener, product reveal, kinetic quote, stats callout, before/after, logo sting), and the time -> takeaway -> focal object -> transformation -> copy -> exit beat plan",
+        include_str!("../skill/scene-seeds.md"),
+    ),
 ];
 
 pub fn topic(name: &str) -> Option<&'static str> {

@@ -1529,6 +1529,7 @@ mod tests {
                     motion: None,
                 },
                 Operation::Animate {
+                    additive: false,
                     video: v.clone(),
                     node: square,
                     prop: od_core::AnimProp::X,

@@ -1323,6 +1323,7 @@ mod tests {
     fn a_track_that_drives_nothing_is_an_error() {
         let mut src = living_scenes(true);
         src.doc.videos[0].animations.push(od_core::Animation {
+            additive: false,
             node: NodeId::parse("n_9999").unwrap(),
             prop: od_core::AnimProp::X,
             keys: vec![

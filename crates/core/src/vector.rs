@@ -105,6 +105,10 @@ pub(crate) fn apply_property(node: &mut Node, prop: Property) -> Result<Property
             Property::ViewBox(replace(&mut node.view_box, v))
         }
         Property::FillRule(v) => Property::FillRule(replace(&mut node.fill_rule, v)),
+        Property::PathMorph(v) => {
+            let v = v.map(crate::morph::PathMorph::checked).transpose()?;
+            Property::PathMorph(replace(&mut node.morph, v))
+        }
         Property::StrokeWidth(v) => {
             let v = finite_in("stroke width", v, 0.0, limits::MAX_STROKE_WIDTH)?;
             Property::StrokeWidth(replace(&mut stroke_of(node)?.width, v))
@@ -316,6 +320,13 @@ pub(crate) fn check_node(node: &Node) -> Result<(), OpError> {
     if node.fill_rule.is_some() && !is_path {
         return not_applicable("fill_rule", node);
     }
+    if node.morph.is_some() && !is_path {
+        return not_applicable("path_morph", node);
+    }
+    node.morph
+        .clone()
+        .map(crate::morph::PathMorph::checked)
+        .transpose()?;
     node.view_box.map(ViewBox::checked).transpose()?;
     Ok(())
 }

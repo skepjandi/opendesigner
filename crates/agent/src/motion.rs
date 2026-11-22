@@ -12,6 +12,7 @@ use od_core::{Ease, Operation};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
+use crate::layering::Layer;
 use crate::tools::{
     ApplyArgs, CallCtx, Content, Output, ToolError, apply_ops, node_id, parse, tool,
 };
@@ -40,6 +41,7 @@ pub fn definitions() -> Vec<Value> {
         "duration_ms": {"type": "integer", "minimum": 100, "maximum": 600000, "description": "Needed by the older moves; a scene move has its own default (one cycle, for a loop)."},
         "strength": {"type": "number", "minimum": animation::MIN_STRENGTH, "maximum": animation::MAX_STRENGTH, "description": "How far the move goes; 1 is as designed."},
         "ease": {"type": "string", "description": format!("Overrides the preset's own ease: one of {} or a tuned one: {}.", Ease::NAMES.join(", "), od_core::ease::GRAMMAR)},
+        "layer": {"type": "string", "enum": ["replace", "additive"], "description": "replace (default) writes the node's own tracks; additive writes an offset track added on top of them, measured from where the move starts: a bob, float or shake laid over a travel or a rise."},
         "turn": id("Groups related calls into one turn; omit and each call is its own turn."),
         "summary": id("One line, in the user's terms, naming what this turn does.")
     });
@@ -200,6 +202,8 @@ struct PresetArgs {
     #[serde(default)]
     ease: Option<Ease>,
     #[serde(default)]
+    layer: Layer,
+    #[serde(default)]
     turn: Option<String>,
     #[serde(default)]
     summary: Option<String>,
@@ -211,7 +215,7 @@ fn animate_preset(ctx: &mut CallCtx, a: PresetArgs) -> Result<Output, ToolError>
         .as_deref()
         .ok_or_else(|| ToolError("this move needs `node`".into()))?;
     let (video, node) = (node_id(&a.video)?, node_id(node_arg)?);
-    let ops: Vec<Operation> = animation::preset_ops(
+    let ops: Vec<Operation> = animation::preset_ops_layered(
         ctx.ws.session.document(),
         &video,
         &node,
@@ -222,6 +226,7 @@ fn animate_preset(ctx: &mut CallCtx, a: PresetArgs) -> Result<Output, ToolError>
             strength: a.intensity.or(a.strength).unwrap_or(1.0),
             ease: a.ease,
         },
+        a.layer == Layer::Additive,
     )?;
     if ops.is_empty() {
         return Err(ToolError(format!(

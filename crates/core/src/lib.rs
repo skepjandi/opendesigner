@@ -21,6 +21,7 @@ pub mod limits;
 pub mod lint;
 pub mod media;
 pub mod model;
+pub mod morph;
 pub mod ops;
 pub mod paint;
 pub mod path;

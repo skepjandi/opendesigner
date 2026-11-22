@@ -20,7 +20,7 @@ mod vector;
 pub mod video;
 
 pub use device::Media;
-pub use images::dimensions as image_dimensions;
+pub use images::{decode_rgba, dimensions as image_dimensions};
 pub use incremental::{Refresh, Retained};
 pub use tiny_skia::Pixmap;
 
