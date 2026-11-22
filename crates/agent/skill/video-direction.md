@@ -111,6 +111,20 @@ audio for the one older track); `list_sounds` shows what `media/` holds. A voice
 track and the bed a `music` track with `duck`, so the bed lowers while the voice speaks. The `motion`
 playbook has the details.
 
+Sound must be about what is on screen. Before any `make_sound`, write a cue sheet: one row per
+visible event (the time, what appears or moves, the sound that event would make). Cut and slide:
+a whoosh (`swoosh_up` for upward or rightward motion, `swoosh_down` for downward) timed to the
+motion's peak speed. An object or card landing: `hit`, or `impact` only for the one big moment.
+Text or a UI element appearing: `pop` or `blip`; typing: `key` with a different seed per press. A
+number counting: `tick` per step. A tension build before a reveal: `riser`, ending on the reveal
+with silence for a beat before it. Success or the final title: `chime` or `stinger`, once. Never
+the same file for different events: another kind, or the same kind with its own `seed` and
+`pitch_hz`, and a file name that says what it is for (`reveal-chime`, `cut-2-whoosh`). A beat
+without an event gets no sound. Match the bed to the subject and mood (calm product film: soft
+`pad`; energetic: `beat` at the cut rhythm; or a `search_sounds` piece whose tags fit), not to
+whatever came first. Then check: play each cue against `render_video_frame` at its start time and
+drop any cue whose frame shows nothing happening.
+
 ## Captions
 
 Captions are data on the video (`captions`: a style and timed cues), drawn in the preview and burned

@@ -157,7 +157,7 @@ fn env_map(light_angle: f64, studio: &Studio) -> Arc<EnvMap> {
             return Arc::clone(map);
         }
     }
-    let map = Arc::new(EnvMap::build(studio, 32));
+    let map = Arc::new(EnvMap::build(studio, 64));
     *guard = Some((key, Arc::clone(&map)));
     map
 }
@@ -233,8 +233,21 @@ impl EnvMap {
     }
 
     fn sample(&self, d: V3, rough: f32) -> V3 {
+        // Sharp below 0.12, blurred above 0.4, a blend between: a polished finish reads as a
+        // mirror of the studio, not a matte one.
+        let t = smoothstep(0.12, 0.4, rough);
+        if t <= 0.0 {
+            return self.lookup(&self.sharp, d);
+        }
+        if t >= 1.0 {
+            return self.lookup(&self.soft, d);
+        }
+        let a = self.lookup(&self.sharp, d);
+        a + (self.lookup(&self.soft, d) - a) * t
+    }
+
+    fn lookup(&self, map: &Faces, d: V3) -> V3 {
         let (face, u, v) = cube_uv(d);
-        let map = if rough < 0.3 { &self.sharp } else { &self.soft };
         let texels = &map[face];
         let n = self.size as f32;
         let x = u * n - 0.5;
@@ -337,7 +350,7 @@ impl<'a> Shader<'a> {
                 // A brushed finish: the roughness drifts along the frame, so the reflection has
                 // the soft streaks of brushed metal instead of a perfect mirror.
                 let brush = 0.05 * (f.uv[1] * 0.06).sin() + 0.02 * (f.uv[0] * 0.05).sin();
-                self.metal(n, v, self.body, (0.38 + brush).max(0.05))
+                self.metal(n, v, self.body, (0.16 + brush).max(0.05))
                     .map(soft_clip)
             }
             Mat::Back => self.back(n, v).map(soft_clip),
@@ -360,20 +373,20 @@ impl<'a> Shader<'a> {
         let fr = (1.0 - nv).powi(5);
         let f = f0 + (V3::splat(1.0) - f0) * fr;
         let spec = f * self.env.sample(r, rough);
-        let diff = albedo * self.studio.irradiance(n) * 0.34;
+        let diff = albedo * self.studio.irradiance(n) * 0.26;
         let h = (self.studio.key + v).norm();
         let blinn = pow64(n.dot(h).max(0.0));
-        diff + spec + f * (blinn * 1.2)
+        diff + spec * 1.25 + f * (blinn * 1.6)
     }
 
     fn back(&self, n: V3, v: V3) -> V3 {
         let nv = n.dot(v).max(0.0);
         let r = reflect(v, n);
-        let fr = 0.05 + 0.95 * (1.0 - nv).powi(5);
+        let fr = 0.09 + 0.91 * (1.0 - nv).powi(5);
         let albedo = self.body * 0.6 + V3::splat(0.015);
         let h = (self.studio.key + v).norm();
         albedo * self.studio.irradiance(n) * 0.75
-            + self.env.sample(r, 0.42) * (fr * 1.1)
+            + self.env.sample(r, 0.2) * (fr * 1.1)
             + V3::splat(pow16(n.dot(h).max(0.0)) * 0.07)
     }
 
@@ -441,7 +454,7 @@ impl<'a> Shader<'a> {
     }
 
     fn deck(&self, f: &Frag, n: V3, v: V3) -> V3 {
-        let base = self.metal(n, v, self.body, 0.45);
+        let base = self.metal(n, v, self.body, 0.28);
         let Some(k) = &self.model.keyboard else {
             return base;
         };

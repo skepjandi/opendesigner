@@ -1,6 +1,6 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use super::beats::{beat_times, next_unbuilt};
+use super::beats::{beat_times, next_unbuilt, sound_plan};
 use super::schema::{Beat, Layer, SceneSpec};
 use super::validate::validate;
 
@@ -195,4 +195,22 @@ fn a_spec_without_beats_round_trips_and_old_specs_still_load() {
     assert!(s.beat_map.is_empty() && s.seed.is_none());
     let back: SceneSpec = serde_json::from_str(&serde_json::to_string(&spec()).unwrap()).unwrap();
     assert_eq!(back.beat_map.len(), 3);
+}
+
+#[test]
+fn the_sound_plan_gives_every_cue_its_own_seed_name_and_a_kind_make_sound_knows() {
+    let mut s = spec();
+    for b in &mut s.beat_map {
+        b.audio_cue = Some("swoosh".into());
+    }
+    let plan = sound_plan(&s);
+    assert_eq!(plan.len(), 3);
+    let names: std::collections::HashSet<_> =
+        plan.iter().map(|p| p["make_sound"]["name"].as_str().unwrap()).collect();
+    assert_eq!(names.len(), 3);
+    assert!(plan.iter().all(|p| crate::synth::Kind::parse(p["make_sound"]["kind"].as_str().unwrap()).is_some()));
+    s.beat_map[0].audio_cue = Some("chime".into());
+    s.beat_map[1].audio_cue = Some("chime".into());
+    let plan = sound_plan(&s);
+    assert_ne!(plan[0]["make_sound"]["pitch_hz"], plan[1]["make_sound"]["pitch_hz"]);
 }
