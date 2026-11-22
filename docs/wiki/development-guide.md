@@ -45,7 +45,7 @@ Run the editor offscreen, the way the test does: `QT_QPA_PLATFORM=offscreen targ
 
 ### Packaging (macOS)
 
-`QMAKE="$(brew --prefix qt)/bin/qmake" scripts/package-macos.sh` builds the release binary, assembles `dist/OpenDesigner.app` (Info.plist, an icon made from `assets/logo.svg`, `THIRD_PARTY.txt`, the font and project licenses), runs `macdeployqt` with the QML folder so only the Qt modules the app imports are bundled, **fails if any GPL-only Qt module is in the bundle** (the list in the script mirrors [Qt Desktop](./qt-desktop.md#licensing)), signs it ad hoc, and starts the bundled binary offscreen to run the scripted session (`SELFTEST OK`). The build takes about 5 minutes the first time. The bundle is signed ad hoc, so it runs on the machine that built it; distributing it needs a Developer ID signature and notarization, which the script does not do. There are no Windows or Linux packaging scripts.
+`QMAKE="$(brew --prefix qt)/bin/qmake" scripts/package-macos.sh` builds the release binary, assembles `dist/OpenDesigner.app` (Info.plist, an icon made from `assets/app-icon.png`, `THIRD_PARTY.txt`, the font and project licenses), runs `macdeployqt` with the QML folder so only the Qt modules the app imports are bundled, **fails if any GPL-only Qt module is in the bundle** (the list in the script mirrors [Qt Desktop](./qt-desktop.md#licensing)), signs it ad hoc, and starts the bundled binary offscreen to run the scripted session (`SELFTEST OK`). The build takes about 5 minutes the first time. The bundle is signed ad hoc, so it runs on the machine that built it; distributing it needs a Developer ID signature and notarization, which the script does not do. There are no Windows or Linux packaging scripts.
 
 ## Testing
 
@@ -62,7 +62,7 @@ Run the editor offscreen, the way the test does: `QT_QPA_PLATFORM=offscreen targ
 opendesigner/
 ├── AGENTS.md  CHANGELOG.md  README.md  CONTRIBUTING.md  SECURITY.md  LICENSE
 ├── Cargo.toml  Cargo.lock  deny.toml  clippy.toml  rustfmt.toml  rust-toolchain.toml
-├── assets/logo.svg          # app logo and brand source (copied into the QML module at build time)
+├── assets/                  # logo.svg (mark, copied into the QML module at build time), app-icon.svg/.png (tile icon)
 ├── crates/
 │   ├── core/                # model, operations, history, project I/O, annotations, geometry, views
 │   ├── render/              # CPU rasterizer and PNG export
