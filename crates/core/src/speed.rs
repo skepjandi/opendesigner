@@ -12,9 +12,10 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::ease::Ease;
 use crate::error::OpError;
 use crate::limits::finite_in;
-use crate::video::{Clip, Ease, MAX_CLIP_MS};
+use crate::video::{Clip, MAX_CLIP_MS};
 
 pub const MIN_SPEED: f64 = 0.25;
 pub const MAX_SPEED: f64 = 4.0;

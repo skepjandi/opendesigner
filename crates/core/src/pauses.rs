@@ -6,11 +6,12 @@
 //! here is only the clip operations, so the cut is one transaction: attributed, checkpointed and
 //! undone in one step. Overlays, captions and sound tracks sit at absolute times and do not move.
 
+use crate::ease::Ease;
 use crate::error::OpError;
 use crate::model::NodeId;
 use crate::ops::Operation;
 use crate::video::{
-    Clip, ClipProperty, ClipSource, Ease, Footage, MAX_CLIP_MS, MIN_CLIP_MS, Motion, Video,
+    Clip, ClipProperty, ClipSource, Footage, MAX_CLIP_MS, MIN_CLIP_MS, Motion, Video,
 };
 
 /// A stretch of a media file, in milliseconds from its start.

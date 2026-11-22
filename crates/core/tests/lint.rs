@@ -617,3 +617,86 @@ fn a_scene_where_only_text_and_rectangles_move_is_flagged() {
     fade(&mut f, &video, &moon);
     assert!(!codes(&run(&f.doc())).contains(&"OD091"));
 }
+
+/// The tokens of one locked palette: the deep-space one, in the names the style packs use.
+fn palette_tokens() -> Vec<Value> {
+    [
+        ("bg", "#0d1226"),
+        ("surface", "#161d3a"),
+        ("fg", "#eef2ff"),
+        ("muted", "#8fa0c8"),
+        ("border", "#26325c"),
+        ("accent", "#ffb454"),
+        ("accent_2", "#f2e2d4"),
+        ("shadow", "#05060d"),
+    ]
+    .into_iter()
+    .map(|(name, value)| json!({"op": "set_token", "name": name, "value": value}))
+    .chain([json!({"op": "set_token", "name": "palette_locked", "value": "#000000"})])
+    .collect()
+}
+
+#[test]
+fn od092_a_locked_palette_flags_a_colour_that_is_not_in_it() {
+    let mut f = Fixture::new();
+    f.apply(json!(palette_tokens()));
+    let root = f.root.clone();
+    let frame = f.create(
+        &root,
+        json!({"kind": "frame", "name": "F", "width": 1000, "height": 1000, "fill": "{bg}"}),
+    );
+    let card = f.create(
+        &frame,
+        json!({"kind": "rect", "name": "Card", "x": 40.0, "y": 40.0, "width": 400.0,
+               "height": 200.0, "fill": "{surface}", "corner_radius": 12}),
+    );
+    let title = f.create(
+        &frame,
+        json!({"kind": "text", "name": "Title", "x": 60.0, "y": 60.0, "width": 360.0,
+               "height": 80.0, "text": "Locked", "font_size": 48, "fill": "{fg}"}),
+    );
+    let line = f.create(
+        &frame,
+        json!({"kind": "rect", "name": "Line", "x": 40.0, "y": 300.0, "width": 400.0,
+               "height": 4.0, "fill": "#26325c"}),
+    );
+    let found = run(&f.doc());
+    assert!(!codes(&found).contains(&"OD092"), "{found:?}");
+
+    let stray = f.create(
+        &frame,
+        json!({"kind": "ellipse", "name": "Stray", "x": 600.0, "y": 600.0, "width": 120.0,
+               "height": 120.0, "fill": "#ff00ff"}),
+    );
+    let found = run(&f.doc());
+    assert!(has(&found, "OD092", &stray), "{found:?}");
+    let finding = found.iter().find(|x| x.code == "OD092").unwrap();
+    assert_eq!(finding.severity, Severity::Warn);
+    assert_eq!(finding.frame.as_ref(), Some(&frame));
+    assert!(finding.message.contains("#ff00ff"), "{}", finding.message);
+    assert!(finding.hint.contains("muted"), "{}", finding.hint);
+    for node in [card, title, line] {
+        assert!(
+            !has(&found, "OD092", &node),
+            "{node} should be in the palette"
+        );
+    }
+}
+
+#[test]
+fn od092_is_off_until_the_palette_is_locked() {
+    let mut f = Fixture::new();
+    let root = f.root.clone();
+    let frame = f.create(
+        &root,
+        json!({"kind": "frame", "name": "F", "width": 1000, "height": 1000, "fill": "#ffffff"}),
+    );
+    f.create(
+        &frame,
+        json!({"kind": "rect", "name": "Stray", "x": 10.0, "y": 10.0, "width": 100.0,
+               "height": 100.0, "fill": "#ff00ff"}),
+    );
+    assert!(!codes(&run(&f.doc())).contains(&"OD092"));
+    f.apply(json!(palette_tokens()));
+    assert!(codes(&run(&f.doc())).contains(&"OD092"));
+}

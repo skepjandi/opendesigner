@@ -11,13 +11,14 @@ use std::collections::{BTreeMap, HashMap};
 
 use serde::{Deserialize, Serialize};
 
+use crate::ease::Ease;
 use crate::error::OpError;
 use crate::grade::GradeParam;
 use crate::limits::finite_in;
 use crate::model::{Document, Node, NodeId, NodeKind};
 use crate::ops::{AppliedOp, Operation, Property, set_property};
 use crate::transform::Camera;
-use crate::video::{Ease, MAX_VIDEO_MS, Video};
+use crate::video::{MAX_VIDEO_MS, Video};
 
 /// Animations per video, and keys per animation.
 pub const MAX_ANIMATIONS: usize = 2_000;
@@ -390,7 +391,7 @@ impl Animation {
         let i = self.keys.partition_point(|k| (k.at_ms as f64) <= time_ms);
         let (a, b) = (self.keys[i - 1], self.keys[i]);
         let span = (b.at_ms - a.at_ms) as f64;
-        let p = b.ease.apply((time_ms - a.at_ms as f64) / span);
+        let p = b.ease.apply_in((time_ms - a.at_ms as f64) / span, span);
         let (lo, hi) = self.prop.range();
         if self.prop == AnimProp::FillColor {
             return Some(crate::paint::Rgba::mix_packed(a.value, b.value, p));

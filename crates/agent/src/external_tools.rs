@@ -103,7 +103,7 @@ pub fn definitions() -> Vec<Value> {
             ),
             json!({
                 "file": {"type": "string", "description": "media/<name> of a png, jpg or webp."},
-                "model": {"type": "string", "description": "A rembg model name such as u2net, isnet-general-use or birefnet-general (the user's rembg may download it the first time). Default: rembg's own."},
+                "model": {"type": "string", "description": "A rembg model name such as u2net, isnet-general-use or birefnet-general (the user's rembg may download it the first time). Default: rembg's own. Model weights have their own licences and some (for example bria-rmbg) are non-commercial: when the project is commercial, name isnet-general-use or u2net."},
                 "mask_only": {"type": "boolean", "description": "Write only the mask."},
                 "timeout_s": {"type": "integer", "minimum": 10, "maximum": MAX_CUTOUT_S, "description": "Stop the program after this long (default 180)."}
             }),

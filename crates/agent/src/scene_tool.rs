@@ -12,14 +12,18 @@ use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
 use crate::scene_motion::{
-    CameraPose, Metric, Named, Origin, Pose, Side, Spec, Track, camera_tracks, follow, grid_delays,
-    node_tracks, orbit, resample, stagger_delays,
+    CameraPose, Named, Pose, Side, Spec, Track, camera_tracks, follow, node_tracks, orbit, resample,
 };
-use crate::tools::{ApplyArgs, CallCtx, Output, ToolError, apply_ops, node_id};
+use crate::tools::{ApplyArgs, CallCtx, Content, Output, ToolError, apply_ops, node_id};
+
+pub mod distribution;
+
+use distribution::{FromArg, StaggerArgs};
 
 const PATH_MOVE: &str = "animate_along_path";
 const STAGGER: &str = "stagger";
 const MAX_STAGGERED: usize = 60;
+const DEFAULT_STEP_MS: f64 = 120.0;
 const MIN_MS: u64 = 100;
 const MAX_MS: u64 = 600_000;
 
@@ -67,9 +71,9 @@ pub fn description() -> &'static str {
      `amount` in document units), camera_drift (slow loop), camera_shake (decays), camera_whip \
      (fast pan, `direction`), camera_burst (a kick that is fastest on its first frame, decays over about nine frames with power4_out and then holds; `direction`, `amount`, `start_ms`). animate_along_path: the `path` node's curve is sampled into x/y keys (and, \
      with `orient`, rotation) so `node` follows it over the time range with `ease`. stagger: apply \
-     the move named in `of` to every id in `nodes`, `step_ms` apart, starting `from` first|last| \
-     center|edges|random (seeded); with `columns` the nodes are a grid read row by row and each is delayed by its distance (`metric` manhattan or euclid, default euclid; `step_ms` per unit) from the start cell: `start_index` (an index into `nodes`) or the cell `from` names. `intensity` scales how far a move goes (1 as designed), `repeat` is \
-     once|loop|pingpong, `ease` overrides the move's own."
+     the move named in `of` to every id in `nodes`, `step_ms` apart (default 120), starting `from` first|last| \
+     center|edges|random (seeded); with `columns` the nodes are a grid read row by row and each is delayed by its distance (`metric` manhattan, euclid or chebyshev; `step_ms` per unit) from the start cell: `start_index` (an index into `nodes`) or the cell `from` names. A `stagger` object adds more: each_ms, range [near, far] (a value stagger: each node's intensity is multiplied by its value), from as an index or {point}, grid [columns, rows], axis x|y, an eased distribution, reversed, start_ms, seeded jitter_ms, and spatial (distances between the nodes' real centres). `intensity` scales how far a move goes (1 as designed), `repeat` is \
+     once|loop|pingpong, `ease` overrides the move's own; a tuned spring `ease` on an entrance stretches duration_ms to the time the spring needs to come to rest (the result says so)."
 }
 
 /// The arguments the scene moves add to `animate_preset`.
@@ -92,8 +96,9 @@ pub fn extra_properties() -> Map<String, Value> {
         "step_ms": {"type": "integer", "minimum": 0, "maximum": 5000, "description": "stagger: delay between one node and the next."},
         "from": {"type": "string", "enum": ["first", "last", "center", "edges", "random"], "description": "stagger: which node goes first (edges: both ends together, then inward; in a grid, the outer ring first)."},
         "columns": {"type": "integer", "minimum": 1, "maximum": MAX_STAGGERED, "description": "stagger: lay the nodes out as a grid this many columns wide, row by row, and delay by distance from the start cell."},
-        "metric": {"type": "string", "enum": ["manhattan", "euclid"], "description": "stagger with columns: how distance is measured (default euclid)."},
-        "start_index": {"type": "integer", "minimum": 0, "maximum": MAX_STAGGERED - 1, "description": "stagger with columns: index in nodes of the cell the wave starts from (overrides from)."},
+        "metric": {"type": "string", "enum": ["manhattan", "euclid", "chebyshev"], "description": "stagger with columns: how distance is measured (default euclid)."},
+        "start_index": {"type": "integer", "minimum": 0, "maximum": MAX_STAGGERED - 1, "description": "stagger: index in nodes of the node the wave starts from (overrides from)."},
+        "stagger": distribution::schema(),
     });
     props.as_object().cloned().unwrap_or_default()
 }
@@ -147,6 +152,8 @@ pub struct SceneArgs {
     #[serde(default)]
     start_index: Option<usize>,
     #[serde(default)]
+    stagger: Option<StaggerArgs>,
+    #[serde(default)]
     turn: Option<String>,
     #[serde(default)]
     summary: Option<String>,
@@ -160,14 +167,75 @@ pub fn animate(ctx: &mut CallCtx, a: SceneArgs) -> Result<Output, ToolError> {
             a.preset
         )));
     }
-    apply_ops(
+    let note = stretch_note(&a);
+    let out = apply_ops(
         ctx,
         ApplyArgs {
             ops,
             turn: a.turn,
             summary: a.summary,
         },
-    )
+    )?;
+    Ok(match note {
+        Some(note) => merge_output(out, json!({"note": note})),
+        None => out,
+    })
+}
+
+/// `out` with the fields of the object `extra` added to its JSON.
+pub(crate) fn merge_output(out: Output, extra: Value) -> Output {
+    let mut body = match out.content.first() {
+        Some(Content::Text(t)) => serde_json::from_str::<Value>(t).unwrap_or(Value::Null),
+        _ => Value::Null,
+    };
+    if let (Some(into), Some(from)) = (body.as_object_mut(), extra.as_object()) {
+        into.extend(from.clone());
+    }
+    Output::json(&body)
+}
+
+/// How long a move really runs.
+pub struct Timing {
+    pub duration_ms: u64,
+    /// The duration asked for, when a spring's rest time made it longer.
+    pub stretched_from: Option<u64>,
+}
+
+/// The duration of `named`: the one asked for, or its own. A tuned spring on an entrance is read
+/// over the whole move, so the move lasts at least as long as the spring takes to come to rest.
+/// `None` when the move has no duration of its own and none was asked for.
+pub fn timing(named: Option<Named>, asked: Option<u64>, ease: Option<Ease>) -> Option<Timing> {
+    let wanted = asked.or_else(|| named.map(Named::default_duration))?;
+    let rest = named
+        .filter(|n| n.spans_ease())
+        .and(ease)
+        .and_then(Ease::natural_ms)
+        .map(u64::from);
+    Some(match rest {
+        Some(rest) if rest > wanted => Timing {
+            duration_ms: rest.min(MAX_MS),
+            stretched_from: Some(wanted),
+        },
+        _ => Timing {
+            duration_ms: wanted,
+            stretched_from: None,
+        },
+    })
+}
+
+fn stretch_note(a: &SceneArgs) -> Option<String> {
+    let name = if a.preset == STAGGER {
+        a.of.as_deref()?
+    } else {
+        &a.preset
+    };
+    let t = timing(Named::parse(name), a.duration_ms, a.ease)?;
+    t.stretched_from.map(|from| {
+        format!(
+            "duration_ms {from} was stretched to {} so the spring ease can come to rest",
+            t.duration_ms
+        )
+    })
 }
 
 /// The `animate` operations a request amounts to.
@@ -208,11 +276,9 @@ struct Request<'a> {
 
 impl Request<'_> {
     fn spec(&self, named: Option<Named>, start_ms: u64, seed: u64) -> Result<Spec, ToolError> {
-        let duration = self
-            .a
-            .duration_ms
-            .or_else(|| named.map(Named::default_duration))
-            .ok_or_else(|| ToolError("duration_ms is needed for this move".into()))?;
+        let duration = timing(named, self.a.duration_ms, self.a.ease)
+            .ok_or_else(|| ToolError("duration_ms is needed for this move".into()))?
+            .duration_ms;
         if !(MIN_MS..=MAX_MS).contains(&duration) || start_ms + duration > MAX_VIDEO_MS {
             return Err(ToolError(format!(
                 "start_ms {start_ms} and duration_ms {duration} must give a move of 100 to {MAX_MS} ms that ends by {MAX_VIDEO_MS} ms"
@@ -299,63 +365,46 @@ impl Request<'_> {
         let of = self.a.of.as_deref().and_then(Named::parse).ok_or_else(|| {
             ToolError("stagger needs `of`: the name of a move such as pop_in".into())
         })?;
-        if self.a.nodes.is_empty() || self.a.nodes.len() > MAX_STAGGERED {
-            return Err(ToolError(format!(
-                "stagger needs `nodes`: 1 to {MAX_STAGGERED} ids"
-            )));
-        }
-        let from = match self.a.from.as_deref() {
-            None => Origin::First,
-            Some(f) => Origin::parse(f).ok_or_else(|| {
-                ToolError(format!(
-                    "from {f:?} is not first, last, center, edges or random"
-                ))
-            })?,
-        };
         let seed = self.a.seed.unwrap_or(0);
-        let delays = self.stagger_delays(from, seed)?;
+        let spread =
+            self.stagger_args()
+                .distribute(self.doc, &self.a.nodes, seed, DEFAULT_STEP_MS)?;
         let mut ops = Vec::new();
-        for (i, (id, delay)) in self.a.nodes.iter().zip(delays).enumerate() {
-            let each = seed.wrapping_add(i as u64 * 7919);
-            ops.extend(self.named(of, self.a.start_ms + delay, Some(id), each)?);
+        for (i, (id, offset)) in self.a.nodes.iter().zip(&spread.offsets_ms).enumerate() {
+            let value = spread.values.as_ref().map_or(1.0, |v| v[i]);
+            let intensity = self.intensity * value;
+            if !(MIN_STRENGTH..=MAX_STRENGTH).contains(&intensity) {
+                return Err(ToolError(format!(
+                    "the range gives node {i} a value of {value}, an intensity of {intensity}, outside {MIN_STRENGTH} to {MAX_STRENGTH}"
+                )));
+            }
+            let each = Request {
+                doc: self.doc,
+                video: self.video,
+                a: self.a,
+                intensity,
+            };
+            let move_seed = seed.wrapping_add(i as u64 * 7919);
+            ops.extend(each.named(of, self.a.start_ms + offset, Some(id), move_seed)?);
         }
         Ok(ops)
     }
 
-    fn stagger_delays(&self, from: Origin, seed: u64) -> Result<Vec<u64>, ToolError> {
-        let (count, step) = (self.a.nodes.len(), self.a.step_ms.unwrap_or(120));
-        let Some(columns) = self.a.columns else {
-            if self.a.metric.is_some() || self.a.start_index.is_some() {
-                return Err(ToolError(
-                    "metric and start_index need `columns` (a grid stagger)".into(),
-                ));
-            }
-            return Ok(stagger_delays(count, step, from, seed));
+    /// The `stagger` object over the older top-level arguments (`step_ms`, `from`, `columns`,
+    /// `metric`, `start_index`).
+    fn stagger_args(&self) -> StaggerArgs {
+        let a = self.a;
+        let older = StaggerArgs {
+            each_ms: a.step_ms.map(|ms| ms as f64),
+            from: a
+                .start_index
+                .map(FromArg::Index)
+                .or_else(|| a.from.clone().map(FromArg::Name)),
+            columns: a.columns,
+            metric: a.metric.clone(),
+            ..StaggerArgs::default()
         };
-        if columns == 0 || columns > count {
-            return Err(ToolError(format!(
-                "columns {columns} is not from 1 to the {count} nodes"
-            )));
-        }
-        let metric = match self.a.metric.as_deref() {
-            None => Metric::Euclid,
-            Some(m) => Metric::parse(m)
-                .ok_or_else(|| ToolError(format!("metric {m:?} is not manhattan or euclid")))?,
-        };
-        if self.a.start_index.is_some_and(|s| s >= count) {
-            return Err(ToolError(format!(
-                "start_index is not an index into the {count} nodes"
-            )));
-        }
-        Ok(grid_delays(
-            count,
-            columns,
-            step,
-            from,
-            self.a.start_index,
-            metric,
-            seed,
-        ))
+        a.stagger.clone().unwrap_or_default().over(older)
     }
 
     fn along_path(&self) -> Result<Vec<Operation>, ToolError> {

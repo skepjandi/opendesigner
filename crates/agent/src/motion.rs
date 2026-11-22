@@ -28,18 +28,6 @@ fn names<T: serde::Serialize>(all: &[T]) -> Vec<Value> {
 
 pub fn definitions() -> Vec<Value> {
     let id = |d: &str| json!({"type": "string", "description": d});
-    let eases = [
-        Ease::Linear,
-        Ease::EaseIn,
-        Ease::EaseOut,
-        Ease::EaseInOut,
-        Ease::Back,
-        Ease::Spring,
-        Ease::EaseInOutCubic,
-        Ease::EaseOutBack,
-        Ease::Elastic,
-        Ease::Bounce,
-    ];
     let preset_names: Vec<Value> = names(&Preset::ALL)
         .into_iter()
         .chain(crate::scene_tool::names().into_iter().map(Value::from))
@@ -51,7 +39,7 @@ pub fn definitions() -> Vec<Value> {
         "start_ms": {"type": "integer", "minimum": 0},
         "duration_ms": {"type": "integer", "minimum": 100, "maximum": 600000, "description": "Needed by the older moves; a scene move has its own default (one cycle, for a loop)."},
         "strength": {"type": "number", "minimum": animation::MIN_STRENGTH, "maximum": animation::MAX_STRENGTH, "description": "How far the move goes; 1 is as designed."},
-        "ease": {"type": "string", "enum": names(&eases), "description": "Overrides the preset's own ease."},
+        "ease": {"type": "string", "description": format!("Overrides the preset's own ease: one of {} or a tuned one: {}.", Ease::NAMES.join(", "), od_core::ease::GRAMMAR)},
         "turn": id("Groups related calls into one turn; omit and each call is its own turn."),
         "summary": id("One line, in the user's terms, naming what this turn does.")
     });

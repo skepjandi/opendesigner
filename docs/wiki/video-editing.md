@@ -55,9 +55,9 @@ Nodes turn, scale, blur, cast shadows and clip, tracks repeat, and a video has a
 
 ## Scene motion
 
-> **Status: Built** (`crates/agent/src/scene_motion.rs`, `scene_tool.rs`, 2026-11-24). `animate_preset` takes named moves that work on any node (not only 3D devices) and on the video's camera. They are pure functions from the pose a node has where the move starts to ordinary keyframes, so a move can be read, edited and undone like any other `animate`: one tool call is one undoable step, keys inside the move's time range replace the old ones and the rest are kept, so moves chain. The same builders give the scenery blocks their loops.
+> **Status: Built** (`crates/agent/src/scene_motion.rs`, `scene_tool.rs`, `sequence.rs`, 2026-11-28). `animate_preset` takes named moves that work on any node (not only 3D devices) and on the video's camera. They are pure functions from the pose a node has where the move starts to ordinary keyframes, so a move can be read, edited and undone like any other `animate`: one tool call is one undoable step, keys inside the move's time range replace the old ones and the rest are kept, so moves chain. The same builders give the scenery blocks their loops. `sequence` places several moves against each other with a position grammar, and `spring_to` sends one property to a value on a spring.
 
-Arguments: `video`, `node` (not for camera moves), `preset`, `start_ms`, `duration_ms` (a scene move has a default; the older moves need it), `ease`, `intensity` (the older `strength`, 0.1 to 4), `repeat` (`once|loop|pingpong`), `seed`, and per move `direction`, `amount`, `center_x`/`center_y`/`radius`, `path`/`orient`, `of`/`nodes`/`step_ms`/`from`.
+Arguments: `video`, `node` (not for camera moves), `preset`, `start_ms`, `duration_ms` (a scene move has a default; the older moves need it), `ease`, `intensity` (the older `strength`, 0.1 to 4), `repeat` (`once|loop|pingpong`), `seed`, and per move `direction`, `amount`, `center_x`/`center_y`/`radius`, `path`/`orient`, `of`/`nodes`/`step_ms`/`from`, and a `stagger` object.
 
 | Move | What it writes |
 |------|----------------|
@@ -78,13 +78,54 @@ Arguments: `video`, `node` (not for camera moves), `preset`, `start_ms`, `durati
 | `draw_on` | `trim_end` 0 to 1 (the node needs a stroke) |
 | `orbit` | x and y around `center_x`/`center_y` (default a point one radius to the left), sampled about every 33 ms, loops |
 | `animate_along_path` | x and y (and with `orient` rotation) sampled from a `path` node's flattened curve at equal arc length, shaped by `ease`; a two-point path with a plain ease is two keys |
-| `stagger` | any other move on every id of `nodes`, `step_ms` apart, `from` first, last, center, edges (both ends together, then inward) or random (seeded). With `columns` the nodes are a grid read row by row and each is delayed by its distance from the start cell: `start_index` (an index into `nodes`) or the cell `from` names (first is top-left, last bottom-right, center the middle, edges the outer ring first); `metric` is `manhattan` (a diamond wave) or `euclid` (round, the default); one unit of distance is `step_ms` (`scene_motion/grid.rs`) |
+| `stagger` | any other move on every id of `nodes`, `step_ms` apart, `from` first, last, center, edges (both ends together, then inward) or random (seeded). With `columns` the nodes are a grid read row by row and each is delayed by its distance from the start cell: `start_index` (an index into `nodes`) or the cell `from` names (first is top-left, last bottom-right, center the middle, edges the outer ring first); `metric` is `manhattan` (a diamond wave), `euclid` (round, the default) or `chebyshev`; one unit of distance is `step_ms`. A `stagger` object adds value staggers, an eased or reversed distribution, a seeded jitter and real node centres (see [Stagger v2](#stagger-v2)) (`scene_motion/stagger.rs`) |
 | `camera_push_in`, `camera_pull_back` | `camera_zoom` 20 percent (pull back from rest starts 20 percent in) |
 | `camera_pan` | `camera_x` or `camera_y` by `amount` (default an eighth of the video size) toward `direction` |
 | `camera_drift` | slow looping `camera_x`, `camera_y`, `camera_rotation` |
 | `camera_shake` | decaying `camera_x`, `camera_y`, `camera_rotation` |
 | `camera_whip` | a fast pan with `ease_in_out_cubic` and a tilt |
 | `camera_burst` | a camera kick along `direction` by `amount` (default a sixth of the stage, scaled by `intensity`): `camera_x` or `camera_y` keys from the start to the new place with `power4_out`, so the speed peaks on the first frame and fades over nine frames of the video, then a key holds it until the move's end (default 600 ms) (`scene_motion/burst.rs`) |
+
+### Sequencing: the position grammar
+
+`sequence` (`crates/agent/src/sequence.rs`) places a list of moves against each other in one turn and one undo step. Each item names a `preset`, the `node` or `nodes` it moves, and where it starts (`at`):
+
+| `at` | meaning |
+|---|---|
+| a number (`250`) | that many milliseconds from the start of the video |
+| nothing | after the longest step so far |
+| `+=100`, `-=100`, `*=2` | that much more or less than the end of the timeline (`*=2` is half of it twice over) |
+| `<` | the end of the step added last (0 on an empty timeline) |
+| `<<` | the start of the step added last |
+| `<+=50`, `<<-=100`, `<*=2` | that much more or less than the end or the start of the step before |
+| `intro`, `intro+=200` | where a step named `intro` was set |
+
+An item may name itself with `label` (later items place against it) and spread its own nodes with a `stagger` object. `fit_to_ms` scales the whole sequence to that length before anything is written. The result echoes the resolved table of `{label, node, preset, start_ms, end_ms}` and the labels. A label that does not exist yet, an empty `at` and a start before zero are refused: a typo must not quietly become a number.
+
+### Stagger v2
+
+`animate_preset` with `preset: stagger` (and every `sequence` item) take a `stagger` object (`crates/agent/src/scene_tool/distribution.rs`, `scene_motion/stagger.rs`):
+
+| field | meaning |
+|---|---|
+| `each_ms` | the delay per unit of distance between neighbours (the older `step_ms`; default 120) |
+| `range` | a value stagger: `[near, far]` spreads those two values over the distances, and each node's intensity is multiplied by its value (a scale that falls off from the middle) |
+| `from` | `first`, `last`, `center`, `edges`, `random` (seeded), an index into the nodes, or `{"point": [fx, fy]}` as fractions across the group |
+| `grid` | `[columns, rows]`: the nodes are a grid read row by row (the older `columns`) |
+| `metric` | `euclid` (the default), `manhattan` or `chebyshev` |
+| `axis` | `x` or `y`: only the distance along that axis counts, signed |
+| `ease` | shapes the distribution (`out_*` front-loads the wave) |
+| `reversed` | the farthest goes first |
+| `start_ms` | added to every delay |
+| `jitter_ms` | a seeded random change per node: one size, or `[size at the first, size at the last]` |
+| `seed` | seeds the random order and the jitter (the move's own seed by default) |
+| `spatial` | distances are measured between the nodes' real centres, in units of the nearest pair |
+
+A delay that would fall below zero (an `axis` reading, or a jitter) shifts every delay so the earliest is 0. The older top-level arguments (`step_ms`, `from`, `columns`, `metric`, `start_index`) still work and are the base the `stagger` object is laid over.
+
+### Springs
+
+`spring_to` sends one property of a node (or of the video's camera) to a value on a spring: the keys run from where the property is now to the value, over the time the spring needs to come to rest (`settle_ms`), and the result says when it looks done (`perceived_ms`, the `visual_ms` asked for) and when it has really stopped, so the next beat can be placed after it. A tuned spring ease (`spring(visual_ms,bounce)`, or the presets `spring_snappy` 250/0, `spring_smooth` 400/0, `spring_playful` 450/0.3, `spring_bouncy` 500/0.5, `spring_heavy` 800/0.1) on an entrance stretches the move to the time the spring needs to rest; the result says by how much (`crates/core/src/ease.rs`).
 
 From the command line: `opendesigner animate <project> --video <id> [--node <id>] --preset <move> [--start-ms --duration-ms --intensity --ease --repeat --seed --direction --amount --center-x --center-y --radius --path --orient --of --nodes a,b,c --step-ms --from --columns --metric --start-index]`.
 
@@ -146,7 +187,8 @@ An agent checks its own animation with `review_video` (numbers: flash safety, be
 
 ## Time feel and loudness
 
-- **More eases** (`Ease` in `crates/core/src/video.rs`, snake_case names in every `ease` field and tool argument). `power2_in|out|in_out` and `power4_in|out|in_out` (t raised to 2 or 4; `power4_out` is the quick-start, long-settle curve), `expo_in|out|in_out`, `circ_in|out|in_out` and `sine_in|out|in_out` (the gentlest). The older names keep their curves. **Steps** hold a value instead of gliding: `steps_2`, `steps_3`, `steps_4`, `steps_6`, `steps_8` and `steps_12` split the stretch between two keys into that many equal pieces and show one evenly spaced pose in each (first piece the start value, last the end value), so a 1 s move with `steps_4` jumps four times, for the stepped feel of drawn animation. The count is part of the name (a fixed set rather than a parameter, so an ease stays a plain string and old readers fail on an unknown name instead of misreading a number). Tests pin 0 and 1 at the ends, monotonicity and the midpoints.
+- **More eases** (`Ease` in `crates/core/src/ease.rs`, snake_case names in every `ease` field and tool argument). `power2_in|out|in_out` and `power4_in|out|in_out` (t raised to 2 or 4; `power4_out` is the quick-start, long-settle curve), `expo_in|out|in_out`, `circ_in|out|in_out` and `sine_in|out|in_out` (the gentlest). The older names keep their curves. **Steps** hold a value instead of gliding: `steps_2`, `steps_3`, `steps_4`, `steps_6`, `steps_8` and `steps_12` split the stretch between two keys into that many equal pieces and show one evenly spaced pose in each (first piece the start value, last the end value), so a 1 s move with `steps_4` jumps four times, for the stepped feel of drawn animation. Tests pin 0 and 1 at the ends, monotonicity and the midpoints.
+- **Tunable eases** (`od_core::ease`, 2026-11-22). An ease is still one string in a file or a tool argument, so every older project loads unchanged; the tunable forms are a name with numbers, kept in thousandths so `Ease` stays `Copy` and a file never holds a float that prints differently the next time it is saved (`Ease::to_string` writes the shortest form, `"spring(450,0.3)"`, and reads back the same). They are `cubic(x1,y1,x2,y2)` (the CSS `cubic-bezier`; x from 0 to 1, y from -2 to 3, solved by Newton's method with a bisection fallback), `back_in|back_out|back_in_out(overshoot)` (0 to 5; 1.70158 is the classic `back`), `elastic_out|elastic_in(amplitude,period)`, `power_in|power_out|power_in_out|power_out_in(exponent)` (1 to 8), `bounce_in`, `bounce_in_out`, `steps(n)` (2 to 64; the same poses as `steps_N`) and `anticipate` (pulls back a few percent first, then goes; the curve Motion calls `anticipate`, rebuilt from its Bezier). **Springs** are `spring(visual_ms,bounce)`: a damped spring with no starting speed whose move looks done after `visual_ms` (about 97 percent with no bounce) and that rings by `bounce` (0 none, 0.3 playful, 0.5 bouncy, negative slow and heavy, from -0.9 to 0.95). The damping ratio is `1 - bounce` (or `1 / (1 + bounce)` below zero) and the frequency is `2π / (1.2 · visual_ms)`; the position is the closed-form step response in its under-, critically and over-damped forms. A spring is the one ease with a length of its own: `Ease::apply_in(t, span_ms)` reads it over the stretch between two keys (`Animation::value_at` does), and what the spring has left at the end of a short stretch is spread over it so the value always lands on its key; `Ease::natural_ms` and `Spring::settle_ms` (the last moment it is more than 0.05 percent off) say how long a stretch must be for the swings to show (2 to 3 times `visual_ms`). The presets `spring_snappy` (250, 0), `spring_smooth` (400, 0), `spring_playful` (450, 0.3), `spring_bouncy` (500, 0.5) and `spring_heavy` (800, 0.1) are read-only names for the tuned form. The older `spring` keeps its fixed curve. Anything else is refused with the list of what is allowed (`od_core::ease::GRAMMAR`); `animate_preset`'s `ease` argument and `apply_ops animate` take all of them. Ideas from Anime.js (MIT) and Motion (MIT); the formulas are rebuilt from the published algorithms, no code is copied.
 - **Hold frames ("on twos").** `Video.hold_frames` (1 to 6, default 1, left out of the file at 1; `set_video` prop `hold_frames`) makes every drawing last that many frames: the frames of a group of `hold_frames` all show the picture of the group's first frame (`Video::held_ms` maps a time to the start time of its group, using `timebase::frame_containing`, so a frame's own start time maps to its group's start and asking again changes nothing). `VideoRenderer::frame_at` and `signature` apply it first, so the editor's single frame, the preview and every worker of the parallel export agree and a held frame is a repeat the exporter and the preview cache already reuse; sound is not touched. With motion blur the blur is taken at the held moment. Pair it with `steps_*` eases for a hand-drawn rhythm.
 - **Loudness.** `export_video` takes `loudness` (-14 social, -16 podcast, -23 broadcast; none by default, which leaves the level as mixed), `opendesigner export-video --loudness -14`. `od_media::loudness` runs ffmpeg's `loudnorm` on the final mix in **two passes**: the first measures the mix (`print_format=json`, read back by `Measured::parse`), the second applies `loudnorm=I=<target>:TP=-1.5:LRA=11:measured_I=...:linear=true` from that measurement, which lands closer than the single dynamic pass; if the first pass prints nothing usable the second falls back to the single-pass filter, and a silent mix is left alone. The filter sits between `amix` and the final `apad` (`mix::filter_graph_with`), so it sees exactly the exported sound. A video without sound ignores the option. The window has no video export options panel yet, so only the tool and the command line expose it. Tests build the filter strings and, when `ffmpeg` is installed, measure the exported file's integrated loudness for tones at several levels within 1.5 LU of each target.
 

@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::http;
+use crate::sound_license::{self, Candidate, Imported, License};
 
 /// Where the API lives.
 pub const API_URL: &str = "https://freesound.org/apiv2";
@@ -27,10 +28,10 @@ pub const APPLY_URL: &str = "https://freesound.org/apiv2/apply/";
 pub const TOKEN_FILE: &str = "freesound/token";
 /// The most a search answer may take.
 const MAX_SEARCH_BYTES: u64 = 2 * 1024 * 1024;
-/// The most a preview may take.
-const MAX_AUDIO_BYTES: u64 = 32 * 1024 * 1024;
 /// How many sounds a search returns.
 const PAGE_SIZE: u32 = 15;
+/// The hosts a preview may come from: Freesound's own.
+const HOSTS: &[&str] = &["freesound.org"];
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -54,10 +55,8 @@ pub enum Error {
     NoSuchSound(u64),
     #[error("the sound {0} has no preview to download")]
     NoPreview(u64),
-    #[error("the preview of the sound {id} is on {host}, which is not Freesound")]
-    ForeignHost { id: u64, host: String },
-    #[error("the file name {0:?} is not a plain name")]
-    BadName(String),
+    #[error("{0}")]
+    Sound(#[from] sound_license::Error),
     #[error("{path}: {source}")]
     Io {
         path: String,
@@ -73,10 +72,7 @@ pub struct Sound {
     pub name: String,
     /// How long it lasts, in milliseconds.
     pub duration_ms: u64,
-    /// The license as it reads for a person: "CC0 1.0", "Attribution", ...
-    pub license: String,
-    /// Where that license is written, empty when Freesound named one we do not know.
-    pub license_url: String,
+    pub license: License,
     /// The uploader's name.
     pub author: String,
     /// The preview to download (an mp3, not the original recording).
@@ -86,43 +82,28 @@ pub struct Sound {
 }
 
 impl Sound {
-    /// The one line the user must show wherever the sound is used.
+    /// The line the user must show wherever the sound is used.
     pub fn attribution(&self) -> String {
-        format!(
-            "{} by {}, {}, {}",
-            self.name, self.author, self.license, self.source_url
-        )
+        sound_license::credit_line(&self.name, &self.author, &self.source_url, &self.license)
     }
-}
 
-/// What is written next to an imported sound: `media/<name>.freesound.json`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Sidecar {
-    pub id: u64,
-    pub title: String,
-    pub author: String,
-    pub license: String,
-    pub license_url: String,
-    pub source_url: String,
-}
-
-impl Sidecar {
-    /// The one line the user must show.
-    pub fn attribution(&self) -> String {
-        format!(
-            "{} by {}, {}, {}",
-            self.title, self.author, self.license, self.source_url
-        )
+    /// The sound as the tools list and import it.
+    pub fn candidate(&self) -> Candidate {
+        Candidate {
+            provider: "freesound",
+            id: self.id.to_string(),
+            title: self.name.clone(),
+            creator: self.author.clone(),
+            creator_url: format!("https://freesound.org/people/{}/", self.author),
+            duration_ms: self.duration_ms,
+            license: self.license.clone(),
+            attribution: self.attribution(),
+            download_url: self.preview_url.clone(),
+            landing_url: self.source_url.clone(),
+            origin: "freesound".to_string(),
+            quality: "preview",
+        }
     }
-}
-
-/// A sound in the project: the file, what it is and the line to show.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Imported {
-    /// `media/<name>.mp3`
-    pub file: String,
-    pub sidecar: String,
-    pub attribution: String,
 }
 
 /// The API address, which the tests may point elsewhere.
@@ -244,8 +225,14 @@ fn write_private(path: &Path, bytes: &[u8]) -> Result<(), Error> {
     })
 }
 
-/// Searches Freesound for sounds. `duration_max_ms` keeps only the short ones.
-pub fn search(query: &str, duration_max_ms: Option<u32>, page: u32) -> Result<Vec<Sound>, Error> {
+/// Searches Freesound for sounds. `duration_max_ms` keeps only the short ones. A commercial
+/// project sees only the sounds its licence clears; the second number is how many were hidden.
+pub fn search(
+    query: &str,
+    duration_max_ms: Option<u32>,
+    page: u32,
+    commercial: bool,
+) -> Result<(Vec<Sound>, usize), Error> {
     let token = token()?;
     let query = query.trim();
     if query.is_empty() {
@@ -267,7 +254,14 @@ pub fn search(query: &str, duration_max_ms: Option<u32>, page: u32) -> Result<Ve
     let body = get_json(&url)?;
     let answer: SearchAnswer =
         serde_json::from_str(&body).map_err(|e| Error::Malformed(e.to_string()))?;
-    Ok(answer.results.into_iter().map(Sound::from).collect())
+    let all: Vec<Sound> = answer.results.into_iter().map(Sound::from).collect();
+    let total = all.len();
+    let shown: Vec<Sound> = all
+        .into_iter()
+        .filter(|s| s.license.allowed(commercial).is_ok())
+        .collect();
+    let hidden = total - shown.len();
+    Ok((shown, hidden))
 }
 
 /// One sound, with everything the search may not have returned.
@@ -283,108 +277,28 @@ pub fn sound(id: u64) -> Result<Sound, Error> {
     Ok(Sound::from(raw))
 }
 
-/// Downloads the preview of a sound into the project's `media/` folder and writes the sidecar
-/// next to it. The file is never overwritten: a free name is found instead.
-pub fn import(project: &Path, id: u64, name: Option<&str>) -> Result<Imported, Error> {
+/// Downloads the preview of a sound into the project's `media/` folder and writes its licence
+/// sidecar next to it. The file is never overwritten: a free name is found instead. A sound the
+/// project's `commercial` setting does not clear is refused before anything is downloaded.
+pub fn import(
+    project: &Path,
+    id: u64,
+    name: Option<&str>,
+    commercial: bool,
+) -> Result<Imported, Error> {
     let sound = sound(id)?;
     if sound.preview_url.is_empty() {
         return Err(Error::NoPreview(id));
     }
-    // The preview must come from the same site as the API: no other host may be asked for it.
-    let preview = http::parse_url(&sound.preview_url)?;
-    let api = http::parse_url(&api_url())?;
-    if !api.same_site(&preview) {
-        return Err(Error::ForeignHost {
-            id,
-            host: preview.host.clone(),
-        });
-    }
-    let media = project.join("media");
-    std::fs::create_dir_all(&media).map_err(|e| Error::Io {
-        path: media.display().to_string(),
-        source: e,
-    })?;
-    let stem = match name {
-        Some(n) => clean_name(n)?,
-        None => clean_name(&sound.name).unwrap_or_else(|_| format!("sound-{}", sound.id)),
-    };
-    let preview = http::get(&sound.preview_url, MAX_AUDIO_BYTES)?;
-    if preview.status != 200 {
-        return Err(Error::Api {
-            status: preview.status,
-            detail: "the preview could not be downloaded".to_string(),
-        });
-    }
-    let bytes = preview.body;
-    if bytes.is_empty() {
-        return Err(Error::Malformed("the preview is empty".into()));
-    }
-    let file_name = free_stem(&media, &stem)?;
-    let path = media.join(format!("{file_name}.mp3"));
-    if let Err(e) = write_new(&path, &bytes) {
-        let _ = std::fs::remove_file(&path);
-        return Err(e);
-    }
-    let sidecar = Sidecar {
-        id: sound.id,
-        title: sound.name.clone(),
-        author: sound.author.clone(),
-        license: sound.license.clone(),
-        license_url: sound.license_url.clone(),
-        source_url: sound.source_url.clone(),
-    };
-    let sidecar_name = format!("{file_name}.freesound.json");
-    let sidecar_path = media.join(&sidecar_name);
-    let text =
-        serde_json::to_string_pretty(&sidecar).map_err(|e| Error::Malformed(e.to_string()))?;
-    if let Err(e) = write_new(&sidecar_path, text.as_bytes()) {
-        let _ = std::fs::remove_file(&path);
-        return Err(e);
-    }
-    Ok(Imported {
-        file: format!("media/{file_name}.mp3"),
-        sidecar: format!("media/{sidecar_name}"),
-        attribution: sidecar.attribution(),
-    })
-}
-
-/// The sounds already imported in this project, with the line to show for each.
-pub fn list_imported(project: &Path) -> Result<Vec<Imported>, Error> {
-    let media = project.join("media");
-    let entries = match std::fs::read_dir(&media) {
-        Ok(e) => e,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(e) => {
-            return Err(Error::Io {
-                path: media.display().to_string(),
-                source: e,
-            });
-        }
-    };
-    let mut out = Vec::new();
-    for entry in entries.flatten() {
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if !name.ends_with(".freesound.json") {
-            continue;
-        }
-        let path = entry.path();
-        let text = match std::fs::read_to_string(&path) {
-            Ok(t) => t,
-            Err(_) => continue,
-        };
-        let Ok(sidecar) = serde_json::from_str::<Sidecar>(&text) else {
-            continue;
-        };
-        // The sidecar sits next to the preview, which is always an mp3.
-        let audio = format!("{}.mp3", name.trim_end_matches(".freesound.json"));
-        out.push(Imported {
-            file: format!("media/{audio}"),
-            sidecar: format!("media/{name}"),
-            attribution: sidecar.attribution(),
-        });
-    }
-    out.sort_by(|a, b| a.file.cmp(&b.file));
-    Ok(out)
+    let allow = sound_license::Allowlist::new(HOSTS, std::env::var(URL_ENV).ok().as_deref());
+    Ok(sound_license::store(
+        project,
+        sound_license::Provider::Freesound,
+        &sound.candidate(),
+        &allow,
+        name,
+        commercial,
+    )?)
 }
 
 /// The API's answer to a search.
@@ -420,13 +334,11 @@ struct Previews {
 
 impl From<RawSound> for Sound {
     fn from(raw: RawSound) -> Sound {
-        let (license, license_url) = license_of(&raw.license);
         Sound {
             id: raw.id,
             name: raw.name,
             duration_ms: (raw.duration.max(0.0) * 1000.0).round() as u64,
-            license,
-            license_url,
+            license: License::from_name(&raw.license, ""),
             author: raw.username,
             preview_url: if raw.previews.hq.is_empty() {
                 raw.previews.lq
@@ -436,75 +348,6 @@ impl From<RawSound> for Sound {
             source_url: format!("https://freesound.org/s/{}/", raw.id),
         }
     }
-}
-
-/// The license as a person reads it, and where it is written.
-fn license_of(name: &str) -> (String, String) {
-    match name.trim() {
-        "Creative Commons 0" => (
-            "CC0 1.0".to_string(),
-            "https://creativecommons.org/publicdomain/zero/1.0/".to_string(),
-        ),
-        "Attribution" => (
-            "Attribution".to_string(),
-            "https://creativecommons.org/licenses/by/4.0/".to_string(),
-        ),
-        "Attribution NonCommercial" => (
-            "Attribution NonCommercial".to_string(),
-            "https://creativecommons.org/licenses/by-nc/4.0/".to_string(),
-        ),
-        other => (other.to_string(), String::new()),
-    }
-}
-
-/// A plain file name: letters, digits, space, `.`, `_` and `-`.
-fn clean_name(name: &str) -> Result<String, Error> {
-    let cleaned: String = name
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | ' ') {
-                c
-            } else {
-                '-'
-            }
-        })
-        .collect();
-    let trimmed = cleaned.trim_matches(['.', '-', ' ']).to_string();
-    if trimmed.is_empty() {
-        return Err(Error::BadName(name.to_string()));
-    }
-    Ok(trimmed.chars().take(60).collect())
-}
-
-/// A file name in `media/` that is not taken yet, for the sound and its sidecar both.
-fn free_stem(media: &Path, stem: &str) -> Result<String, Error> {
-    for n in 1.. {
-        let name = if n == 1 {
-            stem.to_string()
-        } else {
-            format!("{stem}-{n}")
-        };
-        if !media.join(format!("{name}.mp3")).exists()
-            && !media.join(format!("{name}.freesound.json")).exists()
-        {
-            return Ok(name);
-        }
-    }
-    Err(Error::BadName(stem.to_string()))
-}
-
-/// Writes a file that must not exist yet.
-fn write_new(path: &Path, bytes: &[u8]) -> Result<(), Error> {
-    let mut options = std::fs::OpenOptions::new();
-    options.write(true).create_new(true);
-    let mut file = options.open(path).map_err(|e| Error::Io {
-        path: path.display().to_string(),
-        source: e,
-    })?;
-    std::io::Write::write_all(&mut file, bytes).map_err(|e| Error::Io {
-        path: path.display().to_string(),
-        source: e,
-    })
 }
 
 /// Asks the API and hands back the answer's body.
@@ -546,50 +389,63 @@ mod tests {
 
     use super::*;
 
+    fn raw(license: &str) -> RawSound {
+        RawSound {
+            id: 42,
+            name: "Bell".into(),
+            duration: 1.5,
+            license: license.into(),
+            username: "Someone".into(),
+            previews: Previews {
+                hq: "https://cdn.freesound.org/previews/42_hq.mp3".into(),
+                lq: String::new(),
+            },
+        }
+    }
+
     #[test]
-    fn licenses_are_named_for_people() {
+    fn licenses_are_normalised_from_freesound_names_and_deed_addresses() {
         assert_eq!(
-            license_of("Creative Commons 0"),
-            (
-                "CC0 1.0".to_string(),
-                "https://creativecommons.org/publicdomain/zero/1.0/".to_string()
-            )
+            Sound::from(raw("Creative Commons 0")).license.spdx,
+            "CC0-1.0"
         );
-        assert_eq!(license_of("Attribution").0, "Attribution");
-        assert_eq!(license_of("Something else").1, "");
+        assert_eq!(Sound::from(raw("Attribution")).license.spdx, "CC-BY-4.0");
+        let nc = Sound::from(raw("Attribution NonCommercial")).license;
+        assert_eq!(nc.spdx, "CC-BY-NC-4.0");
+        assert!(!nc.commercial_ok);
+        let sampling = Sound::from(raw("Sampling+")).license;
+        assert!(!sampling.commercial_ok && sampling.derivatives_ok);
+        let by3 = Sound::from(raw("http://creativecommons.org/licenses/by/3.0/")).license;
+        assert_eq!(by3.spdx, "CC-BY-3.0");
+        assert!(Sound::from(raw("Something else")).license.spdx.is_empty());
     }
 
     #[test]
     fn a_sound_carries_its_attribution() {
-        let sound = Sound {
-            id: 42,
-            name: "Bell".into(),
-            duration_ms: 1000,
-            license: "CC0 1.0".into(),
-            license_url: String::new(),
-            author: "Someone".into(),
-            preview_url: String::new(),
-            source_url: "https://freesound.org/s/42/".into(),
-        };
+        let sound = Sound::from(raw("Creative Commons 0"));
+        assert_eq!(sound.duration_ms, 1500);
         assert_eq!(
             sound.attribution(),
-            "Bell by Someone, CC0 1.0, https://freesound.org/s/42/"
+            "\"Bell\" by Someone (https://freesound.org/s/42/), licensed under CC0 1.0 (https://creativecommons.org/publicdomain/zero/1.0/)"
         );
+        let candidate = sound.candidate();
+        assert_eq!(candidate.id, "42");
+        assert_eq!(candidate.provider, "freesound");
+        assert_eq!(candidate.quality, "preview");
     }
 
     #[test]
-    fn names_are_plain_and_seconds_are_short() {
-        assert_eq!(clean_name("Bell / 2.wav").unwrap(), "Bell - 2.wav");
-        assert!(clean_name("   ").is_err());
+    fn seconds_are_short() {
         assert_eq!(format_seconds(1.5), "1.5");
         assert_eq!(format_seconds(2.0), "2");
     }
 
     #[test]
-    fn a_preview_must_come_from_the_api_s_own_site() {
-        let api = http::parse_url("https://freesound.org/apiv2").unwrap();
-        assert!(api.same_site(&http::parse_url("https://cdn.freesound.org/x").unwrap()));
-        assert!(!api.same_site(&http::parse_url("https://example.com/x").unwrap()));
-        assert!(!api.same_site(&http::parse_url("https://notfreesound.org/x").unwrap()));
+    fn a_preview_must_come_from_freesound() {
+        let allow = sound_license::Allowlist::new(HOSTS, None);
+        let check = |u: &str| allow.check(sound_license::Provider::Freesound, "1", u);
+        assert!(check("https://cdn.freesound.org/x").is_ok());
+        assert!(check("https://example.com/x").is_err());
+        assert!(check("https://notfreesound.org/x").is_err());
     }
 }

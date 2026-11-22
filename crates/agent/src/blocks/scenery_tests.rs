@@ -918,7 +918,7 @@ fn a_grid_stagger_delays_each_cell_by_its_distance_and_bad_grids_are_refused() {
     for bad in [
         json!({"columns": 0}),
         json!({"columns": 7}),
-        json!({"metric": "chebyshev"}),
+        json!({"metric": "taxicab"}),
         json!({"start_index": 6}),
     ] {
         assert!(call_tool(&mut s.ws, "animate_preset", args(bad)).is_err());

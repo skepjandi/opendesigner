@@ -11,7 +11,8 @@ generated is not done.\n\
 the product's own repository, screens, colors and copy, and use the user's media (list_media, \
 find_files, import_file). Never invent facts, numbers, reviews or features.\n\
 2. Read the craft: call get_playbook with `design` for images, `video` and `motion` for video, \
-`formats` to choose sizes, `style` to pick a named look, `logo` for marks, `blocks` for ready-made parts. Anything animated (animation, scene, explainer, motion graphics, cartoon, 2D, \
+`formats` to choose sizes, `style` to pick a named look, `logo` for marks, `blocks` for ready-made parts, \
+`packs` (one style pack), `build` (plan a scene). Anything animated (animation, scene, explainer, motion graphics, cartoon, 2D, \
 illustration, Kurzgesagt, In a Nutshell) starts with `explainer`: an image backdrop with moving text is never an \
 animated scene; build it from moving vector shapes. \
 Say which look you chose and its rules.\n\
@@ -20,7 +21,7 @@ one hero frame, look at it, fix it, and only then the rest.\n\
 4. Check, do not hope: render_preview (also at 160 to 320 px), review_frame on every frame and fix \
 what it finds, validate_document for the whole design (stable codes, fix every error and warning), \
 render_video_frame at each beat and mid-transition, read the story in list_videos. \
-Iterate at least once after you first look. An animated video gets review_video before export_video: fix its findings. A video also gets sound unless the user asked for \
+Iterate at least once after you first look. pixel_verified false means you have not looked at a render yet: not done. An animated video gets review_video before export_video: fix its findings. A video also gets sound unless the user asked for \
 silence: make_sound for effects, search_sounds or the user's own file for a music bed (gain 0.15 to \
 0.3 under a voice, fades 300 to 800 ms), then set_video audio.\n\
 5. Assets: before drawing an icon, blob, background or texture by hand, search_assets, \
@@ -108,6 +109,16 @@ pub const TOPICS: &[(&str, &str, &str)] = &[
         "sketch",
         "hand-made looks: sketch, boil, watercolor_wash, paper_grain, flow_strokes, marker_underline, scribble_circle; when to use them, how to combine them, palette and node budgets",
         include_str!("../skill/sketch-playbook.md"),
+    ),
+    (
+        "build",
+        "building a scene in locked passes: write the SceneSpec first, validate it, then one pass at a time with one contact sheet per pass",
+        include_str!("../skill/scene-build.md"),
+    ),
+    (
+        "packs",
+        "style packs: choosing one look from the brief, applying its palette as tokens, the 80/20 rule, the motion personality, and the anti-slop list",
+        include_str!("../skill/style-packs.md"),
     ),
 ];
 

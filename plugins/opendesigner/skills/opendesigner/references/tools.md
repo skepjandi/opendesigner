@@ -12,7 +12,7 @@ No arguments.
 
 ## `get_playbook`
 
-Craft guidance for making work that is not mediocre. Topics: design (images), style (named looks with rules), video (start with the inventory of media, footage, sounds and assets), motion (timings, easing, recipes), 3d (devices in 3D, captures from a simulator, moves), formats (sizes and safe zones), logo (identity design), blocks (the catalog of ready-made titles, overlays, backgrounds, charts and motion, and when to use one), scenery (layered flat-vector scenes: scenery blocks, parallax, idle loops, scene moves and the camera), characters (flat-vector characters, bubbles and animated props), sketch (hand-made looks: pen sketches and hatching, line boil, watercolor washes, film grain, grass and wind strokes, hand-drawn emphasis), explainer (anything animated: animation, scenes, explainers, motion graphics, cartoons, 2D illustration, Kurzgesagt or In a Nutshell style; read it FIRST, a jpg backdrop with moving text is never an animated scene), review (look at your own video harshly: strips, crops, grids, diffs, the checklist). Call it with no topic for the list; read the ones that apply before you build, not after.
+Craft guidance for making work that is not mediocre. Topics: design (images), style (named looks with rules), video (start with the inventory of media, footage, sounds and assets), motion (timings, easing, recipes), 3d (devices in 3D, captures from a simulator, moves), formats (sizes and safe zones), logo (identity design), blocks (the catalog of ready-made titles, overlays, backgrounds, charts and motion, and when to use one), scenery (layered flat-vector scenes: scenery blocks, parallax, idle loops, scene moves and the camera), characters (flat-vector characters, bubbles and animated props), sketch (hand-made looks: pen sketches and hatching, line boil, watercolor washes, film grain, grass and wind strokes, hand-drawn emphasis), explainer (anything animated: animation, scenes, explainers, motion graphics, cartoons, 2D illustration, Kurzgesagt or In a Nutshell style; read it FIRST, a jpg backdrop with moving text is never an animated scene), review (look at your own video harshly: strips, crops, grids, diffs, the checklist), packs (style packs: commit to one look before you draw: choosing it from the brief, applying its palette, the 80/20 rule, the motion personality). Call it with no topic for the list; read the ones that apply before you build, not after.
 
 Read-only.
 
@@ -138,7 +138,7 @@ No arguments.
 
 ## `apply_ops`
 
-Change the design with a list of operations, applied together or not at all. Operations: {op:'create', parent, index?, node:{kind, name?, x, y, width, height, fill?, stroke?, corner_radius?, opacity?, visible?, text?, font_size?, font_family?, font_weight?, text_align?, line_height?, image?, image_fit?, device3d?, path?, view_box?, fill_rule?, rotation?, scale_x?, scale_y?, pivot_x?, pivot_y?, blur?, shadow?, clip?, depth?, children?}}, {op:'set', id, prop:{name, value}} with name one of name, x, y, width, height, visible, opacity, fill, stroke, corner_radius, text, font_size, font_family, font_weight, text_align, line_height, image (a media/ path from list_media), image_fit (cover, contain or fill), path, view_box, fill_rule, stroke_width, trim_start, trim_end, rotation, scale_x, scale_y, scale (both), scale_xy (value {x, y}), pivot_x, pivot_y, blur, drop_shadow, shadow_dx, shadow_dy, shadow_blur, clip, depth (see Transform and effects below), {op:'move', id, x, y}, {op:'reparent', id, parent, index?}, {op:'delete', id}, {op:'set_token', name, value} (a named color '#rrggbb'; value null removes an unused token), {op:'set_localized_text', locale, id, text} (a translation of a text node; text null removes it). Vector shapes: kind 'path' draws SVG path data in its box: path:'M0 0 C10 20 30 20 40 0 Z' (commands M L H V C S Q T A Z, absolute or relative, at most 4000 segments and 64 KB). The path's own bounds are stretched over the node's width and height, so resizing scales it; give no width and height and the box takes the path's size. view_box:{x, y, width, height} maps that rectangle of path coordinates onto the box instead (exact placement for imported art); fill_rule is nonzero (default) or evenodd. Any shape (frame, rect, ellipse, path) takes a gradient as fill or as stroke paint: {type:'linear', angle?: degrees, 0 left to right, 90 top to bottom (default), stops:[{offset: 0 to 1, color}]} or {type:'radial', cx?, cy?: fractions of the box (0.5), r?: fraction of the longer side (0.5), stops}, 2 to 8 stops whose colors are '#rrggbb[aa]' or '{token}'. A stroke is {paint, width, cap?: butt|round|square, join?: miter|round|bevel, dash?: [dash, gap, ...], trim_start?, trim_end?: 0 to 1 along the outline, only the stretch between them is drawn}; animate trim_end from 0 to 1 to draw a line on. A stroke width of 0 draws nothing. import_svg_vector turns a whole SVG illustration into path nodes. 3D devices: kind 'device3d' is a phone, tablet, laptop or monitor drawn in 3D inside its box (the box is the viewport; 1 zoom fits the device with a margin at any turn); its fill is the body finish, its image (with image_fit) is the capture on the screen; create it with device3d:{model: phone|phone_punch_hole|tablet|laptop|monitor, rotate_x?, rotate_y?, rotate_z?, zoom?, fov?, light_angle?, shadow?, glare?, screen_scroll?, screen_footage?:{file:'media/x.mov', in_ms}} and change it with set props model, rotate_x (tilt, + leans the top away), rotate_y (turn, + turns the right edge away), rotate_z (roll, + clockwise), zoom (0.05 to 10), fov (1 to 100 degrees, 30 natural, low is flat), light_angle (degrees, 0 from above, 90 from the right), shadow (0 to 1), glare (0 to 1, screen reflection), screen_scroll (0 top to 1 bottom of a long capture; null centres), screen_footage (value {file, in_ms}: a recording on the screen that plays while the frame is shown; null shows the image). Transform and effects (any node, drawn together with everything inside it; defaults mean no effect): rotation (degrees, clockwise, up to 36000), scale_x and scale_y (default 1, negative flips; scale sets both), pivot_x and pivot_y (fractions of the node's own box that rotation and scale turn about, default 0.5 the center; a group without a size uses the box around its children), blur (Gaussian radius in px, 0 to 500), shadow (create) or drop_shadow (set) = {dx, dy, blur, color} with the color's alpha as its opacity (null removes it; shadow_dx, shadow_dy and shadow_blur change one number of an existing shadow and can be keyframed), clip (true on a group or frame: children are cut at its box; a group needs a width and height for that, a frame always clips) and depth (0 to 10, default 1: how strongly the video's camera moves the node, 0 pins it to the screen, 0.5 moves half as far for parallax; depths multiply down the tree). The exported frame ignores its own transform. A node's bounds (and what a click hits) are the box around it after its transform. Videos (see list_videos): {op:'create_video', name, fps, width, height} (even sizes), {op:'delete_video', id}, {op:'set_video', id, prop:{name, value}} with name one of name, fps, size (value {width, height}), audio (value {file:'media/x.mp3', start_ms?, gain? (0 to 2), fade_in_ms?, fade_out_ms?} for the sound under the picture; null takes it away), motion_blur (0 off, or 2 to 16 pictures blended while anything moves), hold_frames (1 to 6, default 1: every drawing is held for this many frames, 2 is animation on twos, 3 on threes; audio is unaffected), {op:'add_clip', video, frame | footage:{file:'media/x.mp4', in_ms}, duration_ms, index?, transition?, motion?} (a clip shows a design frame or plays footage from list_footage), {op:'remove_clip', video, clip}, {op:'move_clip', video, clip, index}, {op:'set_clip', video, clip, prop:{name, value}} with name one of duration_ms, frame, source (value {frame} or {footage:{file,in_ms}}), transition (value {kind: cut|fade|slide_left|slide_right|slide_up|slide_down|dip|zoom_in|wipe_left|wipe_right|wipe_up|wipe_down|iris|flash|blur_dissolve|glitch_slice, duration_ms, ease?}), motion (value {scale_from, scale_to, ease?}, 1 to 3), speed (footage only, 0.25 to 4; duration_ms is the length on the timeline, the clip plays duration_ms*speed of the file), speed_ramp (footage only, value [{at_ms, rate 0.25 to 4, ease?}] in clip time, needs speed 1; [] removes it), grade (value {exposure?(-3..3 stops), contrast?, saturation?, temperature?, tint? (all -1..1), vignette? (0..1), blur? (0..50), look?: warm|cool|mono|faded|punchy}, or null; a look fills the numbers and the numbers you give override it; also set on an image node with {op:'set', id, prop:{name:'grade', value}}). Times (durations, starts, in points, transitions, keys) are rounded to the video's frame grid; the receipt shows the value kept. {op:'add_overlay', video, frame, start_ms, duration_ms, fade_ms?, enter?, exit?, ease?} (a design frame drawn over the whole video for a while: titles, lower thirds, call-outs; a frame with no fill is transparent; enter and exit are none, fade, slide_up, slide_down, slide_left, slide_right, pop or zoom, taking fade_ms each), {op:'remove_overlay', video, overlay}, {op:'set_overlay', video, overlay, prop:{name, value}} with name one of frame, start_ms, duration_ms, fade_ms, enter, exit, ease, {op:'animate', video, node, prop, keys:[{at_ms, value, ease?}], repeat?} (keyframes one number of a node over the video's time, at_ms from the start of the video, strictly increasing; the value holds before the first key and after the last unless repeat is loop (start again from the first key, for as long as the video plays; end on the first key's value for a seamless cycle) or pingpong (play back and forth), once being the default and what an animate without repeat sets, so send repeat again when you change the keys of a looping track; prop one of x, y, width, height, opacity, corner_radius, rotation, scale_x, scale_y, scale (both), blur, shadow_dx, shadow_dy, shadow_blur (the node needs a shadow), rotate_x, rotate_y, rotate_z, zoom, fov, light_angle, shadow, glare, screen_scroll, trim_start, trim_end, stroke_width (the node needs a stroke), fill_color (key value '#rrggbb[aa]', mixed in sRGB and listed back as the number 0xRRGGBBAA; the node needs a fill), or on an image node grade_exposure, grade_contrast, grade_saturation, grade_temperature, grade_tint, grade_vignette, grade_blur; the camera props camera_x, camera_y (pan in px: the scene moves the other way), camera_zoom (0.1 to 20, about the frame's center) and camera_rotation (degrees the scene turns clockwise about the center) take the VIDEO's id as node and move every node of a clip's frame by its depth (nodes at depth 0 and overlays stay); a single key holds a camera still; keys:[] removes it; animate_preset writes some of these for you). Eases: linear, ease_in, ease_out, ease_in_out (also ease_in_out_cubic), back (overshoots; also ease_out_back), spring (overshoots and settles), elastic (rings past the end) or bounce (bounces off the end); power2_in|out|in_out and power4_in|out|in_out (stronger cubic-like curves), expo_in|out|in_out, circ_in|out|in_out, sine_in|out|in_out (the gentlest); steps_2, steps_3, steps_4, steps_6, steps_8 and steps_12 (no in-between: the value holds each of that many poses, jumping between them, for the stepped feel of drawn animation). Colors are '#rrggbb', '#rrggbbaa' or '{token.name}'. Template variables (see list_variables): {op:'declare_variable', variable:{id, kind, label, description?, portrays?, default, enum_values?, binds?:[{node, prop}]}} with kind one of string, number, color, bool, enum, image, font (enum_values only for enum) and portrays one of subject_name, subject_domain, subject_tagline, subject_logo, host_identity, {op:'set_variable', id, prop:{name, value}} with name one of label, description, portrays, default, enum_values, binds, {op:'remove_variable', id}, {op:'set_variable_value', id, value} (writes every bound node property through the same validated path as set, so it is attributed and undoable). Ids are minted for you; the result lists the created ids. A checkpoint is taken before your first change in a turn so the user can restore it. Set dry_run true to check the operations without applying them: you get ok, what each operation would do, the node ids that would change, and for a rejection a stable code (E_NODE_NOT_FOUND, E_OUT_OF_BOUNDS, E_LIMIT, ...) with a hint; nothing is changed, checkpointed or saved. An applied result has stage 'applied', the checkpoint taken before the turn, the transaction, the changed ids and whether the project was saved.
+Change the design with a list of operations, applied together or not at all. Operations: {op:'create', parent, index?, node:{kind, name?, x, y, width, height, fill?, stroke?, corner_radius?, opacity?, visible?, text?, font_size?, font_family?, font_weight?, text_align?, line_height?, image?, image_fit?, device3d?, path?, view_box?, fill_rule?, rotation?, scale_x?, scale_y?, pivot_x?, pivot_y?, blur?, shadow?, clip?, depth?, children?}}, {op:'set', id, prop:{name, value}} with name one of name, x, y, width, height, visible, opacity, fill, stroke, corner_radius, text, font_size, font_family, font_weight, text_align, line_height, image (a media/ path from list_media), image_fit (cover, contain or fill), path, view_box, fill_rule, stroke_width, trim_start, trim_end, rotation, scale_x, scale_y, scale (both), scale_xy (value {x, y}), pivot_x, pivot_y, blur, drop_shadow, shadow_dx, shadow_dy, shadow_blur, clip, depth (see Transform and effects below), {op:'move', id, x, y}, {op:'reparent', id, parent, index?}, {op:'delete', id}, {op:'set_token', name, value} (a named color '#rrggbb'; value null removes an unused token), {op:'set_localized_text', locale, id, text} (a translation of a text node; text null removes it). Vector shapes: kind 'path' draws SVG path data in its box: path:'M0 0 C10 20 30 20 40 0 Z' (commands M L H V C S Q T A Z, absolute or relative, at most 4000 segments and 64 KB). The path's own bounds are stretched over the node's width and height, so resizing scales it; give no width and height and the box takes the path's size. view_box:{x, y, width, height} maps that rectangle of path coordinates onto the box instead (exact placement for imported art); fill_rule is nonzero (default) or evenodd. Any shape (frame, rect, ellipse, path) takes a gradient as fill or as stroke paint: {type:'linear', angle?: degrees, 0 left to right, 90 top to bottom (default), stops:[{offset: 0 to 1, color}]} or {type:'radial', cx?, cy?: fractions of the box (0.5), r?: fraction of the longer side (0.5), stops}, 2 to 8 stops whose colors are '#rrggbb[aa]' or '{token}'. A stroke is {paint, width, cap?: butt|round|square, join?: miter|round|bevel, dash?: [dash, gap, ...], trim_start?, trim_end?: 0 to 1 along the outline, only the stretch between them is drawn}; animate trim_end from 0 to 1 to draw a line on. A stroke width of 0 draws nothing. import_svg_vector turns a whole SVG illustration into path nodes. 3D devices: kind 'device3d' is a phone, tablet, laptop or monitor drawn in 3D inside its box (the box is the viewport; 1 zoom fits the device with a margin at any turn); its fill is the body finish, its image (with image_fit) is the capture on the screen; create it with device3d:{model: phone|phone_punch_hole|tablet|laptop|monitor, rotate_x?, rotate_y?, rotate_z?, zoom?, fov?, light_angle?, shadow?, glare?, screen_scroll?, screen_footage?:{file:'media/x.mov', in_ms}} and change it with set props model, rotate_x (tilt, + leans the top away), rotate_y (turn, + turns the right edge away), rotate_z (roll, + clockwise), zoom (0.05 to 10), fov (1 to 100 degrees, 30 natural, low is flat), light_angle (degrees, 0 from above, 90 from the right), shadow (0 to 1), glare (0 to 1, screen reflection), screen_scroll (0 top to 1 bottom of a long capture; null centres), screen_footage (value {file, in_ms}: a recording on the screen that plays while the frame is shown; null shows the image). Transform and effects (any node, drawn together with everything inside it; defaults mean no effect): rotation (degrees, clockwise, up to 36000), scale_x and scale_y (default 1, negative flips; scale sets both), pivot_x and pivot_y (fractions of the node's own box that rotation and scale turn about, default 0.5 the center; a group without a size uses the box around its children), blur (Gaussian radius in px, 0 to 500), shadow (create) or drop_shadow (set) = {dx, dy, blur, color} with the color's alpha as its opacity (null removes it; shadow_dx, shadow_dy and shadow_blur change one number of an existing shadow and can be keyframed), clip (true on a group or frame: children are cut at its box; a group needs a width and height for that, a frame always clips) and depth (0 to 10, default 1: how strongly the video's camera moves the node, 0 pins it to the screen, 0.5 moves half as far for parallax; depths multiply down the tree). The exported frame ignores its own transform. A node's bounds (and what a click hits) are the box around it after its transform. Videos (see list_videos): {op:'create_video', name, fps, width, height} (even sizes), {op:'delete_video', id}, {op:'set_video', id, prop:{name, value}} with name one of name, fps, size (value {width, height}), audio (value {file:'media/x.mp3', start_ms?, gain? (0 to 2), fade_in_ms?, fade_out_ms?} for the sound under the picture; null takes it away), motion_blur (0 off, or 2 to 16 pictures blended while anything moves), hold_frames (1 to 6, default 1: every drawing is held for this many frames, 2 is animation on twos, 3 on threes; audio is unaffected), {op:'add_clip', video, frame | footage:{file:'media/x.mp4', in_ms}, duration_ms, index?, transition?, motion?} (a clip shows a design frame or plays footage from list_footage), {op:'remove_clip', video, clip}, {op:'move_clip', video, clip, index}, {op:'set_clip', video, clip, prop:{name, value}} with name one of duration_ms, frame, source (value {frame} or {footage:{file,in_ms}}), transition (value {kind: cut|fade|slide_left|slide_right|slide_up|slide_down|dip|zoom_in|wipe_left|wipe_right|wipe_up|wipe_down|iris|flash|blur_dissolve|glitch_slice, duration_ms, ease?}), motion (value {scale_from, scale_to, ease?}, 1 to 3), speed (footage only, 0.25 to 4; duration_ms is the length on the timeline, the clip plays duration_ms*speed of the file), speed_ramp (footage only, value [{at_ms, rate 0.25 to 4, ease?}] in clip time, needs speed 1; [] removes it), grade (value {exposure?(-3..3 stops), contrast?, saturation?, temperature?, tint? (all -1..1), vignette? (0..1), blur? (0..50), look?: warm|cool|mono|faded|punchy}, or null; a look fills the numbers and the numbers you give override it; also set on an image node with {op:'set', id, prop:{name:'grade', value}}). Times (durations, starts, in points, transitions, keys) are rounded to the video's frame grid; the receipt shows the value kept. {op:'add_overlay', video, frame, start_ms, duration_ms, fade_ms?, enter?, exit?, ease?} (a design frame drawn over the whole video for a while: titles, lower thirds, call-outs; a frame with no fill is transparent; enter and exit are none, fade, slide_up, slide_down, slide_left, slide_right, pop or zoom, taking fade_ms each), {op:'remove_overlay', video, overlay}, {op:'set_overlay', video, overlay, prop:{name, value}} with name one of frame, start_ms, duration_ms, fade_ms, enter, exit, ease, {op:'animate', video, node, prop, keys:[{at_ms, value, ease?}], repeat?} (keyframes one number of a node over the video's time, at_ms from the start of the video, strictly increasing; the value holds before the first key and after the last unless repeat is loop (start again from the first key, for as long as the video plays; end on the first key's value for a seamless cycle) or pingpong (play back and forth), once being the default and what an animate without repeat sets, so send repeat again when you change the keys of a looping track; prop one of x, y, width, height, opacity, corner_radius, rotation, scale_x, scale_y, scale (both), blur, shadow_dx, shadow_dy, shadow_blur (the node needs a shadow), rotate_x, rotate_y, rotate_z, zoom, fov, light_angle, shadow, glare, screen_scroll, trim_start, trim_end, stroke_width (the node needs a stroke), fill_color (key value '#rrggbb[aa]', mixed in sRGB and listed back as the number 0xRRGGBBAA; the node needs a fill), or on an image node grade_exposure, grade_contrast, grade_saturation, grade_temperature, grade_tint, grade_vignette, grade_blur; the camera props camera_x, camera_y (pan in px: the scene moves the other way), camera_zoom (0.1 to 20, about the frame's center) and camera_rotation (degrees the scene turns clockwise about the center) take the VIDEO's id as node and move every node of a clip's frame by its depth (nodes at depth 0 and overlays stay); a single key holds a camera still; keys:[] removes it; animate_preset writes some of these for you). Eases: linear, ease_in, ease_out, ease_in_out (also ease_in_out_cubic), back (overshoots; also ease_out_back), spring (overshoots and settles), elastic (rings past the end) or bounce (bounces off the end); power2_in|out|in_out and power4_in|out|in_out (stronger cubic-like curves), expo_in|out|in_out, circ_in|out|in_out, sine_in|out|in_out (the gentlest); steps_2, steps_3, steps_4, steps_6, steps_8 and steps_12 (no in-between: the value holds each of that many poses, jumping between them, for the stepped feel of drawn animation); anticipate (pulls back a little, then goes). Tuned eases are text with numbers: spring(visual_ms,bounce) is a real spring that looks done after visual_ms and rings by the bounce (0 none, 0.3 playful, 0.5 bouncy, negative slow and heavy; it is read over the stretch between its two keys, so give that stretch about 2 to 3 times visual_ms for the swings to show, and the presets spring_snappy, spring_smooth, spring_playful, spring_bouncy, spring_heavy are spring(250,0), (400,0), (450,0.3), (500,0.5), (800,0.1)); cubic(x1,y1,x2,y2) is the CSS cubic-bezier; back_in|back_out|back_in_out(overshoot) (1.7 is the classic, 0.5 subtle); elastic_out|elastic_in(amplitude,period); steps(n) for any n from 2 to 64. Colors are '#rrggbb', '#rrggbbaa' or '{token.name}'. Template variables (see list_variables): {op:'declare_variable', variable:{id, kind, label, description?, portrays?, default, enum_values?, binds?:[{node, prop}]}} with kind one of string, number, color, bool, enum, image, font (enum_values only for enum) and portrays one of subject_name, subject_domain, subject_tagline, subject_logo, host_identity, {op:'set_variable', id, prop:{name, value}} with name one of label, description, portrays, default, enum_values, binds, {op:'remove_variable', id}, {op:'set_variable_value', id, value} (writes every bound node property through the same validated path as set, so it is attributed and undoable). Ids are minted for you; the result lists the created ids. A checkpoint is taken before your first change in a turn so the user can restore it. Set dry_run true to check the operations without applying them: you get ok, what each operation would do, the node ids that would change, and for a rejection a stable code (E_NODE_NOT_FOUND, E_OUT_OF_BOUNDS, E_LIMIT, ...) with a hint; nothing is changed, checkpointed or saved. An applied result has stage 'applied', the checkpoint taken before the turn, the transaction, the changed ids and whether the project was saved.
 
 Arguments:
 
@@ -349,27 +349,6 @@ Read-only.
 
 No arguments.
 
-## `search_sounds`
-
-Find music and sound effects on Freesound (https://freesound.org) for a video. Returns each sound's id, name, length, license, author and a preview to listen to. Freesound sounds are licensed by their authors, not by us: the license in the result is the license the user must obey, and you must show the attribution the result carries (title, author, license, link) wherever the sound is used. Prefer CC0. Needs the user's Freesound token (the Connect tab); without one the call says so.
-
-Read-only.
-
-Arguments:
-
-- `duration_max_ms` (integer) Keep only sounds no longer than this.
-- `page` (integer) Which page of results (1 is the first).
-- `query` (string, required) Words to search for, for example "soft piano loop".
-
-## `import_sound`
-
-Download one Freesound sound (the preview recording, not the original file) into this project's media/ folder and write what it is next to it. Returns the media/ reference and the one line the user must show: "Title by Author, License, link". The license must be honoured: say who made it, under which license, and where it came from. The file is never overwritten. Then put it under a video with set_video prop {name: "audio", value: {file, start_ms, gain, fade_in_ms, fade_out_ms}}.
-
-Arguments:
-
-- `id` (integer, required) The id of a sound from search_sounds.
-- `name` (string) A plain file name for the sound, without the .mp3 ending.
-
 ## `list_sounds`
 
 All the sounds in this project's media/ folder (.mp3 .wav .m4a .aac .ogg), whether made with make_sound, downloaded with import_sound or imported with import_file: the file, size, length when ffmpeg is installed, where it came from (synthesized, freesound or imported) and, for a Freesound sound, the attribution line the user must show. Any of them can be the video's sound track (set_video audio).
@@ -380,7 +359,7 @@ No arguments.
 
 ## `make_sound`
 
-Make a sound effect or a simple loop yourself, with no download and no licence to honour (it is synthesized and written to media/<name>.wav, normalized, with short fades so it never clicks). Use it for the basics: click, pop, tick, whoosh, swoosh_up, swoosh_down, riser (builds into a cut), hit (impact: put it on a cut or a reveal), chime (a notification or a finish), stinger (a 2 to 3 note sting), drone (a soft pad that loops) and beat (4-on-the-floor kick and hat at `bpm`, `bars` bars). It cannot make real music or speech: for a music bed use search_sounds (Freesound, needs the user's token) or ask the user; for a voice-over use a speech MCP server if the user added one (get_guidance lists them). The same kind, duration and seed give the same sound. Then set it as the track: set_video prop {name: "audio", value: {file, start_ms, gain, fade_in_ms, fade_out_ms}}.
+Make a sound effect or a simple loop yourself, with no download and no licence to honour (it is synthesized and written to media/<name>.wav, normalized, with short fades so it never clicks). Use it for the basics: click, pop, tick, whoosh, swoosh_up, swoosh_down, riser (builds into a cut), hit and impact (a thump: put it on a cut or a reveal; impact is bigger, with a crack and a tail), chime (a notification or a finish), stinger (a 2 to 3 note sting), drone (a soft pad that loops), pad (a slow chord bed that loops), key (a typing click, a little different each press: repeat it with different seeds), blip (a UI blip), scratch (a record scratch) and beat (4-on-the-floor kick and hat at `bpm`, `bars` bars). It cannot make real music or speech: for a music bed use search_sounds (Openverse, Incompetech, ccMixter or Freesound) or ask the user; for a voice-over use a speech MCP server if the user added one (get_guidance lists them). The same kind, duration and seed give the same sound. Then set it as the track: set_video prop {name: "audio", value: {file, start_ms, gain, fade_in_ms, fade_out_ms}}.
 
 Arguments:
 
@@ -389,7 +368,7 @@ Arguments:
 - `duration_ms` (integer) How long. Optional: each kind has a fitting default. A beat takes its length from bpm and bars.
 - `kind` (string, required) Which sound.
 - `name` (string) A plain file name without the .wav ending; default is the kind. An existing file is never overwritten.
-- `pitch_hz` (number) The base pitch of chime, drone, tick, pop, riser, hit and stinger.
+- `pitch_hz` (number) The base pitch of chime, drone, pad, tick, key, blip, pop, riser, hit, impact and stinger.
 - `seed` (integer) Another seed gives another variation (noise, the notes of a stinger, and the pitch or tempo when you give none). Default: a new random seed each call, returned as `seed` and kept in the sidecar. Pass the same seed to make the same sound again.
 - `stereo` (boolean) Two channels (default one).
 
@@ -439,7 +418,7 @@ Arguments:
 
 ## `animate_preset`
 
-Animate a node with a named move, measured from its designed pose, as keyframes you can then inspect in list_videos and change with apply_ops animate. 3D device moves: spin (a full turn; strength 2 is two), turntable (slow side to side), swing (away one way, then the other, back), flip_in (turns from its back to face the viewer, springing), hero_reveal (starts flat and square, settles into the designed tilt and turn), push_in and pull_back (camera closer or settling back), orbit (the view swings around the device), scroll_screen (scrolls a long capture top to bottom). Any node: rise_in, drop_in, float (gentle drift; a 3D device also sways), fade_in, fade_out, slide_in_left, slide_in_right. Keys already inside start_ms..start_ms+duration_ms for the same properties are replaced and the rest kept, so moves chain. Times are from the start of the video; the node should be in a frame the video shows at that time. Scene moves work on any node, not only 3D devices, and write ordinary keyframes. Ambient (loop by default, end where they start, `seed` shifts the phase so nodes do not move in lockstep; duration_ms is one cycle): float (lazy drift), bob (up and down with a little tilt), breathe (squash and stretch), pulse (a beat of scale), spin (intensity = turns), wobble, swing (a pendulum tilt), orbit (the node's middle circles `center_x`/`center_y`, or a point to its left; `radius`). Entrances and impacts (play once): pop_in (scale 0 to 1 with a small overshoot), bounce_in (drops in and bounces), elastic_in (rings in), slide_in_left|right|up|down (with overshoot), fade_up, zoom_in, shake (decays), draw_on (a stroked node's trim_end 0 to 1). Camera moves write the video's camera (the node is the video; layers with a `depth` follow it by that much): camera_push_in, camera_pull_back, camera_pan (`direction` left|right|up|down, `amount` in document units), camera_drift (slow loop), camera_shake (decays), camera_whip (fast pan, `direction`), camera_burst (a kick that is fastest on its first frame, decays over about nine frames with power4_out and then holds; `direction`, `amount`, `start_ms`). animate_along_path: the `path` node's curve is sampled into x/y keys (and, with `orient`, rotation) so `node` follows it over the time range with `ease`. stagger: apply the move named in `of` to every id in `nodes`, `step_ms` apart, starting `from` first|last| center|edges|random (seeded); with `columns` the nodes are a grid read row by row and each is delayed by its distance (`metric` manhattan or euclid, default euclid; `step_ms` per unit) from the start cell: `start_index` (an index into `nodes`) or the cell `from` names. `intensity` scales how far a move goes (1 as designed), `repeat` is once|loop|pingpong, `ease` overrides the move's own.
+Animate a node with a named move, measured from its designed pose, as keyframes you can then inspect in list_videos and change with apply_ops animate. 3D device moves: spin (a full turn; strength 2 is two), turntable (slow side to side), swing (away one way, then the other, back), flip_in (turns from its back to face the viewer, springing), hero_reveal (starts flat and square, settles into the designed tilt and turn), push_in and pull_back (camera closer or settling back), orbit (the view swings around the device), scroll_screen (scrolls a long capture top to bottom). Any node: rise_in, drop_in, float (gentle drift; a 3D device also sways), fade_in, fade_out, slide_in_left, slide_in_right. Keys already inside start_ms..start_ms+duration_ms for the same properties are replaced and the rest kept, so moves chain. Times are from the start of the video; the node should be in a frame the video shows at that time. Scene moves work on any node, not only 3D devices, and write ordinary keyframes. Ambient (loop by default, end where they start, `seed` shifts the phase so nodes do not move in lockstep; duration_ms is one cycle): float (lazy drift), bob (up and down with a little tilt), breathe (squash and stretch), pulse (a beat of scale), spin (intensity = turns), wobble, swing (a pendulum tilt), orbit (the node's middle circles `center_x`/`center_y`, or a point to its left; `radius`). Entrances and impacts (play once): pop_in (scale 0 to 1 with a small overshoot), bounce_in (drops in and bounces), elastic_in (rings in), slide_in_left|right|up|down (with overshoot), fade_up, zoom_in, shake (decays), draw_on (a stroked node's trim_end 0 to 1). Camera moves write the video's camera (the node is the video; layers with a `depth` follow it by that much): camera_push_in, camera_pull_back, camera_pan (`direction` left|right|up|down, `amount` in document units), camera_drift (slow loop), camera_shake (decays), camera_whip (fast pan, `direction`), camera_burst (a kick that is fastest on its first frame, decays over about nine frames with power4_out and then holds; `direction`, `amount`, `start_ms`). animate_along_path: the `path` node's curve is sampled into x/y keys (and, with `orient`, rotation) so `node` follows it over the time range with `ease`. stagger: apply the move named in `of` to every id in `nodes`, `step_ms` apart (default 120), starting `from` first|last| center|edges|random (seeded); with `columns` the nodes are a grid read row by row and each is delayed by its distance (`metric` manhattan, euclid or chebyshev; `step_ms` per unit) from the start cell: `start_index` (an index into `nodes`) or the cell `from` names. A `stagger` object adds more: each_ms, range [near, far] (a value stagger: each node's intensity is multiplied by its value), from as an index or {point}, grid [columns, rows], axis x|y, an eased distribution, reversed, start_ms, seeded jitter_ms, and spatial (distances between the nodes' real centres). `intensity` scales how far a move goes (1 as designed), `repeat` is once|loop|pingpong, `ease` overrides the move's own; a tuned spring `ease` on an entrance stretches duration_ms to the time the spring needs to come to rest (the result says so).
 
 Arguments:
 
@@ -449,7 +428,7 @@ Arguments:
 - `columns` (integer) stagger: lay the nodes out as a grid this many columns wide, row by row, and delay by distance from the start cell.
 - `direction` (string) camera_pan, camera_whip and camera_burst.
 - `duration_ms` (integer) Needed by the older moves; a scene move has its own default (one cycle, for a loop).
-- `ease` (string) Overrides the preset's own ease.
+- `ease` (string) Overrides the preset's own ease: one of linear, ease_in, ease_out, ease_in_out, back, spring, ease_in_out_cubic, ease_out_back, elastic, bounce, steps_2, steps_3, steps_4, steps_6, steps_8, steps_12, power2_in, power2_out, power2_in_out, power4_in, power4_out, power4_in_out, expo_in, expo_out, expo_in_out, circ_in, circ_out, circ_in_out, sine_in, sine_out, sine_in_out, anticipate, bounce_in, bounce_in_out, spring_snappy, spring_smooth, spring_playful, spring_bouncy, spring_heavy or a tuned one: cubic(x1,y1,x2,y2) with x1 and x2 from 0 to 1, y1 and y2 from -2 to 3; spring(visual_ms,bounce) with visual_ms 50 to 5000 and bounce from -0.9 (slow, no overshoot) to 0.95 (very bouncy); back_in|back_out|back_in_out(overshoot) from 0 to 5; elastic_out|elastic_in(amplitude,period) with amplitude 1 to 5 and period 0.05 to 2; steps(n) with n from 2 to 64; anticipate (pulls back first, then goes).
 - `from` (string) stagger: which node goes first (edges: both ends together, then inward; in a grid, the outer ring first).
 - `intensity` (number) How far the move goes; 1 is as designed (the same as strength).
 - `metric` (string) stagger with columns: how distance is measured (default euclid).
@@ -462,7 +441,8 @@ Arguments:
 - `radius` (number) orbit: the radius when there is no center.
 - `repeat` (string) What the track does after its last key (scene moves; ambient ones loop by default).
 - `seed` (integer) Shifts an ambient move's phase and orders a random stagger.
-- `start_index` (integer) stagger with columns: index in nodes of the cell the wave starts from (overrides from).
+- `stagger` (object) How a group of nodes is spread over time (and, with range, over a value). Every field is optional.
+- `start_index` (integer) stagger: index in nodes of the node the wave starts from (overrides from).
 - `start_ms` (integer, required) 
 - `step_ms` (integer) stagger: delay between one node and the next.
 - `strength` (number) How far the move goes; 1 is as designed.
@@ -499,6 +479,66 @@ Arguments:
 - `times` (array) 
 - `to_ms` (integer) 
 - `video` (string, required) Id of a video from list_videos.
+
+## `sequence`
+
+Several moves placed against each other in time, written as one turn and one undo step. Give each step a `preset`, the `node` or `nodes` it moves, and where it starts: a number of milliseconds, or a phrase against what is already there (`<` the end of the step before, `<<` its start, `<+=50` to overlap it by 50 ms, `intro+=200` after a step named intro). A step may name itself with `label` and spread its own nodes with a `stagger` object. `fit_to_ms` scales the whole sequence to a length. The result echoes the table of resolved starts and ends, so the agent can see the timing it got.
+
+Arguments:
+
+- `fit_to_ms` (integer) Scale the whole sequence to this many milliseconds.
+- `items` (array, required) 
+- `summary` (string) One line, in the user's terms, naming what this turn does.
+- `turn` (string) Groups related calls into one turn; omit and each call is its own turn.
+- `video` (string, required) Id of a video from list_videos.
+
+## `spring_to`
+
+Send one property of a node to a value on a spring: it accelerates, overshoots and settles. The spring is `visual_ms` long (how long it looks like it takes) and `bounce` (0 settles straight, 0.3 playful, 0.5 bouncy). The keys run from where the property is now to the value, over the time the spring needs to come to rest. The result says when it looks done and when it has really stopped, so the next beat can be placed after it.
+
+Arguments:
+
+- `at_ms` (integer) When the spring starts (default: after the last key of this property).
+- `bounce` (number) How much it overshoots: 0 settles straight, 0.3 playful, 0.5 bouncy (default 0).
+- `node` (string) Id of the node to move (the video's camera props need none).
+- `prop` (string, required) The property to move, such as x, y, opacity, scale_x, rotation, trim_end, camera_zoom.
+- `summary` (string) One line, in the user's terms, naming what this turn does.
+- `to` (number, required) Where the property ends up.
+- `turn` (string) Groups related calls into one turn; omit and each call is its own turn.
+- `video` (string, required) Id of a video from list_videos.
+- `visual_ms` (integer) How long the spring looks like it takes (default 400).
+
+## `split_text`
+
+Split a text node into a group of one text node per character, word or line, each drawn where the original glyphs were (the renderer's own shaping and wrapping, so the lines are the ones the box width really breaks to) with the original font, size, weight, line height, fill and stroke. Pieces are named '<name>.c0..' (chars), '<name>.w0..' (words) or '<name>.l0..' (lines), in reading order; spaces are not nodes. The group takes the original's box, transform, opacity, blur and shadow. Returns the piece ids in order: pass them to animate_preset stagger as nodes, or use text_reveal to split and animate in one call. One attributed, undoable turn. Limits: a ligature is one glyph and so one character piece, and the kerning between two pieces is lost; a piece is set flush left at the place its glyphs were drawn (a line keeps the text's own alignment), so a centred or right-aligned text may sit a pixel off; position is rounded to whole pixels, so a left-aligned text is drawn exactly as before and other alignments match to within a pixel; right-to-left text is ordered by logical position and only pure runs are exact.
+
+Arguments:
+
+- `by` (string, required) 
+- `mode` (string) keep hides the original text (visible false) so it can be shown again; replace (the default) removes it and the group takes its name. One undo restores it either way.
+- `node` (string, required) Id of the text node.
+- `summary` (string) One line, in the user's terms, naming what this turn does.
+- `turn` (string) Groups related calls into one turn.
+- `wrap` (boolean) Put each piece in its own clipping group (a mask box the size of the piece's line) so it can rise or slide in from outside the box. The animated node is then the text inside the mask.
+
+## `text_reveal`
+
+Bring text in piece by piece: splits the text node first (as split_text does, unless it is already a split group) and writes the keyframes, as one undoable turn. Styles: rise (pieces rise 450 ms with power4_out, from below their mask box; masked by default), fade (400 ms ease_out), pop (scale 0.5 to 1 with a small overshoot, 350 ms), slide (from the left, 500 ms power4_out), typewriter (each piece appears at once, 33 ms apart per character). Stagger defaults: 40 ms per character, 90 ms per word, 140 ms per line (typewriter 33 / 120 / 400). `by` defaults to characters for a headline of 12 characters or fewer on one line, else words (lines past 4 lines or 40 words). Never reveal body copy per character. Keys replace any track a piece already has. Returns the resolved timing (each piece's start and end), when the reveal ends and how long to hold it for it to be readable (1 s plus 0.4 s per short word, review check RV015).
+
+Arguments:
+
+- `at_ms` (integer) When the first piece starts (default 0).
+- `by` (string) 
+- `duration_ms` (integer) How long each piece takes (style default; ignored by typewriter).
+- `each_ms` (integer) Milliseconds from one piece to the next.
+- `ease` (string) Overrides the style's ease: one of linear, ease_in, ease_out, ease_in_out, back, spring, ease_in_out_cubic, ease_out_back, elastic, bounce, steps_2, steps_3, steps_4, steps_6, steps_8, steps_12, power2_in, power2_out, power2_in_out, power4_in, power4_out, power4_in_out, expo_in, expo_out, expo_in_out, circ_in, circ_out, circ_in_out, sine_in, sine_out, sine_in_out, anticipate, bounce_in, bounce_in_out, spring_snappy, spring_smooth, spring_playful, spring_bouncy, spring_heavy or a tuned one: cubic(x1,y1,x2,y2) with x1 and x2 from 0 to 1, y1 and y2 from -2 to 3; spring(visual_ms,bounce) with visual_ms 50 to 5000 and bounce from -0.9 (slow, no overshoot) to 0.95 (very bouncy); back_in|back_out|back_in_out(overshoot) from 0 to 5; elastic_out|elastic_in(amplitude,period) with amplitude 1 to 5 and period 0.05 to 2; steps(n) with n from 2 to 64; anticipate (pulls back first, then goes).
+- `mode` (string) keep hides the original text (visible false) so it can be shown again; replace (the default) removes it and the group takes its name. One undo restores it either way.
+- `node` (string, required) Id of the text node, or of a group split_text made.
+- `style` (string, required) 
+- `summary` (string) One line, in the user's terms, naming what this turn does.
+- `turn` (string) Groups related calls into one turn.
+- `video` (string, required) Id of a video from list_videos.
+- `wrap` (boolean) Put each piece in its own clipping group (a mask box the size of the piece's line) so it can rise or slide in from outside the box. The animated node is then the text inside the mask.
 
 ## `list_blocks`
 
@@ -744,6 +784,114 @@ Arguments:
 - `uppercase` (boolean) 
 - `video` (string, required) Id of a video from list_videos.
 
+## `search_sounds`
+
+Find music and sound effects for a video on Openverse, Freesound, Incompetech or ccMixter. Returns each sound's provider, id, title, creator, length, licence (SPDX style, with its url and whether it needs a credit), the ready-made attribution and a preview to listen to. While the project is commercial (sound_settings, the default) sounds with a non-commercial, no-derivatives or unknown licence are left out and counted in hidden_by_license. Sounds are licensed by their authors, not by us: prefer CC0, and for anything that needs a credit call sound_credits before the video is finished. Import one with import_sound, giving it this provider and id.
+
+Read-only.
+
+Arguments:
+
+- `duration_max_ms` (integer) Keep only sounds no longer than this.
+- `page` (integer) Which page of results (1 is the first).
+- `provider` (string) Where to look: openverse (keyless; sound effects and music from Freesound, Jamendo and Wikimedia), freesound (needs the user's token; the biggest library of sound effects), incompetech (keyless; Kevin MacLeod's music, all CC BY 4.0) or ccmixter (keyless; music, CC BY). Default: freesound when the user added a token, otherwise openverse.
+- `query` (string, required) Words to search for, for example "soft piano loop".
+- `source` (string) Openverse only: one hosting site, freesound, jamendo or wikimedia_audio.
+
+## `import_sound`
+
+Download one sound found with search_sounds into this project's media/ folder and write its licence record, media/<name>.license.json, next to it. Pass the provider and id from the search result. Returns the media/ reference and the credit that must be shown (empty for CC0). A sound whose licence the project does not clear (see sound_settings) is refused with what to do. The file is only downloaded from the provider's own hosting sites and is never overwritten. Then put it under a video with set_video prop {name: "audio", value: {file, start_ms, gain, fade_in_ms, fade_out_ms}} or add_sound_track.
+
+Arguments:
+
+- `id` (any, required) The id of a sound from search_sounds.
+- `name` (string) A plain file name for the sound, without the ending.
+- `provider` (string) Where to look: openverse (keyless; sound effects and music from Freesound, Jamendo and Wikimedia), freesound (needs the user's token; the biggest library of sound effects), incompetech (keyless; Kevin MacLeod's music, all CC BY 4.0) or ccmixter (keyless; music, CC BY). Default: freesound when the user added a token, otherwise openverse.
+
+## `sound_settings`
+
+Read or set how this project may use sounds. `commercial` (default true: a video that may earn money or promote a business) hides and refuses sounds under non-commercial, no-derivatives or unknown licences. Set it to false only when the user says the video is not commercial, and quote them in `reason`; never change it to get a sound through. With no arguments it only reads.
+
+Arguments:
+
+- `commercial` (boolean) Whether the project's videos are commercial.
+- `reason` (string) Required with commercial false: the user's own words for why.
+
+## `sound_credits`
+
+Write the credits for the sounds a video uses: the credit line of every sound whose licence asks for one (CC BY and the like), with a note when the video trims, fades, lowers or re-levels it, as the licences require. Saved to exports/<video>-credits.txt and returned. Call it before finishing any video that uses a sound that is not CC0 or synthesized, and put the text in the description or the end card. Also lists sounds with no licence record and ShareAlike sounds.
+
+Arguments:
+
+- `video` (string, required) Id of a video from list_videos.
+
+## `scene_spec_new`
+
+Start the SceneSpec for a video: a starter with the minimum number of details for its complexity tier and placeholders that FAIL strict validation until you replace them with the real layers, details, features, palette and motion. Write the plan before you build anything; see get_playbook build.
+
+Arguments:
+
+- `audience` (string) 
+- `intent` (string) explainer, promo, tutorial, story, ...
+- `max_per_pass` (integer) Refine actions allowed per pass (default 3).
+- `max_total` (integer) Refine actions allowed in total (default 6); not below max_per_pass.
+- `name` (string) Plain spec name: lowercase letters, digits, . _ - (default "main"). Stored as scene_specs/<name>.json in the project.
+- `overwrite` (boolean) Replace an existing spec of this name, review history included.
+- `silent` (boolean) No audio planned.
+- `subject` (string, required) What the video is about, one sentence.
+- `tier` (string) Complexity tier (default moderate): needs at least 3, 6, 10, 16 inventoried details.
+- `video` (string) Video id; takes its size, frame rate and length.
+
+## `scene_spec_write`
+
+Replace the SceneSpec with a full, edited one (a refine-spec, or filling the starter in). The review history is kept as recorded: you cannot rewrite it. Returns the strict validation.
+
+Arguments:
+
+- `name` (string) Plain spec name: lowercase letters, digits, . _ - (default "main"). Stored as scene_specs/<name>.json in the project.
+- `spec` (object, required) The whole SceneSpec (schema opendesigner.scene_spec/1).
+
+## `scene_spec_validate`
+
+Check the SceneSpec. Errors always fail; quality findings (routing under 0.82, too few details for the tier, details that map to nothing, more than 5 critical or 3 important features per pass, ambient motion without loop, gait without stance, no audio) fail only with strict, which a build needs.
+
+Read-only.
+
+Arguments:
+
+- `include_spec` (boolean) Also return the spec.
+- `name` (string) Plain spec name: lowercase letters, digits, . _ - (default "main"). Stored as scene_specs/<name>.json in the project.
+- `strict` (boolean) 
+
+## `scene_status`
+
+Where the build is, from the review history only: current pass, passes completed, refine counters, active or stopped with the reason, missing evidence and the exact next tool call. Call it before every action; never continue from memory.
+
+Read-only.
+
+Arguments:
+
+- `name` (string) Plain spec name: lowercase letters, digits, . _ - (default "main"). Stored as scene_specs/<name>.json in the project.
+
+## `record_review`
+
+Record your review of a pass and choose ONE action: continue, refine-spec (a planned thing is missing or wrong in the plan), refine-code (the plan is right, the build is not), request-input, or stop. A continue for a visual pass needs the contact sheet and frames in exports/, ai_score >= 0.7, every layer score and every critical feature at its minimum; a pass cannot be continued before the one before it. Refused when the loop limit was reached.
+
+Arguments:
+
+- `action` (string, required) 
+- `ai_score` (number) Your score of the contact sheet as a whole.
+- `defect_tags` (array) Short names of the defects you still see; the same tag twice running means refine-spec.
+- `evidence` (object) 
+- `feature_reviews` (array) 
+- `fidelity` (number, required) 0.2 placeholder, 0.4 silhouette recognizable, 0.6 macro and meso right, 0.75 reads correctly, 0.85 strong, 0.95 near-reference.
+- `hard_gate_failures` (array) Numeric gate findings with severity fail.
+- `layer_scores` (object) 0 to 1 each: silhouette_proportion, component_structure, form_detail, palette_fidelity, motion_quality.
+- `name` (string) Plain spec name: lowercase letters, digits, . _ - (default "main"). Stored as scene_specs/<name>.json in the project.
+- `pass_id` (string, required) 
+- `reverted` (boolean) This iteration undid the previous one.
+- `summary` (string, required) What changed, what still does not match, and what the numeric gate does not measure.
+
 ## `list_asset_sources`
 
 What assets exist and under which licence: the bundled Lucide icon set, the generators make_asset runs, the packs install_asset_pack can download (with sizes and whether installed), optional external MCP servers for 3D assets, and sources that are only a link and why. Call it once before you draw an icon, blob, background or pattern by hand, and at the start of every video (with list_media, list_footage and list_sounds).
@@ -866,9 +1014,56 @@ Read-only.
 
 Arguments:
 
+- `allow_unevaluated` (boolean) Accept a gate that could not be evaluated (the beat without a tempo, the flash scan of a video with footage). The report says which gates were unevaluated; the video is not ready unless this is true.
 - `bpm` (number) The tempo of the music, to check that cuts land on a beat (RV014). Videos have no tempo of their own.
 - `samples` (integer) How many moments to render (default 12).
 - `video` (string) Id of a video from list_videos; defaults to the first.
+
+## `verify_motion`
+
+Proves the tracks of a video play, in numbers, without changing anything. For every animation track (and the camera's) it samples at least 5 moments (default 7, always the start, the middle and the end) and compares the value the track says with the value the renderer's pipeline draws (G1), checks the node exists, the property fits its kind, the node is visible and its scene on screen while the track runs (finding RV020 track-drives-nothing), that every value is finite and legal (G2), and that looping tracks end where they start (G3: rotation 0.5 degrees, position 0.01 of the frame height, scale and opacity 0.005). Each track reports id, node, prop, samples, max_delta, status (pass, fail or unevaluated, never a silent pass) and reasons. With classify it also measures each moving node in fractions of the frame height (travel, rise, speed, rotation, scale, pose return) and names the motion (idle, in-place, walk, run, dash, jump, leap); looping ambient motion must read as idle. `gait` checks foot slide against the 0.01 limit. Call it after the motion pass and fix every fail before review_video.
+
+Read-only.
+
+Arguments:
+
+- `ambient` (array) Node ids that are ambient life and must read as idle (nodes whose every track loops are ambient already).
+- `classify` (boolean) Also measure and classify the motion of every animated node.
+- `declared_loops` (array) Loop declarations from the plan: {node, prop, loop: true|false|null}. A null loop is unknown: the track is treated as one-shot and the gate is unevaluated.
+- `expect` (array) Intended motion classes: {node, class}; the measured labels must include it. A class that names intent (strike, guard) is reported as inferred.
+- `gait` (array) Foot-slide checks: {node (the foot), stance: [{from_ms, to_ms}], character_height (default the frame height), ground (a scrolling node whose motion is subtracted)}. A gait with no stance is unevaluated.
+- `samples` (integer) Moments sampled per track (default 7, at least 5).
+- `video` (string) Id of a video from list_videos; defaults to the first.
+
+## `scene_check`
+
+Geometry gates over a video's document, without rendering the whole video and without changing anything. Run at the union of the keyframe times of each chain plus 12 even moments. Each gate answers pass, fail or unevaluated with reasons: bleed (a layer flagged bleed:true must cover the frame under every camera pan, zoom and turn, scaled by its depth), attach (a child's box within gap_tolerance of its parent's), chirality (left and right parts are a reflection, never a rotation, and the left one is on the viewer's right when facing front), part_coverage (every layer_plan entry is a node; none is fused; unowned nodes and unmapped details warn), motion_roster (every layer that expects motion has a track), and freeze (nodes frozen after the shapes pass have not changed). `freeze_snapshot` returns the hashes to store; `footprint` counts the pixels a node really changes in the picture.
+
+Read-only.
+
+Arguments:
+
+- `added_by` (object) Nodes a later pass added, by pass name: {node_id: pass}.
+- `camera` (object) Declared camera extremes, checked as extra poses: {x_max_px, y_max_px, zoom_min, zoom_max, rotation_max_deg}.
+- `details` (array) The detail inventory: {id, maps_to: {type: node|track, ref}}; one that maps to nothing real warns.
+- `footprint` (object) Pixels node really changes at t_ms (the picture with and without it).
+- `freeze` (object) A snapshot from freeze_snapshot: {hashes, attributes}. Later passes may change nothing in it but nodes listed in added_by.
+- `freeze_snapshot` (boolean) Return the freeze hashes of the video's scenes instead of comparing.
+- `layer_plan` (array) The plan's layers: {id, node_ref (a node id or name), role, bleed, parent, attach: {gap_tolerance_px, contact}, side: l|r, side_source: reference|convention, facing: front|side, mirror_of, expects_motion, ignore}.
+- `video` (string) Id of a video; defaults to the first.
+
+## `hit_test`
+
+The node ids under a point at a moment of a video, topmost first (the discriminating test for 'what is covering this?'). The point is in the frame's own units (0,0 is its top-left corner), as the design shows at that moment; a moving camera is not applied.
+
+Read-only.
+
+Arguments:
+
+- `t` (number) Moment in ms from the start of the video (default 0).
+- `video` (string) Id of a video; defaults to the first.
+- `x` (number, required) 
+- `y` (number, required) 
 
 ## `get_capabilities`
 
@@ -903,7 +1098,7 @@ Arguments:
 
 - `file` (string, required) media/<name> of a png, jpg or webp.
 - `mask_only` (boolean) Write only the mask.
-- `model` (string) A rembg model name such as u2net, isnet-general-use or birefnet-general (the user's rembg may download it the first time). Default: rembg's own.
+- `model` (string) A rembg model name such as u2net, isnet-general-use or birefnet-general (the user's rembg may download it the first time). Default: rembg's own. Model weights have their own licences and some (for example bria-rmbg) are non-commercial: when the project is commercial, name isnet-general-use or u2net.
 - `timeout_s` (integer) Stop the program after this long (default 180).
 
 ## `video_strip`
@@ -970,6 +1165,33 @@ Arguments:
 - `threshold` (integer) A channel must differ by more than this to count as changed (default 12).
 - `time_ms` (integer, required) The first moment.
 - `video` (string, required) Id of a video from list_videos.
+
+## `list_style_packs`
+
+The style packs: a ready-made look for a piece of work. Each one carries a palette (bg, surface, fg, muted, border, accent), a type scale, a shape posture and a motion personality, with the rules that keep it coherent. Pick ONE and say why it fits the brief; never mix two. Read the `packs` playbook before you choose.
+
+Read-only.
+
+No arguments.
+
+## `get_style_pack`
+
+One style pack in full: its colours, its type, its shapes, its motion and its rules written as guidance you can follow, plus what it must never do. Read it before you build anything with the pack.
+
+Read-only.
+
+Arguments:
+
+- `id` (string, required) A pack id from list_style_packs.
+
+## `apply_style_pack`
+
+Commit the design to a style pack: writes its palette into the document as the tokens bg, surface, fg, muted, border, accent, accent_2 and shadow, locks the palette (the linter then flags any colour outside it, rule OD092) and records the pack in the workspace brief so later tools know it. It is ONE attributed, checkpointed, undoable step: undo it and the palette goes with it. Paint with the tokens afterwards ({bg}, {accent}, ...) instead of literal colours. `overrides` changes single colours (for example {"accent": "#ff8800"}) when the user's brand demands it.
+
+Arguments:
+
+- `id` (string, required) A pack id from list_style_packs.
+- `overrides` (object) Colours to change: token name (bg, surface, fg, muted, border, accent, accent_2, shadow) to a #rrggbb value.
 
 ## `show_preview`
 

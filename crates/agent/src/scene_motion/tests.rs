@@ -327,25 +327,50 @@ fn camera_values_stay_inside_the_camera_limits() {
     }
 }
 
+/// A stagger of `step` milliseconds, one step per unit of distance.
+fn each(step: f64) -> StaggerSpec {
+    StaggerSpec {
+        step: Step::Each(step),
+        ..StaggerSpec::default()
+    }
+}
+
 #[test]
 fn stagger_orders_by_origin() {
-    assert_eq!(
-        stagger_delays(4, 100, Origin::First, 0),
-        vec![0, 100, 200, 300]
+    let delays = |n: usize, from: Origin| {
+        stagger_offsets_ms(
+            n,
+            &StaggerSpec {
+                from,
+                ..each(100.0)
+            },
+        )
+    };
+    assert_eq!(delays(4, Origin::First), vec![0, 100, 200, 300]);
+    assert_eq!(delays(4, Origin::Last), vec![300, 200, 100, 0]);
+    assert_eq!(delays(5, Origin::Center), vec![200, 100, 0, 100, 200]);
+    let random = stagger_offsets_ms(
+        6,
+        &StaggerSpec {
+            from: Origin::Random,
+            seed: Some(5),
+            ..each(100.0)
+        },
     );
-    assert_eq!(
-        stagger_delays(4, 100, Origin::Last, 0),
-        vec![300, 200, 100, 0]
-    );
-    assert_eq!(
-        stagger_delays(5, 100, Origin::Center, 0),
-        vec![200, 100, 0, 100, 200]
-    );
-    let random = stagger_delays(6, 100, Origin::Random, 5);
     let mut sorted = random.clone();
     sorted.sort_unstable();
     assert_eq!(sorted, vec![0, 100, 200, 300, 400, 500]);
-    assert_eq!(random, stagger_delays(6, 100, Origin::Random, 5));
+    assert_eq!(
+        random,
+        stagger_offsets_ms(
+            6,
+            &StaggerSpec {
+                from: Origin::Random,
+                seed: Some(5),
+                ..each(100.0)
+            }
+        )
+    );
 }
 
 #[test]
@@ -359,45 +384,295 @@ fn the_generator_is_deterministic_and_spread() {
 
 #[test]
 fn edges_go_together_from_both_ends_inward() {
-    assert_eq!(
-        stagger_delays(5, 100, Origin::Edges, 0),
-        vec![0, 100, 200, 100, 0]
-    );
-    assert_eq!(
-        stagger_delays(4, 100, Origin::Edges, 0),
-        vec![0, 100, 100, 0]
-    );
+    let delays = |n: usize| {
+        stagger_offsets_ms(
+            n,
+            &StaggerSpec {
+                from: Origin::Edges,
+                ..each(100.0)
+            },
+        )
+    };
+    assert_eq!(delays(5), vec![0, 100, 200, 100, 0]);
+    assert_eq!(delays(4), vec![0, 100, 100, 0]);
     assert_eq!(Origin::parse("edges"), Some(Origin::Edges));
 }
 
 #[test]
 fn a_grid_stagger_delays_by_distance_from_the_start_cell() {
     // 3 columns x 2 rows, indices 0 1 2 / 3 4 5
-    let manhattan = |from, start| grid_delays(6, 3, 100, from, start, Metric::Manhattan, 0);
+    let grid = |from, metric| {
+        stagger_offsets_ms(
+            6,
+            &StaggerSpec {
+                from,
+                grid: Some((3, 2)),
+                metric,
+                ..each(100.0)
+            },
+        )
+    };
     assert_eq!(
-        manhattan(Origin::First, None),
+        grid(Origin::First, Metric::Manhattan),
         vec![0, 100, 200, 100, 200, 300]
     );
     assert_eq!(
-        manhattan(Origin::Last, None),
+        grid(Origin::Last, Metric::Manhattan),
         vec![300, 200, 100, 200, 100, 0]
     );
     assert_eq!(
-        manhattan(Origin::First, Some(4)),
+        grid(Origin::Index(4), Metric::Manhattan),
         vec![200, 100, 200, 100, 0, 100]
     );
-    let euclid = grid_delays(6, 3, 100, Origin::First, Some(0), Metric::Euclid, 0);
-    assert_eq!(euclid, vec![0, 100, 200, 100, 141, 224]);
-    // a 3x3 grid: the middle cell is last from the edges, first from the center
-    let edges = grid_delays(9, 3, 100, Origin::Edges, None, Metric::Euclid, 0);
-    assert_eq!(edges, vec![0, 0, 0, 0, 100, 0, 0, 0, 0]);
-    let center = grid_delays(9, 3, 100, Origin::Center, None, Metric::Manhattan, 0);
-    assert_eq!(center, vec![200, 100, 200, 100, 0, 100, 200, 100, 200]);
-    let a = grid_delays(9, 3, 100, Origin::Random, None, Metric::Euclid, 4);
     assert_eq!(
-        a,
-        grid_delays(9, 3, 100, Origin::Random, None, Metric::Euclid, 4)
+        grid(Origin::First, Metric::Euclid),
+        vec![0, 100, 200, 100, 141, 224]
     );
+    // a 3x3 grid: the middle cell is last from the edges, first from the center
+    let edges = stagger_offsets_ms(
+        9,
+        &StaggerSpec {
+            from: Origin::Edges,
+            grid: Some((3, 3)),
+            ..each(100.0)
+        },
+    );
+    assert_eq!(edges, vec![0, 0, 0, 0, 100, 0, 0, 0, 0]);
+    let center = stagger_offsets_ms(
+        9,
+        &StaggerSpec {
+            from: Origin::Center,
+            grid: Some((3, 3)),
+            metric: Metric::Manhattan,
+            ..each(100.0)
+        },
+    );
+    assert_eq!(center, vec![200, 100, 200, 100, 0, 100, 200, 100, 200]);
+    let random = stagger_offsets_ms(
+        9,
+        &StaggerSpec {
+            from: Origin::Random,
+            grid: Some((3, 3)),
+            seed: Some(4),
+            ..each(100.0)
+        },
+    );
+    assert_eq!(
+        random,
+        stagger_offsets_ms(
+            9,
+            &StaggerSpec {
+                from: Origin::Random,
+                grid: Some((3, 3)),
+                seed: Some(4),
+                ..each(100.0)
+            }
+        )
+    );
+}
+
+#[test]
+fn the_stagger_vectors_are_the_ones_the_research_gives() {
+    let delays = |n: usize, spec: StaggerSpec| stagger_offsets_ms(n, &spec);
+    assert_eq!(delays(5, each(100.0)), vec![0, 100, 200, 300, 400]);
+    assert_eq!(
+        delays(
+            5,
+            StaggerSpec {
+                from: Origin::Center,
+                ..each(100.0)
+            }
+        ),
+        vec![200, 100, 0, 100, 200]
+    );
+    assert_eq!(
+        delays(
+            4,
+            StaggerSpec {
+                from: Origin::Center,
+                ..each(100.0)
+            }
+        ),
+        vec![150, 50, 50, 150]
+    );
+    assert_eq!(
+        delays(
+            5,
+            StaggerSpec {
+                from: Origin::Last,
+                ..each(100.0)
+            }
+        ),
+        vec![400, 300, 200, 100, 0]
+    );
+    assert_eq!(
+        delays(
+            5,
+            StaggerSpec {
+                from: Origin::Index(1),
+                ..each(100.0)
+            }
+        ),
+        vec![100, 0, 100, 200, 300]
+    );
+    assert_eq!(
+        delays(
+            5,
+            StaggerSpec {
+                reversed: true,
+                ..each(100.0)
+            }
+        ),
+        vec![400, 300, 200, 100, 0]
+    );
+    assert_eq!(
+        delays(
+            5,
+            StaggerSpec {
+                ease: Some(Ease::PowerOut(2000)),
+                ..each(100.0)
+            }
+        ),
+        vec![0, 175, 300, 375, 400]
+    );
+    // a grid of 3 columns and 2 rows
+    let grid = |from, metric, axis| {
+        delays(
+            6,
+            StaggerSpec {
+                from,
+                grid: Some((3, 2)),
+                metric,
+                axis,
+                ..each(100.0)
+            },
+        )
+    };
+    assert_eq!(
+        grid(Origin::First, Metric::Euclid, None),
+        vec![0, 100, 200, 100, 141, 224]
+    );
+    assert_eq!(
+        grid(Origin::Center, Metric::Euclid, None),
+        vec![112, 50, 112, 112, 50, 112]
+    );
+    assert_eq!(
+        grid(Origin::First, Metric::Manhattan, None),
+        vec![0, 100, 200, 100, 200, 300]
+    );
+    assert_eq!(
+        grid(Origin::First, Metric::Euclid, Some(Axis::X)),
+        vec![0, 100, 200, 0, 100, 200]
+    );
+    assert_eq!(
+        grid(Origin::First, Metric::Euclid, Some(Axis::Y)),
+        vec![0, 0, 0, 100, 100, 100]
+    );
+    // reading one axis from the last cell would start before zero: the delays shift
+    assert_eq!(
+        grid(Origin::Last, Metric::Euclid, Some(Axis::X)),
+        vec![0, 100, 200, 0, 100, 200]
+    );
+}
+
+#[test]
+fn a_value_stagger_spreads_a_range_over_the_distances() {
+    let values = |n: usize, range: [f64; 2], from: Origin| {
+        stagger_values(
+            n,
+            &StaggerSpec {
+                step: Step::Range(range[0], range[1]),
+                from,
+                ..StaggerSpec::default()
+            },
+        )
+    };
+    let got = values(4, [1.0, 0.1], Origin::First);
+    assert!((got[0] - 1.0).abs() < 1e-9);
+    assert!((got[1] - 0.7).abs() < 1e-9);
+    assert!((got[2] - 0.4).abs() < 1e-9);
+    assert!((got[3] - 0.1).abs() < 1e-9);
+    // one node alone has no distance to spread over
+    let alone = values(1, [1.0, 0.1], Origin::First);
+    assert_eq!(alone.len(), 1);
+    assert!((alone[0] - 1.0).abs() < 1e-9);
+    // a scale that falls off from the middle
+    let scales = values(5, [1.0, 0.6], Origin::Center);
+    let want = [0.6, 0.8, 1.0, 0.8, 0.6];
+    for (got, want) in scales.iter().zip(want) {
+        assert!((got - want).abs() < 1e-9, "{got} against {want}");
+    }
+}
+
+#[test]
+fn a_spatial_stagger_measures_between_the_real_centres() {
+    let square = stagger_offsets_ms(
+        4,
+        &StaggerSpec {
+            positions: Some(vec![(0.0, 0.0), (100.0, 0.0), (0.0, 100.0), (100.0, 100.0)]),
+            ..each(100.0)
+        },
+    );
+    assert_eq!(square, vec![0, 100, 100, 141]);
+    let row = stagger_offsets_ms(
+        3,
+        &StaggerSpec {
+            positions: Some(vec![(0.0, 0.0), (100.0, 0.0), (300.0, 0.0)]),
+            ..each(100.0)
+        },
+    );
+    assert_eq!(row, vec![0, 100, 300]);
+}
+
+#[test]
+fn the_seeded_generator_is_the_same_every_run() {
+    let mut rng = Mulberry32::new(0);
+    assert!((rng.next_f64() - 0.26642920868471265).abs() < 1e-15);
+    let mut rng = Mulberry32::new(0);
+    assert!((rng.range(-1.0, 1.0, 4) + 0.4672).abs() < 1e-9);
+    let mut rng = Mulberry32::new(0);
+    assert_eq!(rng.range(0.0, 1.0, 0), 0.0);
+    let mut rng = Mulberry32::new(0);
+    assert_eq!(rng.range(0.0, 100.0, 0), 26.0);
+    let mut items: Vec<u32> = (0..8).collect();
+    let mut rng = Mulberry32::new(3);
+    rng.shuffle(&mut items);
+    let mut sorted = items.clone();
+    sorted.sort_unstable();
+    assert_eq!(sorted, (0..8).collect::<Vec<_>>());
+    assert_eq!(items, {
+        let mut again: Vec<u32> = (0..8).collect();
+        Mulberry32::new(3).shuffle(&mut again);
+        again
+    });
+}
+
+#[test]
+fn a_jittered_stagger_is_seeded_and_shifts_what_it_pushes_below_zero() {
+    let jittered = |seed: u64| {
+        stagger_values(
+            1,
+            &StaggerSpec {
+                jitter: Some((10.0, 10.0)),
+                seed: Some(seed),
+                ..each(100.0)
+            },
+        )
+    };
+    let value = jittered(0)[0];
+    assert!((value + 4.672).abs() < 1e-6, "{value}");
+    assert_eq!(jittered(0), jittered(0));
+    assert_ne!(jittered(0), jittered(7));
+    // the delays never go below zero
+    let offsets = stagger_offsets_ms(
+        5,
+        &StaggerSpec {
+            jitter: Some((200.0, 200.0)),
+            seed: Some(1),
+            ..each(100.0)
+        },
+    );
+    assert_eq!(offsets.iter().min(), Some(&0));
 }
 
 #[test]

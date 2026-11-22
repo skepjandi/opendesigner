@@ -730,7 +730,7 @@ pub enum Operation {
         exit: Option<crate::video::Entrance>,
         /// The easing of the arrival and exit (default ease_out).
         #[serde(default)]
-        ease: Option<crate::video::Ease>,
+        ease: Option<crate::Ease>,
     },
     /// Remove an overlay.
     RemoveOverlay { video: NodeId, overlay: NodeId },

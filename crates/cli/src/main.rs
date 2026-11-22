@@ -223,7 +223,8 @@ enum Command {
         /// How far the move goes; 1 is as designed.
         #[arg(long, alias = "strength")]
         intensity: Option<f64>,
-        /// The ease: linear, ease_in, ease_out, ease_in_out, back, spring, elastic, bounce, power2_out, power4_out, expo_out, circ_out, sine_in_out, steps_4, ...
+        /// The ease: linear, ease_in, ease_out, ease_in_out, back, spring, elastic, bounce, power2_out, power4_out, expo_out, circ_out, sine_in_out, steps_4, anticipate, ...
+        /// A tuned ease is the name with numbers: cubic(0.25,0.1,0.25,1), spring(450,0.3), back_out(1.2), elastic_out(1,0.3), power_out(3), steps(5).
         #[arg(long)]
         ease: Option<String>,
         /// once, loop or pingpong (scene moves).
@@ -267,7 +268,7 @@ enum Command {
         /// stagger: lay the nodes out as a grid this many columns wide.
         #[arg(long)]
         columns: Option<u32>,
-        /// stagger with --columns: manhattan or euclid distance.
+        /// stagger with --columns: manhattan, euclid or chebyshev distance.
         #[arg(long)]
         metric: Option<String>,
         /// stagger with --columns: index in --nodes of the cell the wave starts from.

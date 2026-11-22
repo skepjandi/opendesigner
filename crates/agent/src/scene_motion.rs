@@ -17,11 +17,13 @@ use od_core::animation::{AnimProp, Key, MAX_KEYS, Repeat};
 use od_core::transform::{MAX_CAMERA_PAN, MAX_CAMERA_ZOOM, MIN_CAMERA_ZOOM};
 
 mod burst;
-mod grid;
+mod stagger;
 #[cfg(test)]
 mod tests;
 
-pub use grid::{Metric, grid_delays};
+pub use stagger::{
+    Axis, Metric, Mulberry32, Origin, StaggerSpec, Step, stagger_offsets_ms, stagger_values,
+};
 
 /// A small deterministic generator (SplitMix64): the same seed always gives the same numbers, so
 /// every move and every block built from a seed is byte-identical from run to run.
@@ -225,6 +227,21 @@ impl Named {
                 | Named::Swing
                 | Named::Orbit
                 | Named::CameraDrift
+        )
+    }
+
+    /// Whether one ease runs over the whole move (the entrances), so a spring ease needs the
+    /// move to last as long as the spring takes to rest.
+    pub fn spans_ease(self) -> bool {
+        matches!(
+            self,
+            Named::PopIn
+                | Named::BounceIn
+                | Named::ElasticIn
+                | Named::SlideIn(_)
+                | Named::FadeUp
+                | Named::ZoomIn
+                | Named::DrawOn
         )
     }
 
@@ -949,51 +966,4 @@ fn clamp_camera(prop: AnimProp, v: f64) -> f64 {
         AnimProp::CameraX | AnimProp::CameraY => v.clamp(-MAX_CAMERA_PAN, MAX_CAMERA_PAN),
         _ => v,
     }
-}
-
-/// Where a stagger starts.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Origin {
-    First,
-    Last,
-    Center,
-    /// The first and last go together, then inward.
-    Edges,
-    Random,
-}
-
-impl Origin {
-    pub fn parse(s: &str) -> Option<Origin> {
-        Some(match s {
-            "first" => Origin::First,
-            "last" => Origin::Last,
-            "center" => Origin::Center,
-            "edges" => Origin::Edges,
-            "random" => Origin::Random,
-            _ => return None,
-        })
-    }
-}
-
-/// The delay of each of `count` items: the one `from` names goes first, the rest follow one
-/// `step_ms` apart (by distance from the middle for `center`; shuffled, by `seed`, for `random`).
-pub fn stagger_delays(count: usize, step_ms: u64, from: Origin, seed: u64) -> Vec<u64> {
-    let ranks: Vec<f64> = match from {
-        Origin::First => (0..count).map(|i| i as f64).collect(),
-        Origin::Last => (0..count).map(|i| (count - 1 - i) as f64).collect(),
-        Origin::Center => {
-            let mid = (count as f64 - 1.0) / 2.0;
-            (0..count).map(|i| (i as f64 - mid).abs()).collect()
-        }
-        Origin::Edges => (0..count).map(|i| i.min(count - 1 - i) as f64).collect(),
-        Origin::Random => {
-            let mut order: Vec<f64> = (0..count).map(|i| i as f64).collect();
-            Rng::new(seed).shuffle(&mut order);
-            order
-        }
-    };
-    ranks
-        .into_iter()
-        .map(|r| (r * step_ms as f64).round() as u64)
-        .collect()
 }

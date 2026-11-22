@@ -83,6 +83,7 @@ Path data on a node (`path.rs`) is data, never code: a hand-written parser (no d
 
 The inspection tools (`video_strip`, `video_crop`, `frame_grid`, `video_diff`, `crates/agent/src/inspect.rs`) are read-only: they render and return one image, write nothing and run no program (footage needs `ffmpeg` exactly as `render_video_frame` does). All numbers are bounded before drawing: at most 36 pictures in a strip, a crop or an enlarged crop of at most 2,048 px on a side, padding at most 512 px, zoom at most 4. `opendesigner inspect` writes its one PNG through `inspect::write_export`: a plain `.png` name (the `export_name` rule), only into `<project>/exports/`, and an `exports/` folder or file that is a symbolic link is refused.
 **Captions, transcripts and sound analysis** are untrusted input like everything an agent sends. `import_captions` accepts at most 2 MB of text and parses it with a hand-written SRT/WebVTT/JSON reader that enforces the cue, word and length caps of `docs/wiki/document-format.md#sound-tracks-and-captions`, so a hostile transcript can neither grow a project without bound nor smuggle markup (tags are dropped, text is control-character checked); captions are only ever drawn as text. `detect_pauses`, `get_waveform` and `remove_pauses` run `ffmpeg` on a plain-named file of the project's `media/` only (`audio_path` and `footage_path` refuse separators, dots and symlinks), as a separate process with no network, reading at most 30 minutes of sound.
+**The scene spec** (`scene_spec_new`, `scene_spec_write`, `scene_spec_validate`, `scene_status`, `record_review`; `crates/agent/src/scene_spec/`) writes one JSON file per video inside the project: `<project>/scene_specs/<name>.json`. The name is a plain name (lowercase letters, digits, `. _ -`, at most 64 characters, no leading dot, no `..`), the file is capped at 256 KB, written atomically (a temporary file in the same folder, then a rename) and never written or read through a symbolic link (the folder and the file are both checked with `symlink_metadata`). The file is the agent's own text and is read back as untrusted input: unknown fields are kept, the review history is written by `record_review` only, and the evidence a review names must be plain `exports/<name>.png` files inside the project. Nothing is written outside the project folder, and the spec never reaches the document: it is a plan, not an operation.
 
 ## Device access
 
@@ -130,6 +131,20 @@ Allowed destinations: the user's configured model endpoint or agent, sites the u
 - It is sent to **freesound.org only**, in the query string of the API's own requests, where the API documents it (`/apiv2/search/text/`, `/apiv2/sounds/<id>/`). A preview is fetched from the same site (freesound.org or a host under it); a redirect that leads anywhere else is refused, so the token cannot be replayed to a third party.
 - The client (`crates/agent/src/http.rs`) is a small HTTP/1.1 client: one `GET`, no cookies, no cache, a connect and a read timeout, a cap on the answer's size, and the redirect rule above. The secure channel is `rustls` with the root certificates the operating system trusts.
 - What comes back is copied into the project's `media/` folder and nothing else: no sound, no metadata and no token is sent anywhere else, and the app never uploads anything.
+
+**Keyless sound sources** need no credential, so an agent may reach them on its own; they are four fixed addresses and nothing an agent supplies:
+
+| source | address | what is fetched |
+|---|---|---|
+| Openverse | `https://api.openverse.org/v1/audio/` | the search (`?q=&source=&license_type=commercial,modification&page_size=`) and one item (`/audio/<id>/`); no key, no account |
+| Incompetech | `https://incompetech.com/music/royalty-free/pieces.json` and `.../mp3-royaltyfree/<file>.mp3` | the catalogue and one track |
+| ccMixter | `https://ccmixter.org/api/query?f=json&search=&lic=by&limit=` and `https://ccmixter.org/content/...` | the search and one track |
+| Freesound | `https://freesound.org/...` | as above, with the user's token |
+
+- The **download host is an allowlist, not the search's answer**: a file may only come from the hosts the provider is known to use, over https (`freesound.org`, `jamendo.com`, `wikimedia.org` for Openverse; `incompetech.com`; `ccmixter.org`; `freesound.org` for Freesound). A host outside the list, a plain `http` address, an odd port or a redirect to another site is refused before anything is downloaded. The allowlist lives in `crates/agent/src/sound_license.rs`.
+- The same client rules apply (one `GET`, no cookies, a connect and a read timeout, a cap on the size: 32 MB for a sound, 2 MB for a search answer, 4 MB for the Incompetech catalogue). Plain `http://ccmixter.org` is never used: the site answers over https.
+- What comes back is copied into the project's `media/` folder and nothing else, and its licence is written next to it as `media/<name>.license.json`. No sound, no metadata and no token is sent anywhere else, and the app never uploads anything.
+- A licence decides what a project may use. A project is **commercial by default** (`sound-settings.json` in the project folder, read and written by the `sound_settings` tool): while it is, sounds under a non-commercial, a no-derivatives or an unknown licence are left out of the search and refused on import. The setting is never changed to get a sound through: it changes only when the user says the video is not commercial, and the reason is recorded.
 
 **Asset packs** are the second thing an agent can make the app fetch, and the user decides each time ([Store Assets](./store-assets.md#asset-packs-icons-shapes-backgrounds-sounds)):
 

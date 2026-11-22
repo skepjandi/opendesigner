@@ -98,6 +98,14 @@ struct Style<'a> {
 /// The style of `node`'s text at `scale`, or `None` when there is nothing to draw.
 fn style_of(node: &Node, scale: f32) -> Option<Style<'_>> {
     let text = node.text.as_deref().filter(|t| !t.is_empty())?;
+    style_with(node, text, scale)
+}
+
+/// The style of `text` set in `node`'s way at `scale`, or `None` when there is nothing to draw.
+fn style_with<'a>(node: &'a Node, text: &'a str, scale: f32) -> Option<Style<'a>> {
+    if text.is_empty() {
+        return None;
+    }
     let size = node.font_size.unwrap_or(16.0) as f32 * scale;
     let line = size * node.line_height.unwrap_or(DEFAULT_LINE_HEIGHT) as f32;
     if !(size >= 0.5 && line > 0.0) {
@@ -170,6 +178,104 @@ pub(crate) fn measure(node: &Node) -> Option<(f32, f32)> {
                 (w.max(run.line_w), h.max(run.line_top + run.line_height))
             })
     }))
+}
+
+/// One laid-out glyph (a cluster: a ligature or a letter with its marks is one) at scale 1.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlacedGlyph {
+    /// Byte range of the cluster in [`PlacedLine::text`].
+    pub start: usize,
+    pub end: usize,
+    /// Where the renderer draws the glyph: its left edge from the left of the text box, with the
+    /// sub-pixel offset the rasteriser works in already added.
+    pub x: f32,
+    /// Its top from the baseline, with the sub-pixel offset the rasteriser takes off already
+    /// added.
+    pub y: f32,
+    /// The advance the glyph takes.
+    pub width: f32,
+}
+
+/// One row of laid-out text, as the renderer wraps and draws it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlacedLine {
+    /// The paragraph (text between line breaks) this row belongs to.
+    pub paragraph: usize,
+    /// That whole paragraph; glyph ranges index into it.
+    pub text: String,
+    /// Top of the row, and its baseline, from the top of the text box, in document units.
+    pub top: f32,
+    pub baseline: f32,
+    pub height: f32,
+    pub width: f32,
+    pub rtl: bool,
+    pub glyphs: Vec<PlacedGlyph>,
+}
+
+/// The rows of `node`'s text at scale 1 with every glyph's position, from the same layout the
+/// renderer draws. `None` when the node has no text to draw.
+pub(crate) fn layout_lines(node: &Node) -> Option<Vec<PlacedLine>> {
+    let style = style_of(node, 1.0)?;
+    Some(with_layout(&style, |buffer, system, _| {
+        buffer.shape_until_scroll(system, false);
+        buffer
+            .layout_runs()
+            .map(|run| PlacedLine {
+                paragraph: run.line_i,
+                text: run.text.to_string(),
+                top: run.line_top,
+                baseline: run.line_y,
+                height: run.line_height,
+                width: run.line_w,
+                rtl: run.rtl,
+                glyphs: run.glyphs.iter().map(placed_glyph).collect(),
+            })
+            .collect()
+    }))
+}
+
+/// One run of text laid out on its own, as the renderer draws it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlacedRun {
+    pub glyphs: Vec<PlacedGlyph>,
+    /// Top of the row, its baseline and its height, from the top of the text box.
+    pub top: f32,
+    pub baseline: f32,
+    pub height: f32,
+    pub width: f32,
+}
+
+/// The first row of `text` laid out on its own in the style of `node`: `aligned` keeps the
+/// node's own alignment (as when a line is cut out of the text) and otherwise the text is set
+/// flush left (as when a word or a character is cut out).
+pub(crate) fn layout_run<'a>(node: &'a Node, text: &'a str, aligned: bool) -> Option<PlacedRun> {
+    let mut style = style_with(node, text, 1.0)?;
+    if !aligned {
+        style.align = Align::Left;
+    }
+    with_layout(&style, |buffer, system, _| {
+        buffer.shape_until_scroll(system, false);
+        let run = buffer.layout_runs().next()?;
+        Some(PlacedRun {
+            glyphs: run.glyphs.iter().map(placed_glyph).collect(),
+            top: run.line_top,
+            baseline: run.line_y,
+            height: run.line_height,
+            width: run.line_w,
+        })
+    })
+}
+
+/// Where the renderer draws one glyph: the layout's position with the rasteriser's sub-pixel
+/// offsets already in it.
+fn placed_glyph(g: &cosmic_text::LayoutGlyph) -> PlacedGlyph {
+    PlacedGlyph {
+        start: g.start,
+        end: g.end,
+        x: g.x + g.font_size * g.x_offset,
+        y: g.y - g.font_size * g.y_offset,
+        width: g.w,
+    }
 }
 
 /// Draws `node`'s text under `transform`. Where the map only scales and translates the glyphs

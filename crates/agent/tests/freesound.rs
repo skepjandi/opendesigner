@@ -160,7 +160,9 @@ fn answer(path: &str, preview: &str) -> (&'static str, &'static str, Vec<u8>) {
         return ("200 OK", "application/json", vec![b'x'; 3 * 1024 * 1024]);
     }
     if path.starts_with("/previews/") {
-        return ("200 OK", "audio/mpeg", vec![b'I'; 64]);
+        let mut body = b"ID3\x04\0\0\0\0\0\0".to_vec();
+        body.extend_from_slice(&[b'I'; 56]);
+        return ("200 OK", "audio/mpeg", body);
     }
     ("404 Not Found", "text/plain", b"nothing here".to_vec())
 }
@@ -228,36 +230,41 @@ fn child() {
 
     // Without a token the tools say what to do.
     let _ = std::fs::remove_file(&token_file);
-    let missing = freesound::search("bell", None, 1).unwrap_err().to_string();
+    let missing = freesound::search("bell", None, 1, true)
+        .unwrap_err()
+        .to_string();
     assert!(
         missing.contains("no Freesound token") && missing.contains("freesound.org/apiv2/apply/"),
         "the missing token should be explained: {missing}"
     );
 
     std::fs::write(&token_file, "test-token\n").unwrap();
-    let sounds = freesound::search("bell", Some(2000), 1).unwrap();
+    let (sounds, hidden) = freesound::search("bell", Some(2000), 1, true).unwrap();
     assert_eq!(sounds.len(), 2);
+    assert_eq!(hidden, 0);
     assert_eq!(sounds[0].id, 7);
     assert_eq!(sounds[0].name, "Bell");
     assert_eq!(sounds[0].duration_ms, 1500);
-    assert_eq!(sounds[0].license, "CC0 1.0");
+    assert_eq!(sounds[0].license.spdx, "CC0-1.0");
     assert_eq!(
-        sounds[0].license_url,
+        sounds[0].license.url,
         "https://creativecommons.org/publicdomain/zero/1.0/"
     );
     assert_eq!(sounds[0].author, "someone");
     assert_eq!(
         sounds[0].attribution(),
-        "Bell by someone, CC0 1.0, https://freesound.org/s/7/"
+        "\"Bell\" by someone (https://freesound.org/s/7/), licensed under CC0 1.0 (https://creativecommons.org/publicdomain/zero/1.0/)"
     );
-    assert_eq!(sounds[1].license, "Attribution");
+    assert_eq!(sounds[1].license.spdx, "CC-BY-4.0");
     assert_eq!(
-        sounds[1].license_url,
+        sounds[1].license.url,
         "https://creativecommons.org/licenses/by/4.0/"
     );
 
     // An answer that is too big is refused.
-    let huge = freesound::search("huge", None, 1).unwrap_err().to_string();
+    let huge = freesound::search("huge", None, 1, true)
+        .unwrap_err()
+        .to_string();
     assert!(
         huge.contains("larger than"),
         "a huge answer should be refused: {huge}"
@@ -272,37 +279,56 @@ fn child() {
 
     // Importing puts the preview and what it is into the project.
     let project = tempfile::tempdir().unwrap();
-    let imported = freesound::import(project.path(), 8, Some("drum")).unwrap();
+    let imported = freesound::import(project.path(), 8, Some("drum"), true).unwrap();
     assert_eq!(imported.file, "media/drum.mp3");
-    assert_eq!(imported.sidecar, "media/drum.freesound.json");
+    assert_eq!(imported.sidecar, "media/drum.license.json");
     assert_eq!(
         imported.attribution,
-        "Drum loop by other, Attribution, https://freesound.org/s/8/"
+        "\"Drum loop\" by other (https://freesound.org/s/8/), licensed under CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/)"
     );
     assert!(project.path().join("media/drum.mp3").exists());
     let sidecar: Value = serde_json::from_str(
-        &std::fs::read_to_string(project.path().join("media/drum.freesound.json")).unwrap(),
+        &std::fs::read_to_string(project.path().join("media/drum.license.json")).unwrap(),
     )
     .unwrap();
-    assert_eq!(sidecar["id"], 8);
-    assert_eq!(sidecar["title"], "Drum loop");
-    assert_eq!(sidecar["author"], "other");
-    assert_eq!(sidecar["license"], "Attribution");
+    assert_eq!(sidecar["schema"], 1);
+    assert_eq!(sidecar["source"]["provider"], "freesound");
+    assert_eq!(sidecar["source"]["item_id"], "8");
     assert_eq!(
-        sidecar["license_url"],
+        sidecar["source"]["landing_url"],
+        "https://freesound.org/s/8/"
+    );
+    assert_eq!(sidecar["title"], "Drum loop");
+    assert_eq!(sidecar["creator"]["name"], "other");
+    assert_eq!(sidecar["license"]["spdx"], "CC-BY-4.0");
+    assert_eq!(
+        sidecar["license"]["url"],
         "https://creativecommons.org/licenses/by/4.0/"
     );
-    assert_eq!(sidecar["source_url"], "https://freesound.org/s/8/");
+    assert!(
+        sidecar["license"]["attribution_required"]
+            .as_bool()
+            .unwrap()
+    );
+    assert_eq!(sidecar["credit_line"], imported.attribution);
+    assert!(sidecar["sha256"].as_str().unwrap().len() == 64);
 
     // The same sound again gets its own name; nothing is overwritten.
-    let again = freesound::import(project.path(), 8, Some("drum")).unwrap();
+    let again = freesound::import(project.path(), 8, Some("drum"), true).unwrap();
     assert_eq!(again.file, "media/drum-2.mp3");
 
     // The sounds in the project are listed with their attribution.
-    let listed = freesound::list_imported(project.path()).unwrap();
+    let listed = od_agent::sound_license::list_records(project.path());
     assert_eq!(listed.len(), 2);
     assert_eq!(listed[0].file, "media/drum-2.mp3");
-    assert!(listed[0].attribution.contains("Drum loop by other"));
+    assert!(
+        listed[0]
+            .sidecar
+            .as_ref()
+            .unwrap()
+            .credit_line
+            .contains("Drum loop")
+    );
 
     // The same through the tools.
     let ws = Workspace::create(&project.path().join("ws.od"), "Store").unwrap();
@@ -333,43 +359,47 @@ fn child() {
         (result["isError"].as_bool().unwrap(), parsed)
     };
 
-    let (is_error, found) = call("search_sounds", json!({"query": "bell"}));
+    let (is_error, found) = call(
+        "search_sounds",
+        json!({"query": "bell", "provider": "freesound"}),
+    );
     assert!(!is_error, "the search failed: {found}");
+    assert_eq!(found["provider"], "freesound");
     assert_eq!(found["sounds"].as_array().unwrap().len(), 2);
-    assert_eq!(found["sounds"][0]["id"], 7);
-    assert_eq!(found["sounds"][0]["license"], "CC0 1.0");
+    assert_eq!(found["sounds"][0]["id"], "7");
+    assert_eq!(found["sounds"][0]["license"], "CC0-1.0");
     assert!(
         found["sounds"][0]["attribution"]
             .as_str()
             .unwrap()
-            .contains("Bell by someone")
+            .contains("Bell")
     );
 
-    let (is_error, imported) = call("import_sound", json!({"id": 7, "name": "bell"}));
+    let (is_error, imported) = call(
+        "import_sound",
+        json!({"id": 7, "provider": "freesound", "name": "bell"}),
+    );
     assert!(!is_error, "the import failed: {imported}");
     assert_eq!(imported["file"], "media/bell.mp3");
-    assert_eq!(imported["sidecar"], "media/bell.freesound.json");
-    assert!(
-        imported["attribution"]
-            .as_str()
-            .unwrap()
-            .contains("Bell by someone, CC0 1.0")
+    assert_eq!(imported["sidecar"], "media/bell.license.json");
+    assert_eq!(imported["license"], "CC0-1.0");
+    assert_eq!(
+        imported["attribution_required"], false,
+        "CC0 asks for no credit"
     );
+    assert_eq!(imported["attribution"], "");
 
     let (is_error, listed) = call("list_sounds", json!({}));
     assert!(!is_error, "the listing failed: {listed}");
     let rows = listed.as_array().unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0]["file"], "media/bell.mp3");
-    assert!(
-        rows[0]["attribution"]
-            .as_str()
-            .unwrap()
-            .contains("Bell by someone")
-    );
+    assert_eq!(rows[0]["source"], "freesound");
+    assert_eq!(rows[0]["license"], "CC0-1.0");
+    assert!(rows[0]["attribution"].as_str().is_none_or(str::is_empty));
 
     // The tool writes into the project and nowhere else.
     let dir = ws.lock().unwrap().dir().unwrap().to_path_buf();
     assert!(dir.join("media/bell.mp3").exists());
-    assert!(dir.join("media/bell.freesound.json").exists());
+    assert!(dir.join("media/bell.license.json").exists());
 }
