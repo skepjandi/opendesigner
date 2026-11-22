@@ -517,9 +517,9 @@ fn draw_rig(k: &Kit, g: &Geo, pal: &Pal, cfg: &Cfg) -> (Grp, Rest) {
     rest.head_x = g.head.x - rox;
     rest.head_y = g.head.y - roy;
     rig.add_group(head);
-    for side in 0..2 {
+    for (side, arm_y) in rest.arm_y.iter_mut().enumerate() {
         rig.add_group(draw_arm(k, g, pal, cfg, side));
-        rest.arm_y[side] = g.shoulder(side).1 - g.arm_w / 2.0 - roy;
+        *arm_y = g.shoulder(side).1 - g.arm_w / 2.0 - roy;
     }
     rest.rig_x = rox;
     rest.rig_y = roy;
