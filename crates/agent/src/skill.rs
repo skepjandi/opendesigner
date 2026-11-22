@@ -455,7 +455,7 @@ for motion, use several overlays or `set_overlay` over time. Match the video's s
 The ids of a created video and clips come back in `created` (`v_...`, `c_...`). Width and height
 are even numbers; a frame of another shape is scaled to cover the video and cropped in the middle,
 so use frames of the video's shape. A transition (`cut`, `fade`, `slide_left`, `slide_right`, `slide_up`, `slide_down`, `dip`, `zoom_in`,
-`wipe_left`, `wipe_right`, `wipe_up`, `wipe_down`, `iris`, `flash`, `blur_dissolve`, `glitch_slice`)
+`wipe_left`, `wipe_right`, `wipe_up`, `wipe_down`, `iris`, `flash`, `blur_dissolve`, `glitch_slice`, `flip`, `clock_wipe`)
 overlaps the end of the clip before it, so it makes the video shorter by its length; the first
 clip's transition is not shown. `motion` zooms slowly from `scale_from` to `scale_to` (1 to 3) over
 the clip. Change a clip with `set_clip` (`duration_ms`, `frame`, `source`, `transition`, `motion`, and for footage

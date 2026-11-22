@@ -146,6 +146,22 @@ dissolves, sound tracks) and `format: srt` or `vtt` the captions. Read its `warn
 an EDL cannot hold design-frame clips, overlays, keyframes or grades, so export the finished video
 with `export_video` for those.
 
+Other files and parts. `export_video` writes by the ending of `file`: `.mp4` (the default), `.gif`
+(loops for ever, 480 px wide unless `width`, no sound), `.webm` and `.mov` (ProRes, for other editors;
+no sound here). `transparent: true` keeps what no clip covers clear in a gif, webm or mov, so a
+lower third or a sticker is a design frame with no fill exported on its own. `from_ms` and `to_ms`
+write a part (with its sound in an mp4), which is the cheap way to check one scene or make a teaser;
+`every_nth_frame` 2 turns a 30 fps video into a 15 fps GIF. A long full-size GIF is refused: shorten
+it, thin the frames or narrow it. A store preset is for the whole mp4 only.
+
+Length and wobble. `fit_clip_to_media {video, clip, file}` makes a clip as long as a voice-over or a
+recording (a title card held for the whole narration; `pad_ms` adds a beat after it); with no `file`
+a footage clip plays the rest of its own file. Everything after it moves, so check overlays and
+captions. `animate_noise {video, node, props: ["x", "y"], amplitude, frequency}` gives a shake, a
+drift or a breathing glow that never repeats (`loop: true` for one that does, seamlessly); a shake is
+amplitude 6 at frequency 6, a drifting cloud amplitude 40 at 0.2; keep amplitudes small enough that
+nothing leaves the frame, and look at a second of it with `video_strip`.
+
 ## Captions
 
 Captions are data on the video (`captions`: a style and timed cues), drawn in the preview and burned

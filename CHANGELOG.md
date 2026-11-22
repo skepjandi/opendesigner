@@ -8,6 +8,21 @@ All notable changes to OpenDesigner are documented here.
 
 ## Unreleased
 
+### feat(core,render,media,agent): more from Remotion: formats, parts, noise, fit to media, two transitions
+
+**Area:** `feat(render)`, `feat(media)`, `feat(core)`, `feat(agent)`, `docs(wiki)`, `feat(skill)`
+
+From Remotion's docs on noise, transition presentations, transparent videos, GIFs and `calculateMetadata()`, read 2026-11-22 ([Prior Art](docs/wiki/prior-art.md#video-agent-sources-2026-11-22)).
+
+- **`export_video` formats.** `.gif`, `.webm` (VP9) and `.mov` (ProRes) by the file's ending, with `transparent` (a clear ground, `VideoRenderer::with_transparent`; premultiplied pixels turned straight at the writer), `width`, `gif_loops`. New `od_media::Container` and `container.rs` (encoder, pixel format and filter graph per kind); `EncodeSettings` gains `container`, `every_nth`, `alpha`, `scale_width`, `gif_loops`.
+- **Parts and steps.** `from_ms`, `to_ms` and `every_nth_frame`: `od_render::export::export_frames_with` draws only the selected frames (the same pixels as in a full export, tested), an `.mp4` keeps the cut sound of the part, a GIF of a long video no longer draws all of it. A store preset checks whole `.mp4` files only.
+- **`animate_noise`.** Seeded value noise (`od_core::noise`, integer hashing, 1 to 4 octaves, seamless loop) written as keys, up to 4 properties with their own streams, additive by default.
+- **`fit_clip_to_media`.** A clip as long as an audio or footage file, or the rest of its own footage, plus `pad_ms`.
+- **Transitions `flip` and `clock_wipe`.** A flat card flip (`Pose::sx`) and a clockwise radius mask; no change to existing files.
+- **Docs.** Wiki: video-editing (formats and parts, noise motion, fit to media, transitions), agent-integration, security (what reaches ffmpeg), prior-art, roadmap decision log. Playbooks: video-direction and motion.
+
+**Not verified:** colour grades and blur on partly transparent edges, playing the WebM and the MOV in a browser or in Final Cut Pro, Premiere Pro or DaVinci Resolve (only decoded back with ffmpeg), Windows and Linux, and whether agents prefer these tools to what they did before.
+
 ### feat(agent,media,core): footage memory, timeline export and audio-driven motion
 
 **Area:** `feat(agent)`, `feat(media)`, `feat(core)`, `docs(wiki)`, `feat(skill)`
