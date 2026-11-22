@@ -37,8 +37,7 @@ echo "==> icon"
 tmp="$(mktemp -d)"
 iconset="$tmp/OpenDesigner.iconset"
 mkdir -p "$iconset"
-rsvg-convert --height 820 --keep-aspect-ratio "$root/assets/logo.svg" -o "$tmp/logo.png"
-magick "$tmp/logo.png" -background none -gravity center -extent 1024x1024 "$tmp/square.png"
+cp "$root/assets/app-icon.png" "$tmp/square.png"
 for size in 16 32 128 256 512; do
   sips -z $size $size "$tmp/square.png" --out "$iconset/icon_${size}x${size}.png" >/dev/null
   sips -z $((size * 2)) $((size * 2)) "$tmp/square.png" --out "$iconset/icon_${size}x${size}@2x.png" >/dev/null
