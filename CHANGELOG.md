@@ -8,6 +8,12 @@ All notable changes to OpenDesigner are documented here.
 
 ## Unreleased
 
+### feat(skill): a growth playbook for store assets
+
+**Area:** `feat(skill)`
+
+New `growth` playbook (`get_playbook growth`, `references/growth-playbook.md`): how people decide on a store page, what published tests do and do not show (Apple's three PPO tests, custom product page averages, vendor bundles flagged as such), the icon, the screenshot sequence, preview video, Play specifics, custom product pages, policy rails, localization, off-store cards, and the one-change-per-test plan the agent hands over. Evidence read 2026-11-22; conventions with no controlled data are labelled as such.
+
 ### feat(agent): a picture as depth layers
 
 **Area:** `feat(agent)`, `feat(render)`, `docs(wiki)`

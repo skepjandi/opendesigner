@@ -11,7 +11,7 @@ generated is not done.\n\
 the product's own repository, screens, colors and copy, and use the user's media (list_media, \
 find_files, import_file). Never invent facts, numbers, reviews or features.\n\
 2. Read the craft: call get_playbook with `design` for images, `video` and `motion` for video, \
-`formats` to choose sizes, `style` to pick a named look, `logo` for marks, `blocks` for ready-made parts, \
+`formats` to choose sizes, `growth` for store assets (what wins installs), `style` to pick a named look, `logo` for marks, `blocks` for ready-made parts, \
 `packs` (one style pack), `build` (plan a scene). Anything animated (animation, scene, explainer, motion graphics, cartoon, 2D, \
 illustration, Kurzgesagt, In a Nutshell) starts with `explainer`: an image backdrop with moving text is never an \
 animated scene; build it from moving vector shapes. \
@@ -79,6 +79,11 @@ pub const TOPICS: &[(&str, &str, &str)] = &[
         "formats",
         "sizes, aspect ratios and safe zones per platform",
         include_str!("../skill/formats.md"),
+    ),
+    (
+        "growth",
+        "assets that win users: how people decide, evidence for what converts, the icon, the screenshot sequence, video, Play and custom product pages, policy rails, localization, off-store cards, and the test plan to hand over",
+        include_str!("../skill/growth-playbook.md"),
     ),
     (
         "blocks",
