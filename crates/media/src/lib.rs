@@ -18,6 +18,7 @@ use thiserror::Error;
 pub mod analysis;
 pub mod cutout;
 pub mod external;
+pub mod footage;
 pub mod loudness;
 pub mod mix;
 pub mod speech;

@@ -4,7 +4,7 @@
 //! PNG image and a line of text, like `video_contact_sheet`. The CLI (`opendesigner inspect`)
 //! runs the same code and writes the picture into `exports/`.
 
-mod draw;
+pub(crate) mod draw;
 mod geometry;
 
 use std::borrow::Cow;

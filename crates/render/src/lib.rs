@@ -700,6 +700,17 @@ fn rounded_rect(w: f32, h: f32, r: f32) -> Option<Path> {
     p.finish()
 }
 
+/// A picture from opaque RGBA bytes (a decoded video frame). `None` when the size and the bytes
+/// do not agree.
+pub fn pixmap_from_rgba(width: u32, height: u32, rgba: &[u8]) -> Option<Pixmap> {
+    let mut pixmap = Pixmap::new(width, height)?;
+    if pixmap.data().len() != rgba.len() {
+        return None;
+    }
+    pixmap.data_mut().copy_from_slice(rgba);
+    Some(pixmap)
+}
+
 /// Pictures of one size laid out left to right, top to bottom, `cols` to a row, on a dark ground
 /// with a gap around each: a contact sheet. `None` when there are none or it is too large.
 pub fn grid(pictures: &[Pixmap], cols: u32) -> Option<Pixmap> {

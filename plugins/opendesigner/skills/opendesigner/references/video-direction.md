@@ -97,6 +97,26 @@ tighten pauses over 0.7 s; use a cut for energy and a short fade only to mark a 
 titles only where they help. Do not add effects for their own sake. Say in your reply which parts
 you cut and why, so the user can overrule.
 
+### Know the footage before you cut it
+
+When the user gives you recordings, do not cut blind and do not re-watch a file every time you need
+a moment from it. Build a memory once:
+
+1. `index_footage {file}` cuts the file into shots by where the picture changes (lower `threshold`,
+   0.15 to 0.2, for soft cuts; higher, 0.4 to 0.5, when it finds hundreds). With speech in it, call
+   `get_capabilities` and, if a speech program is there, add `transcribe: true`.
+2. `watch_footage {file, from_ms, to_ms, question}` on each shot (its `from_ms` and `to_ms` are in the
+   row) or on the whole file with 8 pictures. Look, then write what you saw.
+3. `index_footage {file, notes: [{shot, note, tags}]}`. A note is one plain sentence naming who or
+   what, doing what, where and how it is shot ("Founder at the desk laughing, medium shot, window
+   light"); tags are the words you would search for. Write the words a person would use, not
+   "good shot".
+4. Later, `search_footage {query}` returns shots with a ready `clip` for `add_clip`, so a request
+   like "the part where she explains pricing" is a search and then one transaction.
+
+A file the user replaced is `stale`: index it again; notes move to shots that start where they did.
+Tell the user which shots you used and which you did not.
+
 ## Sound
 
 Plan the sound with the script, not after it. Unless the user asked for silence, the video has a
@@ -110,6 +130,21 @@ minimax-mcp when `get_guidance` lists it (ask before spending credits on long te
 audio for the one older track); `list_sounds` shows what `media/` holds. A voice-over is a `voice`
 track and the bed a `music` track with `duck`, so the bed lowers while the voice speaks. The `motion`
 playbook has the details.
+
+Motion can follow a sound. `audio_reactive {video, node, prop, file, band, min, max}` measures a
+file (`level`, or `low` for the kick and bass, `mid` for a voice, `high` for hats) and writes keys
+between `min` (silence) and `max` (the loudest moment) on one property of one node, as one undoable
+step. Recipes: a bar's `scale_y` 0.2 to 1 on `low`; a glow's `opacity` 0.3 to 1 on `level`; a pulse
+on the kick is `scale` 0 to 0.12 with `additive: true` so the node keeps its own travel; a lip flap
+is a mouth node's `scale_y` 0.1 to 1 on the `mid` band of the voice file with `attack` 1 (look at
+it with `video_strip`: a mouth that moves on every word reads as speech, one that never closes
+does not). It needs ffmpeg, replaces the node's track for that property unless `additive`, and a
+long sound needs fewer `keys_per_second` (a track holds 500 keys).
+
+To continue in another editor, `export_timeline {video, format: edl}` writes the cuts (footage, speed,
+dissolves, sound tracks) and `format: srt` or `vtt` the captions. Read its `warnings` to the user:
+an EDL cannot hold design-frame clips, overlays, keyframes or grades, so export the finished video
+with `export_video` for those.
 
 ## Captions
 

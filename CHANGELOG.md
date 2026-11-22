@@ -8,6 +8,21 @@ All notable changes to OpenDesigner are documented here.
 
 ## Unreleased
 
+### feat(agent,media,core): footage memory, timeline export and audio-driven motion
+
+**Area:** `feat(agent)`, `feat(media)`, `feat(core)`, `docs(wiki)`, `feat(skill)`
+
+Ideas from Remotion, FrameScript, OpenFilm, ELLMPEG, Shotstack's agent guide, Dataiku's Watch Video tool and invideo's editing agent, read 2026-11-22 (table and what was not taken: [Prior Art](docs/wiki/prior-art.md#video-agent-sources-2026-11-22)).
+
+- **`watch_footage`.** Up to 10 pictures from the middle of equal slices of a `media/` recording, labeled with their time, in one grid, with the agent's `question` repeated beside it. Read-only.
+- **`index_footage` and `search_footage`.** Shots by ffmpeg scene score (`od_media::footage`: `detect_cuts`, `shots_from_cuts`), an optional word-timed transcript from the user's own whisper (the `transcribe` path, now `recognize`), and the agent's notes and tags per shot, kept in `footage-index/<name>.json`. Search matches words against notes, tags and transcript and answers with a ready `add_clip` object. A changed file is marked `stale`; a rescan carries notes to the shots that start where they did.
+- **`export_timeline`.** A CMX 3600 EDL (`od_core::interchange::edl`: footage source and record times, speed, dissolves, sound tracks), SRT or WebVTT in `exports/`; what an EDL cannot hold is returned as `warnings`. A hand-over like `export_video` for the unseen-changes warning.
+- **`audio_reactive`.** A property follows the loudness, or the bass, mid or treble, of a sound: ffmpeg measures it, `normalize` gates, scales and smooths it, and it is written as ordinary keys through `apply_ops` (one undoable step). Also the lip flap: a mouth's `scale_y` on a voice file.
+- **Silence.** A band the sound does not have (about 0.0002 rms, measured for a 100 Hz tone through the treble filter) is not stretched to full scale: anything under -50 dBFS is silence; the first 60 ms of band-filtered sound, where the filter settles and reads twice as loud, are replaced by what follows; a curve with no movement is refused instead of written as two equal keys.
+- **Docs.** Wiki: video-editing (footage memory, timeline export, audio-reactive motion), agent-integration, security (new files written, what reaches ffmpeg), prior-art, roadmap decision log. Playbooks: video-direction (footage workflow, export, lip flap) and review (why three rounds; do not resend a failing call).
+
+**Not verified:** a real whisper (the transcript path is covered by the existing fake-program tests for `transcribe` only), importing the EDL into Final Cut Pro, Premiere Pro or DaVinci Resolve (written to the CMX 3600 layout, never opened in them), Windows and Linux, and whether agents prefer these tools to what they did before.
+
 ### feat(skill): a growth playbook for store assets
 
 **Area:** `feat(skill)`

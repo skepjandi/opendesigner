@@ -20,7 +20,11 @@ would, fix what you find, and look again. This is the loop, the checklist and th
 5. **Compare.** After an edit, `video_diff` the moment before and after it (two times, or two videos of
    the project) to prove you changed what you meant to and nothing else.
 6. **Rounds.** Do at most three automatic rounds of look, list flaws, fix. If it still is not right,
-   stop and ask the user what they want, with the three worst flaws and what you tried.
+   stop and ask the user what they want, with the three worst flaws and what you tried. Past three
+   rounds a self-critic starts to over-correct: it finds flaws in what was fine and undoes good work
+   (a published test of a self-reflecting agent saw exactly that after the third pass). When a tool
+   call fails, read its `code` and `hint` and change the call; never send the same failing call
+   again, it will fail the same way and costs the same.
 
 ## Be harsh
 

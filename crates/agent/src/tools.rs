@@ -147,6 +147,9 @@ pub fn definitions() -> Vec<Value> {
     all.extend(crate::scene_checks::definitions());
     all.extend(crate::external_tools::definitions());
     all.extend(crate::inspect::definitions());
+    all.extend(crate::footage::definitions());
+    all.extend(crate::audio_reactive::definitions());
+    all.extend(crate::timeline_export::definitions());
     all.extend(crate::style_pack::definitions());
     all.extend(showcase_definitions());
     all
@@ -745,6 +748,11 @@ fn dispatch(ctx: &mut CallCtx, name: &str, args: Value) -> Result<Output, ToolEr
         n if crate::scene_checks::NAMES.contains(&n) => crate::scene_checks::call(ctx, n, args),
         n if crate::external_tools::NAMES.contains(&n) => crate::external_tools::call(ctx, n, args),
         n if crate::inspect::NAMES.contains(&n) => crate::inspect::call(ctx, n, args),
+        n if crate::footage::NAMES.contains(&n) => crate::footage::call(ctx, n, args),
+        n if crate::audio_reactive::NAMES.contains(&n) => crate::audio_reactive::call(ctx, n, args),
+        n if crate::timeline_export::NAMES.contains(&n) => {
+            crate::timeline_export::call(ctx, n, args)
+        }
         n if crate::style_pack::NAMES.contains(&n) => crate::style_pack::call(ctx, n, args),
         n if crate::assets::tools::handles(n) => {
             let dir = ctx.ws.dir().map(std::path::Path::to_path_buf);
