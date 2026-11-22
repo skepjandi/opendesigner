@@ -81,6 +81,11 @@ pub enum TransitionKind {
     /// The picture breaks into horizontal slices that slide sideways by seeded, repeatable
     /// amounts while the new clip takes over.
     GlitchSlice,
+    /// The old clip turns away like a card, narrowing to an edge, and the new one turns into
+    /// view from the edge (flat: no perspective).
+    Flip,
+    /// The new clip is uncovered by a radius sweeping clockwise from twelve o'clock.
+    ClockWipe,
 }
 
 /// The transition into a clip. It overlaps the end of the previous clip, so a 500 ms fade makes

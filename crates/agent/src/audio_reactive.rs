@@ -110,7 +110,7 @@ struct Args {
 }
 
 /// Milliseconds of frame number `frame` at `fps`, the grid every key sits on.
-fn frame_ms(frame: u64, fps: u32) -> u64 {
+pub(crate) fn frame_ms(frame: u64, fps: u32) -> u64 {
     (frame * 1000 + u64::from(fps) / 2) / u64::from(fps)
 }
 

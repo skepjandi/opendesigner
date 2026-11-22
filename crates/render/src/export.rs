@@ -135,11 +135,12 @@ impl Window {
 
 /// Which frames need drawing: the first, and every one whose picture differs from the one
 /// before it (see [`VideoRenderer::signature`]). The others repeat the last drawn one.
-fn frames_to_draw(doc: &Document, video: &Video, dir: Option<&Path>) -> Vec<bool> {
+fn frames_to_draw(doc: &Document, video: &Video, dir: Option<&Path>, frames: &[u64]) -> Vec<bool> {
     let planner = VideoRenderer::new(doc, video, dir);
     let mut last: Option<Vec<i64>> = None;
-    (0..video.frame_count())
-        .map(|n| {
+    frames
+        .iter()
+        .map(|&n| {
             let sig = planner.signature(timebase::frame_ms(n, video.fps));
             let fresh = sig.is_none() || sig != last;
             last = sig;
@@ -156,6 +157,8 @@ struct Plan<'a> {
     cache: Arc<Mutex<Vec<DrawnFrame>>>,
     /// Frame numbers that need drawing, in order.
     draw: Vec<u64>,
+    /// Draw on a transparent ground instead of black.
+    transparent: bool,
     run: usize,
     window: usize,
     next_run: AtomicUsize,
@@ -163,8 +166,9 @@ struct Plan<'a> {
 
 fn worker(plan: &Plan, new_source: &SourceFactory, shared: &Window) {
     let mut source = new_source();
-    let mut renderer =
-        VideoRenderer::new(plan.doc, plan.video, plan.dir).with_shared_cache(plan.cache.clone());
+    let mut renderer = VideoRenderer::new(plan.doc, plan.video, plan.dir)
+        .with_shared_cache(plan.cache.clone())
+        .with_transparent(plan.transparent);
     if let Some(s) = source.as_deref_mut() {
         renderer = renderer.with_footage(s);
     }
@@ -195,6 +199,40 @@ fn worker(plan: &Plan, new_source: &SourceFactory, shared: &Window) {
     }
 }
 
+/// Which frames an export delivers and how they are drawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExportOptions {
+    /// The first frame delivered.
+    pub start_frame: u64,
+    /// One past the last frame delivered (`None`: to the end of the video).
+    pub end_frame: Option<u64>,
+    /// Every Nth frame from `start_frame` is delivered (1 is all of them).
+    pub every_nth: u64,
+    /// Draw on a transparent ground; the pixels are premultiplied RGBA.
+    pub transparent: bool,
+}
+
+impl Default for ExportOptions {
+    fn default() -> ExportOptions {
+        ExportOptions {
+            start_frame: 0,
+            end_frame: None,
+            every_nth: 1,
+            transparent: false,
+        }
+    }
+}
+
+impl ExportOptions {
+    /// The frame numbers delivered, in order, for a video of `frame_count` frames.
+    pub fn frames(&self, frame_count: u64) -> Vec<u64> {
+        let end = self.end_frame.unwrap_or(frame_count).min(frame_count);
+        (self.start_frame..end)
+            .step_by(self.every_nth.max(1) as usize)
+            .collect()
+    }
+}
+
 /// Draws every frame of `video` with `workers` threads and gives each, in order, to `sink`
 /// (frame number and RGBA pixels). The sink answers `Ok(true)` to go on, `Ok(false)` to stop
 /// and `Err` to fail the export.
@@ -206,11 +244,36 @@ pub fn export_frames(
     workers: usize,
     sink: &mut Sink<'_>,
 ) -> Result<Drawn, ExportError> {
-    let fresh = frames_to_draw(doc, video, dir);
-    let draw: Vec<u64> = (0u64..)
+    export_frames_with(
+        doc,
+        video,
+        dir,
+        new_source,
+        workers,
+        &ExportOptions::default(),
+        sink,
+    )
+}
+
+/// [`export_frames`] for the frames `options` selects. A frame outside the selection is never
+/// drawn, and a picture is held (drawn once, delivered again) only between selected frames that
+/// look alike, so the same frame is the same pixels whatever else was selected.
+pub fn export_frames_with(
+    doc: &Document,
+    video: &Video,
+    dir: Option<&Path>,
+    new_source: &SourceFactory,
+    workers: usize,
+    options: &ExportOptions,
+    sink: &mut Sink<'_>,
+) -> Result<Drawn, ExportError> {
+    let frames = options.frames(video.frame_count());
+    let fresh = frames_to_draw(doc, video, dir, &frames);
+    let draw: Vec<u64> = frames
+        .iter()
         .zip(&fresh)
         .filter(|(_, f)| **f)
-        .map(|(n, _)| n)
+        .map(|(n, _)| *n)
         .collect();
     let workers = workers.clamp(1, MAX_WORKERS).min(draw.len().max(1));
     let run = if needs_footage(doc, video) {
@@ -226,6 +289,7 @@ pub fn export_frames(
         dir,
         cache: Arc::new(Mutex::new(Vec::new())),
         draw,
+        transparent: options.transparent,
         run,
         window,
         next_run: AtomicUsize::new(0),
@@ -242,7 +306,7 @@ pub fn export_frames(
         for _ in 0..workers {
             scope.spawn(|| worker(&plan, new_source, &shared));
         }
-        let result = deliver(&fresh, &shared, sink, &mut report);
+        let result = deliver(&frames, &fresh, &shared, sink, &mut report);
         shared.halt();
         result
     });
@@ -253,6 +317,7 @@ pub fn export_frames(
 }
 
 fn deliver(
+    frames: &[u64],
     fresh: &[bool],
     shared: &Window,
     sink: &mut Sink<'_>,
@@ -260,13 +325,13 @@ fn deliver(
 ) -> Result<(), ExportError> {
     let mut current: Vec<u8> = Vec::new();
     let mut index = 0;
-    for (n, &new) in fresh.iter().enumerate() {
+    for (&n, &new) in frames.iter().zip(fresh) {
         if new {
             current = shared.take(index)?;
             index += 1;
         }
         report.frames += 1;
-        match sink(n as u64, &current) {
+        match sink(n, &current) {
             Ok(true) => {}
             Ok(false) => {
                 report.stopped = true;
@@ -554,5 +619,130 @@ mod tests {
         for workers in [1, 4] {
             assert!(run(workers) == expected, "{workers} workers");
         }
+    }
+
+    fn collect_with(s: &Session, options: &ExportOptions, workers: usize) -> Vec<(u64, Vec<u8>)> {
+        let doc = s.document();
+        let video = &doc.videos[0];
+        let mut out = Vec::new();
+        let none: &SourceFactory = &|| None;
+        export_frames_with(doc, video, None, none, workers, options, &mut |n, px| {
+            out.push((n, px.to_vec()));
+            Ok(true)
+        })
+        .unwrap();
+        out
+    }
+
+    #[test]
+    fn a_range_and_a_step_deliver_exactly_those_frames_with_the_pictures_of_a_full_export() {
+        let s = busy_video();
+        let full = collect(&s, 2);
+        let video = &s.document().videos[0];
+        let options = ExportOptions {
+            start_frame: 10,
+            end_frame: Some(50),
+            every_nth: 4,
+            transparent: false,
+        };
+        let picked = collect_with(&s, &options, 3);
+        let wanted: Vec<u64> = (10..50).step_by(4).collect();
+        assert_eq!(picked.iter().map(|(n, _)| *n).collect::<Vec<_>>(), wanted);
+        for (n, pixels) in &picked {
+            assert!(*pixels == full[*n as usize].1, "frame {n}");
+        }
+        let past = ExportOptions {
+            end_frame: Some(video.frame_count() + 100),
+            start_frame: video.frame_count() - 2,
+            ..ExportOptions::default()
+        };
+        assert_eq!(collect_with(&s, &past, 1).len(), 2);
+        assert!(
+            collect_with(
+                &s,
+                &ExportOptions {
+                    start_frame: 999,
+                    ..ExportOptions::default()
+                },
+                1
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn a_frame_without_a_fill_is_transparent_only_when_asked() {
+        let mut s = Session::new(Document::new("v"));
+        let page = s.add_page("p").unwrap();
+        let root = s.document().page(&page).unwrap().root.id.clone();
+        let mut n = NewNode::new(NodeKind::Frame);
+        n.width = 64.0;
+        n.height = 48.0;
+        let mut dot = NewNode::new(NodeKind::Rect);
+        dot.x = 0.0;
+        dot.y = 0.0;
+        dot.width = 32.0;
+        dot.height = 48.0;
+        dot.fill = Paint::parse("#ff0000").ok();
+        n.children.push(dot);
+        let f = s
+            .apply(
+                Actor::User,
+                None,
+                &[Operation::Create {
+                    parent: root,
+                    index: None,
+                    node: n,
+                }],
+            )
+            .unwrap()
+            .created[0]
+            .clone();
+        let v = s
+            .apply(
+                Actor::User,
+                None,
+                &[Operation::CreateVideo {
+                    name: "v".into(),
+                    fps: 10,
+                    width: 64,
+                    height: 48,
+                }],
+            )
+            .unwrap()
+            .created[0]
+            .clone();
+        s.apply(
+            Actor::User,
+            None,
+            &[Operation::AddClip {
+                video: v,
+                frame: Some(f),
+                footage: None,
+                duration_ms: 500,
+                index: None,
+                transition: None,
+                motion: None,
+            }],
+        )
+        .unwrap();
+        let alpha_at = |px: &[u8], x: usize| px[(24 * 64 + x) * 4 + 3];
+        let opaque = collect_with(&s, &ExportOptions::default(), 1);
+        assert_eq!(
+            (alpha_at(&opaque[0].1, 4), alpha_at(&opaque[0].1, 60)),
+            (255, 255)
+        );
+        let clear = collect_with(
+            &s,
+            &ExportOptions {
+                transparent: true,
+                ..ExportOptions::default()
+            },
+            1,
+        );
+        assert_eq!(
+            (alpha_at(&clear[0].1, 4), alpha_at(&clear[0].1, 60)),
+            (255, 0)
+        );
     }
 }

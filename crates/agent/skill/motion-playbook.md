@@ -9,7 +9,7 @@ whole video process; this page is about movement.
 - **Clips** of a design frame or of footage, in order, each with a **transition** into it (`cut`,
   `fade`, `slide_left/right/up/down` which push the old clip out, `dip` through black, `flash`
   through white, `zoom_in`, `wipe_left/right/up/down` which uncover the new clip from an edge,
-  `iris` which opens a circle from the middle, `blur_dissolve`, `glitch_slice`) and a slow
+  `iris` which opens a circle from the middle, `blur_dissolve`, `glitch_slice`, `flip` which turns the old clip away like a card and the new one into view, `clock_wipe` which sweeps a radius clockwise) and a slow
   **motion** (zoom from `scale_from` to `scale_to`, 1 to 3) with an **ease**.
 - **Speed** of footage: `set_clip` `speed` (0.25 to 4) plays the file faster or slower, and
   `speed_ramp` (keys `{at_ms, rate, ease?}` in clip time) eases the rate for a slow-motion

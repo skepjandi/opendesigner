@@ -89,6 +89,8 @@ pub struct VideoRenderer<'a> {
     live: HashMap<NodeId, Liveness>,
     /// Where each clip's footage time comes from (`od_core::speed`), by clip index.
     speeds: Vec<SpeedMap>,
+    /// Pictures start from nothing instead of black, so what no clip covers stays transparent.
+    transparent: bool,
 }
 
 /// How far a blur dissolve blurs at most, in thousandths of the shorter side (a grade's blur
@@ -113,7 +115,16 @@ impl<'a> VideoRenderer<'a> {
             footage: None,
             live: live_frames(doc, video),
             speeds: video.clips.iter().map(SpeedMap::new).collect(),
+            transparent: false,
         }
+    }
+
+    /// Draws on a transparent ground instead of black: a design frame with no fill, or a
+    /// fade, lets what is behind show through. The pixels are premultiplied, as every picture
+    /// of this crate is.
+    pub fn with_transparent(mut self, transparent: bool) -> VideoRenderer<'a> {
+        self.transparent = transparent;
+        self
     }
 
     /// Lets clips of footage, and screens that play recordings, be drawn.
@@ -344,7 +355,11 @@ impl<'a> VideoRenderer<'a> {
             width: u64::from(w),
             height: u64::from(h),
         })?;
-        canvas.fill(tiny_skia::Color::BLACK);
+        canvas.fill(if self.transparent {
+            tiny_skia::Color::TRANSPARENT
+        } else {
+            tiny_skia::Color::BLACK
+        });
         let placed = self.video.placed();
         let Some(last) = placed.last() else {
             return Ok(canvas);
@@ -395,6 +410,10 @@ impl<'a> VideoRenderer<'a> {
                         pose.blur = grade::blur_sigma(BLUR_DISSOLVE, w, h) * (1.0 - e);
                     }
                     TransitionKind::Flash => pose.opacity = f32::from(e >= 0.5),
+                    TransitionKind::Flip => {
+                        pose.sx = (2.0 * e - 1.0).max(0.0);
+                        pose.opacity = f32::from(e >= 0.5);
+                    }
                     TransitionKind::Cut => {}
                     masked => pose.reveal = Reveal::of(masked, e, p.index as u64),
                 }
@@ -413,6 +432,10 @@ impl<'a> VideoRenderer<'a> {
                         pose.blur = grade::blur_sigma(BLUR_DISSOLVE, w, h) * e;
                     }
                     TransitionKind::Flash => pose.opacity *= f32::from(e < 0.5),
+                    TransitionKind::Flip => {
+                        pose.sx *= (1.0 - 2.0 * e).max(0.0);
+                        pose.opacity *= f32::from(e < 0.5);
+                    }
                     _ => {}
                 }
             }
@@ -563,14 +586,17 @@ impl<'a> VideoRenderer<'a> {
         let k = zoom / widest * pose.scale;
         let (pw, ph) = (drawn.width() as f32 * k, drawn.height() as f32 * k);
         let transform = Transform::from_row(
-            k,
+            k * pose.sx,
             0.0,
             0.0,
             k,
-            pose.dx + (w - pw) / 2.0,
+            pose.dx + (w - pw * pose.sx) / 2.0,
             pose.dy + (h - ph) / 2.0,
         );
-        let quality = if (k - 1.0).abs() < 1e-4 && pose.dx.fract() == 0.0 && pose.dy.fract() == 0.0
+        let quality = if (k - 1.0).abs() < 1e-4
+            && pose.sx == 1.0
+            && pose.dx.fract() == 0.0
+            && pose.dy.fract() == 0.0
         {
             FilterQuality::Nearest
         } else {
@@ -811,6 +837,8 @@ struct Pose {
     dx: f32,
     dy: f32,
     scale: f32,
+    /// Horizontal squeeze about the middle, 1 for none (a flip).
+    sx: f32,
     opacity: f32,
     /// Blur of the picture, as a sigma in pixels (blur dissolve).
     blur: f32,
@@ -837,6 +865,7 @@ impl Pose {
         dx: 0.0,
         dy: 0.0,
         scale: 1.0,
+        sx: 1.0,
         opacity: 1.0,
         blur: 0.0,
         reveal: None,
@@ -847,6 +876,7 @@ impl Pose {
         self.dx += other.dx;
         self.dy += other.dy;
         self.scale *= other.scale;
+        self.sx *= other.sx;
         self.opacity *= other.opacity;
     }
 }
@@ -1633,6 +1663,43 @@ mod tests {
         assert_eq!(px(&p, 50, 100), BLUE);
         assert_eq!(px(&p, 1, 1), RED);
         assert_eq!(px(&at(&s, &v, 1900), 1, 1), RED, "corners go last");
+    }
+
+    #[test]
+    fn a_clock_wipe_sweeps_the_new_clip_in_clockwise() {
+        let (mut s, v, ..) = two_clips();
+        set_transition(
+            &mut s,
+            &v,
+            1,
+            transition_of(TransitionKind::ClockWipe, 1000),
+        );
+        let quarter = at(&s, &v, 1250);
+        assert_eq!(px(&quarter, 75, 50), BLUE, "top right is passed first");
+        assert_eq!(px(&quarter, 25, 150), RED, "bottom left is not yet");
+        let three = at(&s, &v, 1750);
+        assert_eq!(px(&three, 25, 150), BLUE);
+        assert_eq!(px(&three, 25, 50), RED, "the last quarter is top left");
+        assert_eq!(px(&at(&s, &v, 999), 50, 100), RED);
+        assert_eq!(px(&at(&s, &v, 2000), 50, 100), BLUE);
+    }
+
+    #[test]
+    fn a_flip_narrows_the_old_clip_to_an_edge_and_widens_the_new_one_from_it() {
+        let (mut s, v, ..) = two_clips();
+        set_transition(&mut s, &v, 1, transition_of(TransitionKind::Flip, 1000));
+        let early = at(&s, &v, 1250);
+        assert_eq!(px(&early, 50, 100), RED, "half width, still centred");
+        assert_ne!(px(&early, 5, 100), RED, "its sides have turned away");
+        assert_ne!(px(&early, 5, 100), BLUE);
+        let late = at(&s, &v, 1750);
+        assert_eq!(px(&late, 50, 100), BLUE);
+        assert_ne!(px(&late, 5, 100), BLUE);
+        let middle = at(&s, &v, 1500);
+        assert_ne!(px(&middle, 50, 100), RED);
+        assert_ne!(px(&middle, 50, 100), BLUE);
+        assert_eq!(px(&at(&s, &v, 999), 5, 100), RED);
+        assert_eq!(px(&at(&s, &v, 2000), 5, 100), BLUE);
     }
 
     #[test]
