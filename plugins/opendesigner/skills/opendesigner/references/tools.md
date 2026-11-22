@@ -1315,6 +1315,83 @@ Arguments:
 - `time_ms` (integer, required) The first moment.
 - `video` (string, required) Id of a video from list_videos.
 
+## `watch_footage`
+
+Look at a recording without importing it into a video: up to 10 evenly spaced pictures from a footage file (or from `from_ms` to `to_ms` of it), in one labeled grid you can see, each picture carrying its time in ms. Pass the `question` you want answered and it is repeated next to the picture so you look for the right thing. The pictures are one per equal slice of the range, so motion between them is not visible: narrow the range to look closer. Read-only; needs ffmpeg. Use it before writing a note with index_footage, and again on a narrower range to find an exact moment to cut at.
+
+Read-only.
+
+Arguments:
+
+- `cell_width` (integer) Width of each picture in pixels (default 320).
+- `file` (string, required) A footage file from list_footage: media/<name>.mp4, .mov or .m4v.
+- `frames` (integer) How many pictures (default 8).
+- `from_ms` (integer) Start of the range (default 0).
+- `question` (string) What you are trying to learn from the pictures.
+- `to_ms` (integer) End of the range (default: the end of the file).
+
+## `index_footage`
+
+Remember what is in a footage file. Cuts it into shots where the picture changes (ffmpeg's scene score; `threshold` 0.3 is a start, lower finds more cuts), optionally adds a word-timed transcript with `transcribe: true` (the user's own whisper program: call get_capabilities first), and stores the result in footage-index/ in the project. Then `watch_footage` each shot you have not seen and write what is in it with `notes`: [{shot, note, tags?}] (shot numbers start at 0; an empty note clears one). Calling it again for an unchanged file with the same threshold only updates notes and the transcript; a changed file or threshold scans again and carries notes over to shots that start within a quarter of a second of where they did. The answer lists every shot with its note and the words spoken in it. Nothing is uploaded.
+
+Arguments:
+
+- `file` (string, required) A footage file from list_footage: media/<name>.mp4, .mov or .m4v.
+- `language` (string) With transcribe: `auto` (default) or a code such as en, de.
+- `min_shot_ms` (integer) A cut closer than this to the previous one is ignored (default 500).
+- `model` (string) With transcribe: the speech model, as for the transcribe tool.
+- `notes` (array) What you saw: one entry per shot.
+- `rescan` (boolean) Scan again even though the index is current.
+- `threshold` (number) How different a picture must be from the one before to count as a cut (default 0.3).
+- `timeout_s` (integer) With transcribe: stop the speech program after this long (default 300).
+- `transcribe` (boolean) Run the user's speech program and keep the words (slow for long speech).
+
+## `search_footage`
+
+Find a moment in the footage you indexed by describing it: words are matched against your shot notes and tags (strongest) and the transcript. Each result is a shot with its file, start and end in ms, the note, the words spoken and a ready `clip` ({footage: {file, in_ms}, duration_ms}) to put in add_clip. Without `query` it lists what is indexed and how much of it has notes. A file that changed since it was indexed is marked `stale`: run index_footage on it again. Read-only; works from the index alone, so it needs neither ffmpeg nor a speech program.
+
+Read-only.
+
+Arguments:
+
+- `file` (string) A footage file from list_footage: media/<name>.mp4, .mov or .m4v.
+- `limit` (integer) Most results (default 10).
+- `query` (string) Words to look for, for example `founder laughing at the desk`.
+
+## `audio_reactive`
+
+Make one property of one node follow a sound: the sound of a media/ audio or footage file is measured (`band` level, or only low = bass and kick, mid = voice, high = hats and sibilants), smoothed and written as keyframes between `min` (silence) and `max` (the loudest moment). Examples: a bar's `scale_y` from 0.2 to 1 with the bass, a glow's `opacity` from 0.3 to 1 with the music, a mouth's `scale_y` from 0.1 to 1 with a voice track (lip flap), a logo's `scale` from 0 to 0.12 on the kick (`additive: true` keeps its travel). `start_ms` is where the sound starts on the video's timeline, `from_ms` and `to_ms` the part of the file used. At most 500 keys a track, so a long sound needs fewer `keys_per_second`. One undoable step; replaces any track on that node and property unless `additive`. Needs ffmpeg and a sound; check the result with video_strip.
+
+Arguments:
+
+- `additive` (boolean) Add the values to the node's own instead of replacing it: min 0 and max 20 on x is a shake of up to 20 px (default false).
+- `attack` (number) How quickly the value rises with the sound, 1 is at once (default 0.6).
+- `band` (string) Which part of the sound to follow (default level).
+- `file` (string, required) media/<name> of an audio (.mp3 .wav .m4a .aac .ogg) or footage (.mp4 .mov .m4v) file with sound.
+- `floor` (number) Sound quieter than this share of the loudest counts as silence, so room noise does not move anything (default 0.1).
+- `from_ms` (integer) Where in the file to start measuring (default 0).
+- `keys_per_second` (integer) How often a key is written (default 15).
+- `max` (number) The value at the loudest moment (default 1).
+- `min` (number) The value in silence (default 0).
+- `node` (string, required) Id of the node to move, from get_tree.
+- `prop` (string, required) The property to drive, as animate takes it: x, y, width, height, opacity, rotation, scale, scale_x, scale_y, blur, stroke_width, trim_end, and so on.
+- `release` (number) How quickly it falls back, lower is a longer tail (default 0.25).
+- `start_ms` (integer) Where the sound starts on the video's timeline (default 0).
+- `summary` (string) 
+- `to_ms` (integer) Where in the file to stop (default: as long as the video lasts after start_ms, or the file's end).
+- `turn` (string) 
+- `video` (string, required) Id of a video from list_videos.
+
+## `export_timeline`
+
+Write a video's timeline for another editor, to exports/<file>: `edl` is a CMX 3600 edit decision list (Final Cut Pro, Premiere Pro, DaVinci Resolve and others import it): one event per clip with its source file, source in and out and record in and out, footage speed, dissolves for transitions, and sound tracks. `srt` and `vtt` are the video's captions as subtitles. What an EDL cannot hold (design-frame clips, overlays, captions, keyframes, grades, speed ramps, the kind of a transition) is listed in `warnings`: tell the user. Design-frame clips are placeholders; export_video renders the finished video for them. Writes only the exports folder.
+
+Arguments:
+
+- `file` (string) A plain file name ending in the format, for example cut.edl (default: timeline.<format>).
+- `format` (string, required) edl, srt or vtt.
+- `video` (string, required) Id of a video from list_videos.
+
 ## `list_style_packs`
 
 The style packs: a ready-made look for a piece of work. Each one carries a palette (bg, surface, fg, muted, border, accent), a type scale, a shape posture and a motion personality, with the rules that keep it coherent. Pick ONE and say why it fits the brief; never mix two. Read the `packs` playbook before you choose.

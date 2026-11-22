@@ -374,22 +374,35 @@ fn transcribe(
         return fail("apply needs `video`: the video whose captions are set");
     }
     let source = source_of(ctx, &a)?;
+    let (words, flavor) = recognize(ctx, &source, &language, a.model.as_deref(), limit, programs)?;
+    let mut out = answer(&words, &language, flavor, min_pause);
+    if a.apply {
+        out["captions"] = apply_captions(ctx, &a, &words)?;
+    }
+    Ok(Output::json(&out))
+}
+
+/// The words spoken in the sound of `source`, by the user's speech program, and which program
+/// it was.
+fn recognize(
+    ctx: &CallCtx,
+    source: &Source,
+    language: &str,
+    model: Option<&str>,
+    limit: Duration,
+    programs: &Programs,
+) -> Result<(Vec<TimedWord>, WhisperFlavor), ToolError> {
     let program = Whisper::locate_in(&programs.whisper)?;
-    let model = model_for(
-        ctx,
-        program.flavor,
-        a.model.as_deref(),
-        programs.model.as_deref(),
-    )?;
+    let model = model_for(ctx, program.flavor, model, programs.model.as_deref())?;
     let ffmpeg = Ffmpeg::locate().map_err(|e| ToolError(e.to_string()))?;
     let scratch = Scratch::new()?;
-    let wav = speech_wav(ctx, &source, &ffmpeg, scratch.path())?;
+    let wav = speech_wav(ctx, source, &ffmpeg, scratch.path())?;
     let words = speech::transcribe(
         &program,
         &speech::Request {
             wav: &wav,
             model: &model,
-            language: &language,
+            language,
             scratch: scratch.path(),
             timeout: limit,
             cancel: None,
@@ -399,11 +412,21 @@ fn transcribe(
     if words.is_empty() {
         return fail("the speech program heard no words (is there speech in the sound?)");
     }
-    let mut out = answer(&words, &language, program.flavor, min_pause);
-    if a.apply {
-        out["captions"] = apply_captions(ctx, &a, &words)?;
-    }
-    Ok(Output::json(&out))
+    Ok((words, program.flavor))
+}
+
+/// The words spoken in a `media/` audio or footage file, for the footage index.
+pub(crate) fn words_of_media(
+    ctx: &CallCtx,
+    file: &str,
+    language: &str,
+    model: Option<&str>,
+    timeout_s: Option<u64>,
+) -> Result<Vec<TimedWord>, ToolError> {
+    let language = speech::language_arg(language)?;
+    let limit = timeout(timeout_s, DEFAULT_TRANSCRIBE_S, MAX_TRANSCRIBE_S)?;
+    let source = Source::File(media_path(&project_dir(ctx)?, file)?);
+    recognize(ctx, &source, language, model, limit, &Programs::from_env()).map(|(words, _)| words)
 }
 
 /// Sets the words as the video's captions through the ordinary `import_captions` tool.
