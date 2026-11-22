@@ -138,6 +138,10 @@ pub fn generate() -> Vec<SkillFile> {
             contents: playbook::topic("formats").unwrap_or_default().to_string(),
         },
         SkillFile {
+            path: "references/growth-playbook.md",
+            contents: playbook::topic("growth").unwrap_or_default().to_string(),
+        },
+        SkillFile {
             path: "references/blocks-playbook.md",
             contents: playbook::topic("blocks").unwrap_or_default().to_string(),
         },
@@ -229,8 +233,7 @@ project files directly: that bypasses validation, checkpoints and the user's vie
 4. **Check your work.** `render_preview` again. For store assets, run `export` with the right
    `preset`. A listing is a set: `export_set` for several frames, or lay the slides edge to edge
    on one wide frame (a background or device can cross the seams) and use `export_panorama`; its
-   width must divide by the slide count. Sets are validated as a whole and nothing is written unless
-   everything passes. A failed export names the rule that broke; fix that, do not argue with it. For a phone or tablet around a
+   width must divide by the slide count. A set is validated as a whole. A failed export names the rule that broke; fix that, do not argue with it. For a phone or tablet around a
    screenshot, call `device_template`, put its node in `apply_ops`, and ask the user to drop the
    capture on the `Screen` (or use an image from `list_media` as the template's `image`).
 5. **Close the loop.** Call `validate_document` and fix every error and warning it reports (stable
