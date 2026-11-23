@@ -21,17 +21,18 @@ ffmpeg='(^|/)(lib)?(avcodec|avformat|avutil|swscale|swresample|postproc|avfilter
 
 [ -d "$dir" ] || { echo "no such bundle directory: $dir" >&2; exit 1; }
 
-(cd "$dir" && find . -depth | grep -iE "$banned" | while read -r path; do
-  echo "removing GPL-only Qt part: $path"
-  rm -rf "$path"
-done)
+remove_matching() { # pattern label: delete what matches; no match is not an error
+  (cd "$dir" && { find . -depth | grep -iE "$1" || true; } | while read -r path; do
+    echo "removing $2: $path"
+    rm -rf "$path"
+  done)
+}
+
+remove_matching "$banned" "GPL-only Qt part"
 
 case "$mode" in
   strip-ffmpeg)
-    (cd "$dir" && find . -depth | grep -iE "$ffmpeg" | while read -r path; do
-      echo "removing Qt's FFmpeg backend: $path"
-      rm -rf "$path"
-    done)
+    remove_matching "$ffmpeg" "Qt's FFmpeg backend"
     left="$(cd "$dir" && find . | grep -iE "$ffmpeg" || true)"
     if [ -n "$left" ]; then
       echo "Qt's FFmpeg backend is still in the bundle:" >&2
