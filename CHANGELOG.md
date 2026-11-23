@@ -8,6 +8,18 @@ All notable changes to OpenDesigner are documented here.
 
 ## Unreleased
 
+### feat(render,agent,cli): pixel-art game assets: crisp rendering, atlas export, palette quantize
+
+**Area:** `feat(core)`, `feat(render)`, `feat(agent)`, `feat(cli)`, `docs(wiki)`
+
+- **Crisp pixels.** `Node.image_smoothing` (`smooth` default, `nearest`; left out of the file when smooth) set with `apply_ops set` / the `image_smoothing` property, and a `pixel_art` render option (no anti-aliasing for paths, nearest-neighbour images) on `render_preview`, `export`, `export_set`, `export_panorama` and `opendesigner export --pixel-art`. Project format version 7; every older project loads unchanged.
+- **`export_atlas`** (CLI `export-atlas`). One frame cut into a `cols` x `rows` grid of cells (a 144x192 frame of 3 x 4 cells of 48 px is a character sheet), or a list of frames packed into one sheet; writes `exports/<name>.png` and `exports/<name>.json` (`image`, `size`, `frames` with `x y w h`, `pivot`, `nine_slice`, `palette`, `generator`, `created`). Everything is rendered and checked before the first file is written.
+- **`quantize_image`** (CLI `quantize-image`). Snaps a picture in `media/` to a palette of tokens, `#rrggbb` colours or a style pack (nearest in OKLab, no dithering, alpha threshold) and writes a new `media/<name>-q.png`; reports the colours before and after.
+- **`pixel-16` style pack** with a 16-colour palette and the rules for 48 px sheets, 32 px icons and 48 px tiles.
+- **Docs.** Wiki: store-assets ("Pixel-art game assets"), document-format (format 7), agent-integration; decision log.
+
+**Not verified:** how sheets look in a game engine (tests check pixels, manifests and colours, not pictures); seam checks for tilesets and an autotile template are not built.
+
 ### feat(code,agent,app): Code mode: a stack, a run plan the user approves, services in tmux
 
 **Area:** `feat(code)`, `feat(agent)`, `feat(app)`, `docs(wiki)`, `feat(skill)`
