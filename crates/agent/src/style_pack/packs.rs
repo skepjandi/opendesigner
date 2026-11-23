@@ -459,4 +459,61 @@ pub const PACKS: &[StylePack] = &[
             "Never start everything at once: print the lines 50 ms apart.",
         ],
     ),
+    pack(
+        "pixel-16",
+        "Pixel 16",
+        "A sixteen-colour pixel-art ground: night navy, crimson edges and one warm orange, hard edges and \
+         no blur. Sprites, tiles and icons for a top-down game.",
+        "retro, crisp, game",
+        Palette {
+            bg: "#1a1c2c",
+            surface: "#333c57",
+            fg: "#f4f4f4",
+            muted: "#94b0c2",
+            border: "#b13e53",
+            accent: "#ef7d57",
+        },
+        TypeScale {
+            display: "Menlo",
+            body: "Menlo",
+            ratio: 1.5,
+            weights: &[400, 700],
+        },
+        Shape {
+            corner_radius: 0.0,
+            stroke_width: 1.0,
+            outline: Outline::Ink,
+            shadow: Shadow::None,
+        },
+        Motion {
+            personality: Personality::Snappy,
+            default_ease: "power2_out",
+            enter_ms: 160,
+            exit_ms: 120,
+            stagger_ms: 60,
+            hold_ms_per_word: 100,
+            camera_drift_pct: 0.0,
+        },
+        &[
+            "Keep 80 percent of every sprite, tile and icon to a proven pixel-art pattern and spend \
+             the other 20 percent on one distinctive choice.",
+            "Draw on a whole-pixel grid: a character sheet is 48 px cells, an icon 32 px, a tile \
+             48 px; build the frame at that size and export with pixel_art on and an integer scale.",
+            "Use only these sixteen colours: #1a1c2c #5d275d #b13e53 #ef7d57 #ffcd75 #a7f070 \
+             #38b764 #257179 #29366f #3b5dc9 #41a6f6 #73eff7 #f4f4f4 #94b0c2 #566c86 #333c57. \
+             Run quantize_image with this list on anything that is not drawn from it.",
+            "Give every image node image_smoothing nearest, and never scale a picture by a \
+             fraction.",
+            "Shade with colour steps, not blur: no gradients, no soft shadows, no translucent edges.",
+        ],
+        &[
+            "No indigo-to-purple gradient hero: the ground is a flat palette colour.",
+            "No emoji as icons: draw the pixels of the icon.",
+            "No anti-aliased edges and no blur: every pixel is one palette colour or transparent.",
+            "No invented numbers or names: use the user's lorebook and figures.",
+            "Do not centre everything: place sprites on the tile grid, not in the middle.",
+            "No linear easing except a looping rotation; step and snap instead.",
+            "Never mix pixel sizes in one sheet: one cell size, one pixel scale.",
+        ],
+    ),
 ];

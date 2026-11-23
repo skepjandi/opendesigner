@@ -2,7 +2,7 @@
 //! into closed types and every rejection carries a reason the agent can act on
 //! (`docs/wiki/agent-integration.md#the-mcp-server`).
 
-use crate::export::{ExportOutcome, Plan, export_assets, export_name, exports_dir, preset};
+use crate::export::{ExportOutcome, Plan, export_assets_with, export_name, exports_dir, preset};
 use crate::synth;
 use std::collections::{HashMap, HashSet};
 
@@ -155,6 +155,7 @@ pub fn definitions() -> Vec<Value> {
     all.extend(crate::fit_media::definitions());
     all.extend(crate::timeline_export::definitions());
     all.extend(crate::style_pack::definitions());
+    all.extend(crate::pixel_tools::definitions());
     all.extend(showcase_definitions());
     all
 }
@@ -449,6 +450,7 @@ fn core_definitions() -> Vec<Value> {
             json!({
                 "frame": id("Id of a frame node."),
                 "scale": {"type": "number", "minimum": 0.01, "maximum": 16},
+                "pixel_art": {"type": "boolean", "description": "Draw with hard pixel edges: no anti-aliasing, nearest-neighbour images. Use an integer scale (default false)."},
                 "max_side": {"type": "integer", "minimum": 16, "maximum": 2048}
             }),
             &["frame"],
@@ -464,6 +466,7 @@ fn core_definitions() -> Vec<Value> {
                 "preset": id("A preset id from list_export_presets."),
                 "scale": {"type": "number", "minimum": 0.01, "maximum": 16},
                 "alpha": {"type": "boolean", "description": "Keep transparency (ignored when the preset forbids it)."},
+                "pixel_art": {"type": "boolean", "description": "Hard pixel edges: no anti-aliasing, nearest-neighbour images. Use an integer scale (default false)."},
                 "locale": id("A language from list_locales: text nodes show that language; set files are named <prefix>-<locale>-NN.png.")
             }),
             &["frame", "file"],
@@ -480,6 +483,7 @@ fn core_definitions() -> Vec<Value> {
                 "preset": id("A preset id from list_export_presets."),
                 "scale": {"type": "number", "minimum": 0.01, "maximum": 16},
                 "alpha": {"type": "boolean", "description": "Keep transparency (ignored when the preset forbids it)."},
+                "pixel_art": {"type": "boolean", "description": "Hard pixel edges: no anti-aliasing, nearest-neighbour images. Use an integer scale (default false)."},
                 "locale": id("A language from list_locales: text nodes show that language; set files are named <prefix>-<locale>-NN.png.")
             }),
             &["frames", "prefix"],
@@ -498,6 +502,7 @@ fn core_definitions() -> Vec<Value> {
                 "preset": id("A preset id from list_export_presets."),
                 "scale": {"type": "number", "minimum": 0.01, "maximum": 16},
                 "alpha": {"type": "boolean", "description": "Keep transparency (ignored when the preset forbids it)."},
+                "pixel_art": {"type": "boolean", "description": "Hard pixel edges: no anti-aliasing, nearest-neighbour images. Use an integer scale (default false)."},
                 "locale": id("A language from list_locales: text nodes show that language; set files are named <prefix>-<locale>-NN.png.")
             }),
             &["frame", "slices", "prefix"],
@@ -774,6 +779,7 @@ fn dispatch(ctx: &mut CallCtx, name: &str, args: Value) -> Result<Output, ToolEr
             crate::timeline_export::call(ctx, n, args)
         }
         n if crate::style_pack::NAMES.contains(&n) => crate::style_pack::call(ctx, n, args),
+        n if crate::pixel_tools::NAMES.contains(&n) => crate::pixel_tools::call(ctx, n, args),
         n if crate::assets::tools::handles(n) => {
             let dir = ctx.ws.dir().map(std::path::Path::to_path_buf);
             crate::assets::tools::call(dir.as_deref(), n, args)
@@ -1458,6 +1464,8 @@ struct PreviewArgs {
     scale: Option<f32>,
     #[serde(default)]
     max_side: Option<u32>,
+    #[serde(default)]
+    pixel_art: bool,
 }
 
 fn render_preview(ctx: &mut CallCtx, a: PreviewArgs) -> Result<Output, ToolError> {
@@ -1482,7 +1490,8 @@ fn render_preview(ctx: &mut CallCtx, a: PreviewArgs) -> Result<Output, ToolError
             }
         }
     };
-    let rendered = crate::video_export::render_still(doc, &id, scale, ctx.ws.dir())?;
+    let rendered =
+        crate::video_export::render_still_with(doc, &id, scale, ctx.ws.dir(), a.pixel_art)?;
     let png = od_render::encode_png(&rendered.pixmap, false)?;
     let mut note = format!(
         "{}x{} preview of {} at scale {scale:.3}",
@@ -1525,6 +1534,8 @@ struct ExportArgs {
     alpha: bool,
     #[serde(default)]
     locale: Option<String>,
+    #[serde(default)]
+    pixel_art: bool,
 }
 
 fn export(ctx: &mut CallCtx, a: ExportArgs) -> Result<Output, ToolError> {
@@ -1533,13 +1544,14 @@ fn export(ctx: &mut CallCtx, a: ExportArgs) -> Result<Output, ToolError> {
         frame: &id,
         file: &a.file,
     };
-    let out = export_assets(
+    let out = export_assets_with(
         ctx.ws,
         &plan,
         a.preset.as_deref(),
         a.scale,
         a.alpha,
         a.locale.as_deref(),
+        a.pixel_art,
     )?;
     let Some(file) = out.files.first() else {
         return fail("nothing was exported");
@@ -1583,6 +1595,8 @@ struct ExportSetArgs {
     alpha: bool,
     #[serde(default)]
     locale: Option<String>,
+    #[serde(default)]
+    pixel_art: bool,
 }
 
 fn export_set(ctx: &mut CallCtx, a: ExportSetArgs) -> Result<Output, ToolError> {
@@ -1595,13 +1609,14 @@ fn export_set(ctx: &mut CallCtx, a: ExportSetArgs) -> Result<Output, ToolError> 
         frames: &frames,
         prefix: &a.prefix,
     };
-    let out = export_assets(
+    let out = export_assets_with(
         ctx.ws,
         &plan,
         a.preset.as_deref(),
         a.scale,
         a.alpha,
         a.locale.as_deref(),
+        a.pixel_art,
     )?;
     let v = set_json(&out, a.preset.as_deref());
     Ok(Output::json(&with_review_note(ctx, &frames, v)))
@@ -1621,6 +1636,8 @@ struct PanoramaArgs {
     alpha: bool,
     #[serde(default)]
     locale: Option<String>,
+    #[serde(default)]
+    pixel_art: bool,
 }
 
 fn export_panorama(ctx: &mut CallCtx, a: PanoramaArgs) -> Result<Output, ToolError> {
@@ -1630,13 +1647,14 @@ fn export_panorama(ctx: &mut CallCtx, a: PanoramaArgs) -> Result<Output, ToolErr
         slices: a.slices,
         prefix: &a.prefix,
     };
-    let out = export_assets(
+    let out = export_assets_with(
         ctx.ws,
         &plan,
         a.preset.as_deref(),
         a.scale,
         a.alpha,
         a.locale.as_deref(),
+        a.pixel_art,
     )?;
     let v = set_json(&out, a.preset.as_deref());
     Ok(Output::json(&with_review_note(ctx, &[id], v)))

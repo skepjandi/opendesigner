@@ -207,6 +207,7 @@ Arguments:
 
 - `frame` (string, required) Id of a frame node.
 - `max_side` (integer) 
+- `pixel_art` (boolean) Draw with hard pixel edges: no anti-aliasing, nearest-neighbour images. Use an integer scale (default false).
 - `scale` (number) 
 
 ## `export`
@@ -219,6 +220,7 @@ Arguments:
 - `file` (string, required) File name ending in .png, for example shot-01.png.
 - `frame` (string, required) Id of a frame node.
 - `locale` (string) A language from list_locales: text nodes show that language; set files are named <prefix>-<locale>-NN.png.
+- `pixel_art` (boolean) Hard pixel edges: no anti-aliasing, nearest-neighbour images. Use an integer scale (default false).
 - `preset` (string) A preset id from list_export_presets.
 - `scale` (number) 
 
@@ -231,6 +233,7 @@ Arguments:
 - `alpha` (boolean) Keep transparency (ignored when the preset forbids it).
 - `frames` (array, required) 
 - `locale` (string) A language from list_locales: text nodes show that language; set files are named <prefix>-<locale>-NN.png.
+- `pixel_art` (boolean) Hard pixel edges: no anti-aliasing, nearest-neighbour images. Use an integer scale (default false).
 - `prefix` (string, required) File name stem, for example shot (gives shot-01.png).
 - `preset` (string) A preset id from list_export_presets.
 - `scale` (number) 
@@ -244,6 +247,7 @@ Arguments:
 - `alpha` (boolean) Keep transparency (ignored when the preset forbids it).
 - `frame` (string, required) Id of the wide frame.
 - `locale` (string) A language from list_locales: text nodes show that language; set files are named <prefix>-<locale>-NN.png.
+- `pixel_art` (boolean) Hard pixel edges: no anti-aliasing, nearest-neighbour images. Use an integer scale (default false).
 - `prefix` (string, required) File name stem, for example shot (gives shot-01.png).
 - `preset` (string) A preset id from list_export_presets.
 - `scale` (number) 
@@ -1578,6 +1582,39 @@ Arguments:
 
 - `id` (string, required) A pack id from list_style_packs.
 - `overrides` (object) Colours to change: token name (bg, surface, fg, muted, border, accent, accent_2, shadow) to a #rrggbb value.
+
+## `export_atlas`
+
+Write a sprite sheet or atlas for a game: exports/<name>.png and exports/<name>.json, a manifest {image, size:{w,h}, frames:[{name, x, y, w, h, pivot?, nine_slice?}], palette?, generator, created}. Two ways: GRID cuts ONE frame into `cols` x `rows` cells of `cell_w` x `cell_h` output pixels (the frame must be exactly that big at `scale`), for example a 144x192 frame of 3 x 4 cells of 48x48 is a character sheet with 3 frames per direction and 4 directions; cells are listed row by row. PACK takes a list of `frames` (each one a frame node, such as a 32x32 icon) and lays them in a grid of `columns`, every cell as big as the biggest frame. Transparency is always kept. `names` gives every cell its name (otherwise <name>-00, -01, ... for a grid and the frame's node name when packing); `pivot` and `nine_slice` apply to every frame, `frame_meta` overrides them per name. Everything is rendered and checked before anything is written. Pass `pixel_art: true` for hard pixel edges (no anti-aliasing, nearest-neighbour images) and use an integer `scale`.
+
+Arguments:
+
+- `cell_h` (integer) GRID: height of a cell in output pixels.
+- `cell_w` (integer) GRID: width of a cell in output pixels.
+- `cols` (integer) GRID: cells per row.
+- `columns` (integer) PACK: cells per row (default 8).
+- `frame` (string) GRID: id of the frame to cut.
+- `frame_meta` (object) Per frame name: pivot and nine_slice that replace the defaults.
+- `frames` (array) PACK: the frames to pack, in order.
+- `name` (string, required) File name stem, letters, digits . _ - (gives hero.png and hero.json).
+- `names` (array) One name per cell, row by row (grid) or in order (pack).
+- `nine_slice` (object) 9-slice margins in pixels: the corners that stay fixed when the frame is stretched.
+- `padding` (integer) PACK: transparent pixels around every cell (default 0).
+- `pivot` (object) Where the frame's origin is, in pixels from the cell's top-left corner.
+- `pixel_art` (boolean) No anti-aliasing and nearest-neighbour images (default false).
+- `rows` (integer) GRID: rows of cells.
+- `scale` (number) 
+
+## `quantize_image`
+
+Snap a picture in media/ to a palette: every pixel becomes the nearest palette colour (nearest in OKLab) and a pixel with alpha under `alpha_threshold` becomes fully transparent. Writes a NEW file media/<name>-q.png and leaves the original alone; use it as an image node (with image_smoothing nearest). `palette` is a list of token names and #rrggbb colours, or one style pack id from list_style_packs. Returns the size, how many colours the picture had and has, and the pixels per colour. No dithering.
+
+Arguments:
+
+- `alpha_threshold` (integer) Alpha at or above which a pixel stays (default 128).
+- `dither` (string) Only none: flat colours.
+- `file` (string, required) media/<name>.png (or .jpg, .webp) from list_media.
+- `palette` (any, required) 
 
 ## `show_preview`
 

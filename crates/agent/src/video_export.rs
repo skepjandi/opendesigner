@@ -129,6 +129,18 @@ pub fn render_still(
     scale: f32,
     dir: Option<&std::path::Path>,
 ) -> Result<od_render::Rendered, od_render::RenderError> {
+    render_still_with(doc, frame, scale, dir, false)
+}
+
+/// [`render_still`] with `pixel_art` on: shapes without anti-aliasing and images drawn with
+/// nearest-neighbour sampling, so an integer `scale` keeps every pixel a hard-edged block.
+pub fn render_still_with(
+    doc: &Document,
+    frame: &NodeId,
+    scale: f32,
+    dir: Option<&std::path::Path>,
+    pixel_art: bool,
+) -> Result<od_render::Rendered, od_render::RenderError> {
     let plays = doc
         .node(frame)
         .is_some_and(od_render::video::plays_recording);
@@ -142,7 +154,11 @@ pub fn render_still(
         footage: decoder.as_mut().map(|d| d as &mut dyn FootageSource),
         played_ms: 0,
     };
-    od_render::render_frame_with(doc, frame, scale, dir, &mut media)
+    if pixel_art {
+        od_render::render_frame_pixel_art(doc, frame, scale, dir, &mut media)
+    } else {
+        od_render::render_frame_with(doc, frame, scale, dir, &mut media)
+    }
 }
 
 /// A contact sheet: the PNG, its width and height, the grid's columns, and what could not be

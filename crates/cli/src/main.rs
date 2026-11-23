@@ -15,6 +15,7 @@ mod codecmd;
 mod doccmd;
 mod external;
 mod inspect;
+mod pixel;
 mod review_video;
 mod serve;
 mod skillcmd;
@@ -93,6 +94,9 @@ enum Command {
         /// Keep the alpha channel (stores reject it for screenshots).
         #[arg(long, conflicts_with = "batch")]
         alpha: bool,
+        /// Hard pixel edges: no anti-aliasing, nearest-neighbour images (use an integer scale).
+        #[arg(long, conflicts_with = "batch")]
+        pixel_art: bool,
         /// Show this language's translations.
         #[arg(long, conflicts_with = "batch")]
         locale: Option<String>,
@@ -355,6 +359,12 @@ enum Command {
     Transcribe(external::Transcribe),
     /// Cut a subject out of a project image with the user's rembg.
     RemoveBackground(external::RemoveBackground),
+    /// Write a sprite sheet or atlas (PNG plus JSON manifest) for a game: one frame cut into a
+    /// grid of cells, or a list of frames packed into one sheet.
+    ExportAtlas(pixel::ExportAtlas),
+    /// Snap a project picture to a palette (token names, #rrggbb colours or a style pack) and
+    /// write the result as a new media file.
+    QuantizeImage(pixel::QuantizeImage),
     /// Which external programs (ffmpeg, whisper, rembg) are installed, and how to install the rest.
     Doctor(external::Doctor),
     /// Look closely at a video: a strip of frames, a crop at full size, a coordinate grid, a diff. Writes a PNG to exports/.
@@ -585,6 +595,7 @@ fn run(cli: Cli) -> Result<(), CliError> {
             preset: preset_id,
             scale,
             alpha,
+            pixel_art,
             locale,
             batch,
             video,
@@ -608,6 +619,7 @@ fn run(cli: Cli) -> Result<(), CliError> {
                 preset_id.as_deref(),
                 scale,
                 alpha,
+                pixel_art,
                 locale.as_deref(),
             )?,
             (None, ..) => {
@@ -1065,6 +1077,8 @@ fn run(cli: Cli) -> Result<(), CliError> {
         Command::ReviewVideo(args) => review_video::run(args)?,
         Command::Transcribe(args) => external::transcribe(args)?,
         Command::RemoveBackground(args) => external::remove_background(args)?,
+        Command::ExportAtlas(args) => pixel::export_atlas(args)?,
+        Command::QuantizeImage(args) => pixel::quantize_image(args)?,
         Command::Doctor(args) => external::doctor(args),
         Command::Inspect(args) => inspect::run(args)?,
         Command::Sound { action } => sound::sound(action)?,
@@ -1173,6 +1187,7 @@ fn run_export(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn export(
     dir: &Path,
     frame: &str,
@@ -1180,6 +1195,7 @@ fn export(
     preset_id: Option<&str>,
     scale: f32,
     alpha: bool,
+    pixel_art: bool,
     locale: Option<&str>,
 ) -> Result<(), CliError> {
     let target = preset_id.map(preset).transpose()?;
@@ -1195,7 +1211,8 @@ fn export(
         }
         None => session.document(),
     };
-    let rendered = od_agent::video_export::render_still(doc, &frame_id, scale, Some(dir))?;
+    let rendered =
+        od_agent::video_export::render_still_with(doc, &frame_id, scale, Some(dir), pixel_art)?;
     for warning in &rendered.warnings {
         eprintln!("warning: {warning}");
     }
