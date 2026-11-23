@@ -62,7 +62,7 @@ jobs:
             qml6-module-qtquick-dialogs qml6-module-qtquick-window qml6-module-qtquick-templates \
             qml6-module-qtqml qml6-module-qtqml-workerscript qml6-module-qt-labs-folderlistmodel \
             qml6-module-qt-labs-platform qml6-module-qtcore qml6-module-qtmultimedia \
-            qml6-module-qtwebengine libgl1-mesa-dev libxkbcommon-dev libfontconfig1 fonts-dejavu-core
+            qml6-module-qtwebengine libqt6svg6 libgl1-mesa-dev libxkbcommon-dev libfontconfig1 fonts-dejavu-core
           mkdir -p "$HOME/tools"
           fetch() { # url sha256 file
             curl -fsSL -o "$HOME/tools/$3" "$1"

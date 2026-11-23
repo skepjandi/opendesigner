@@ -17,7 +17,7 @@ native() { if command -v cygpath >/dev/null; then cygpath -w "$1"; else printf '
 printf 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==' | base64 -d > "$work/fixture.png"
 
 run() {
-  HOME="$home" OPENDESIGNER_CONFIG_DIR="$(native "$work/cfg")" QT_QPA_PLATFORM=offscreen \
+  HOME="$home" OPENDESIGNER_CONFIG_DIR="$(native "$work/cfg")" QT_QPA_PLATFORM=offscreen QT_ASSUME_STDERR_HAS_CONSOLE=1 \
     "$exe" "--selftest=$(native "$work")" >"$log" 2>&1
 }
 status=0
