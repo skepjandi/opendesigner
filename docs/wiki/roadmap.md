@@ -91,8 +91,8 @@ Accessibility and IME pass, crash-safe autosave and recovery, Qt deployment per 
 - **Pricing and distribution.** GitNotēs and OpenMedia have paid tiers through stores; a desktop editor's model (free and open, paid cloud-free Pro, store distribution) is not decided. Whatever is chosen must keep open files and local-first ([AGENTS.md invariants 1, 8](../../AGENTS.md)).
 - **One rasterizer or two.** Share `render` between export and the canvas, or let the canvas use a scene-graph/`QRhi` item and test equivalence. Phase 0 canvas spike.
 - **Docking and component kit.** QML `SplitView` and our own panel manager, since KDDockWidgets is GPL-only ([Qt Desktop](./qt-desktop.md#licensing)); scope of a custom Qt Quick Controls style. Phase 0.
-- **Plugins and scripting.** OpenCut plans both; we defer. Not before the operation API is stable.
-- **Code-driven motion.** Kino uses Remotion. If we ever need it, it must be sandboxed and approved per project (invariant 3).
+- **Plugins and scripting.** Deferred. Not before the operation API is stable.
+- **Code-driven motion.** If we ever need it, it must be sandboxed and approved per project (invariant 3).
 - **Collaboration.** Git-based sharing only for now.
 - **Penpot/Figma import.** Only if requested.
 
@@ -232,11 +232,11 @@ Accessibility and IME pass, crash-safe autosave and recovery, Qt deployment per 
 | 2026-11-20 | UI icons are vendored Lucide SVGs (ISC), tinted at load time; no emoji or Unicode symbols as icons | Popular (large community, many maintainers), actively released, permissive licence compatible with MPL-2.0; Tabler and Phosphor (MIT) were the alternatives. Tinting by replacing `currentColor` and loading a data URL needs no extra Qt module ([Qt Desktop](./qt-desktop.md#icons)) |
 | 2026-11-19 | Build a native GUI for agent-guided asset creation instead of continuing to script store art through a CLI agent | Text-only guidance is the bottleneck ([Architecture](./architecture.md#the-problem-this-solves)) |
 | 2026-11-19 | UI toolkit: **Qt 6 (C++/QML)**, over GPUI (first choice, dropped the same day) | The canvas and video preview are custom rendering under any toolkit; Qt supplies the surrounding problems (text input/IME, accessibility, native dialogs and menus, high-DPI, playback, packaging) that GPUI leaves to us, and GPUI is pre-1.0 with a young widget set. Costs: two languages, LGPL obligations, heavier distribution ([Qt Desktop](./qt-desktop.md#why-qt)) |
-| 2026-11-19 | Core crates never import Qt; the Qt app, MCP server and CLI share operations; C++/QML hold presentation only | OpenCut's principle; headless and testable; keeps the toolkit replaceable |
-| 2026-11-19 | Integrate agents through an Agent Skill plus a local MCP server, installed by the app | Skills carry taste, MCP carries capability; Kino, Penpot and Figma validate MCP; `.agents/skills/` is the cross-client convention |
-| 2026-11-19 | Agent edits are attributed operations with checkpoints, outlined in the UI | Kino's model; makes agent output reviewable and reversible |
-| 2026-11-19 | Documents are data, not code | Security and agent legibility ([invariant 3](../../AGENTS.md)); differs from Kino/Remotion |
-| 2026-11-19 | Keep MPL-2.0 (already in the repository) | Matches GitNotēs and OpenMedia; Qt is used under LGPLv3 (dynamic linking), which is compatible; OpenCut (MIT) is a compatible input |
+| 2026-11-19 | Core crates never import Qt; the Qt app, MCP server and CLI share operations; C++/QML hold presentation only | Headless and testable; keeps the toolkit replaceable |
+| 2026-11-19 | Integrate agents through an Agent Skill plus a local MCP server, installed by the app | Skills carry taste, MCP carries capability; Penpot and Figma validate MCP; `.agents/skills/` is the cross-client convention |
+| 2026-11-19 | Agent edits are attributed operations with checkpoints, outlined in the UI | Makes agent output reviewable and reversible |
+| 2026-11-19 | Documents are data, not code | Security and agent legibility ([invariant 3](../../AGENTS.md)) |
+| 2026-11-19 | Keep MPL-2.0 (already in the repository) | Matches GitNotēs and OpenMedia; Qt is used under LGPLv3 (dynamic linking), which is compatible |
 | 2026-11-19 | Documentation system copied from GitNotēs/OpenMedia: wiki-first `AGENTS.md`, `CHANGELOG.md`, `docs/wiki/` synced to the GitHub Wiki, worktrees | Proven in both projects |
 | 2026-11-19 | Logo is `assets/logo.svg`; brand ramp taken from it | Maintainer's choice |
 | 2026-11-19 | A dock built in QML (own split, tab group, floating `Window`) over a pure Rust layout model, instead of a docking library | KDDockWidgets is GPL-only (invariant 12) and Qt Quick has no docking; every rule lives in `layout.rs`, which is testable without a window. Cost: drag-and-drop and window behavior cannot be unit tested, only the model can |

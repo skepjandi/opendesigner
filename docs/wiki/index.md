@@ -19,10 +19,10 @@ OpenDesigner is a native desktop editor: a Rust core under a Qt 6 Quick (QML) sh
 | [Agent Integration](./agent-integration.md) | The skill installer, the local MCP server, selection and annotation context, in-app chat |
 | [Qt Desktop](./qt-desktop.md) | Why Qt, the QML / `Editor` object / `EditorState` layers, Qt licensing (LGPL-only rule), window layout, canvas rendering, theme and brand tokens, platform requirements |
 | [Store Assets](./store-assets.md) | What GitNotēs and OpenMedia do today, store specs, the asset studio that replaces it |
-| [Video Editing](./video-editing.md) | Timeline model, preview, FFmpeg, what we take from OpenCut and Kino |
+| [Video Editing](./video-editing.md) | Timeline model, preview, FFmpeg, audio, what is built and what is not |
 | [Scene Spec](./scene-spec.md) | The SceneSpec an agent writes before it builds, the locked build passes, the review ledger and the correction limits |
 | [Security](./security.md) | Assets, trust boundaries, the MCP threat model, skill installer rules |
-| [Prior Art](./prior-art.md) | Penpot, Figma, Kino, OpenCut: what they do, what we copy, where we differ |
+| [Prior Art](./prior-art.md) | Penpot, Figma, HyperFrames: what they do, what we copy, where we differ |
 | [Roadmap](./roadmap.md) | Phases with exit criteria, Phase 0 spikes, performance budgets, decision log |
 | [Development Guide](./development-guide.md) | Toolchain, commands, repository layout, conventions |
 
