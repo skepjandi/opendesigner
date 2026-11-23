@@ -43,7 +43,7 @@ mkdir -p "$appdir/usr/plugins/platforms"
 cp --update=none "$plugins/platforms/libqoffscreen.so" "$appdir/usr/plugins/platforms/"
 
 echo "==> licensing check"
-"$root/scripts/bundle-licensing.sh" "$appdir" fail-on-ffmpeg
+"$root/scripts/bundle-licensing.sh" "$appdir" strip-ffmpeg
 
 echo "==> smoke test: the bundled app runs its scripted session offscreen"
 "$root/scripts/bundle-smoke.sh" "$appdir/AppRun"
