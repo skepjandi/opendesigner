@@ -163,21 +163,59 @@ ApplicationWindow {
                     fillMode: Image.PreserveAspectFit
                 }
                 Item { implicitWidth: 12 }
-                ComboBox {
-                    id: workspaceBox
+                // one tab per workspace (a deliverable: an app store set, a reel, a landing page);
+                // the agent's tools follow the tab that is open
+                Row {
+                    id: workspaceTabs
                     visible: backend.hasProject
-                    implicitWidth: 170
-                    implicitHeight: Theme.row
+                    spacing: 2
                     readonly property var info: backend.workspaces ? JSON.parse(backend.workspaces) : ({ open: null, names: [] })
-                    model: info.names.concat(["New workspace…"])
-                    currentIndex: Math.max(0, info.names.indexOf(info.open))
-                    onActivated: i => {
-                        if (i === info.names.length) { newWorkspaceDialog.open(); currentIndex = Math.max(0, info.names.indexOf(info.open)) }
-                        else backend.switchWorkspace(info.names[i], false)
+                    Repeater {
+                        model: workspaceTabs.info.names
+                        delegate: Rectangle {
+                            id: tab
+                            required property string modelData
+                            readonly property bool current: modelData === workspaceTabs.info.open
+                            width: Math.min(150, tabLabel.implicitWidth + 24)
+                            height: Theme.row
+                            radius: Theme.radius
+                            color: current ? Theme.panelRaised : "transparent"
+                            border.width: 1
+                            border.color: current ? Theme.accent : Theme.border
+                            Accessible.role: Accessible.PageTab
+                            Accessible.name: modelData
+                            Accessible.selected: current
+                            Label {
+                                id: tabLabel
+                                anchors.fill: parent
+                                anchors.leftMargin: 10
+                                anchors.rightMargin: 10
+                                text: tab.modelData
+                                color: tab.current ? Theme.text : Theme.muted
+                                verticalAlignment: Text.AlignVCenter
+                                elide: Text.ElideRight
+                            }
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: if (!tab.current) backend.switchWorkspace(tab.modelData, false)
+                            }
+                            ToolTip.visible: hovered && tabLabel.truncated
+                            ToolTip.text: modelData
+                            HoverHandler { id: hoverTab }
+                            readonly property bool hovered: hoverTab.hovered
+                        }
                     }
-                    ToolTip.visible: hovered
-                    ToolTip.delay: 600
-                    ToolTip.text: "Workspaces: one per deliverable (the agent can start them too)"
+                    Btn {
+                        iconName: "plus"
+                        implicitWidth: Theme.row
+                        implicitHeight: Theme.row
+                        leftPadding: 0
+                        rightPadding: 0
+                        Accessible.name: "New workspace"
+                        tip: "New workspace: a separate design for another deliverable (the agent can start them too)"
+                        onClicked: newWorkspaceDialog.open()
+                    }
                 }
                 ComboBox {
                     id: languageBox
@@ -354,6 +392,8 @@ ApplicationWindow {
     Component { id: notesPanel; NotesPanel { editor: backend } }
     Component { id: historyPanel; HistoryPanel { editor: backend } }
     Component { id: memoryPanel; MemoryPanel { editor: backend } }
+    Component { id: devicesPanel; DevicesPanel { editor: backend } }
+    Component { id: webPanel; WebPanel { editor: backend } }
     Component {
         id: runPanel
         RunPanel {
@@ -389,7 +429,7 @@ ApplicationWindow {
         mainWindow: win
         components: ({
             layers: layersPanel, canvas: canvasPanel, inspector: inspectorPanel, notes: notesPanel,
-            history: historyPanel, memory: memoryPanel, run: runPanel, video: videoPanel, connect: connectPanel, chat: chatPanel,
+            history: historyPanel, memory: memoryPanel, run: runPanel, web: webPanel, devices: devicesPanel, video: videoPanel, connect: connectPanel, chat: chatPanel,
             variants: variantsPanel, preview: previewPanel
         })
     }

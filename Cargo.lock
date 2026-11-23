@@ -1039,6 +1039,7 @@ dependencies = [
  "base64",
  "flate2",
  "getrandom 0.4.3",
+ "image",
  "opendesigner-code",
  "opendesigner-core",
  "opendesigner-media",
@@ -1065,6 +1066,7 @@ dependencies = [
  "cxx-qt",
  "cxx-qt-build",
  "cxx-qt-lib",
+ "getrandom 0.4.3",
  "opendesigner-agent",
  "opendesigner-code",
  "opendesigner-core",
@@ -1084,6 +1086,7 @@ version = "0.0.1"
 dependencies = [
  "clap",
  "opendesigner-agent",
+ "opendesigner-code",
  "opendesigner-core",
  "opendesigner-media",
  "opendesigner-render",

@@ -8,6 +8,7 @@ pub mod detect;
 pub mod plan;
 pub mod project;
 pub mod runner;
+pub mod simulator;
 pub mod stack;
 pub mod tmux;
 

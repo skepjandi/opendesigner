@@ -10,6 +10,7 @@ use od_code::detect;
 use od_code::plan::{RunPlan, Service};
 use od_code::project::{CodeProject, Mode};
 use od_code::runner::{self, Runner};
+use od_code::simulator::{Exec, Programs, Simulators, System};
 use od_code::stack::{self, Stack};
 use od_code::tmux::{self, SystemTmux, Tmux};
 use serde::Deserialize;
@@ -18,7 +19,7 @@ use serde_json::{Value, json};
 use crate::tools::{CallCtx, Output, ToolError, parse, tool};
 use crate::{memory, token};
 
-pub const NAMES: [&str; 7] = [
+pub const NAMES: [&str; 12] = [
     "get_code_project",
     "set_stack",
     "propose_run_plan",
@@ -26,6 +27,11 @@ pub const NAMES: [&str; 7] = [
     "stop_services",
     "restart_service",
     "service_logs",
+    "list_simulators",
+    "boot_simulator",
+    "install_app",
+    "launch_app",
+    "capture_simulator",
 ];
 
 pub fn definitions() -> Vec<Value> {
@@ -115,6 +121,52 @@ pub fn definitions() -> Vec<Value> {
             &["name"],
             true,
         ),
+        tool(
+            "list_simulators",
+            "The iOS Simulators and Android emulators on this computer (a connected phone is never \
+             listed or touched): id, platform, name, OS and whether it is booted. The id goes into \
+             the other simulator tools. Code mode only.",
+            json!({}),
+            &[],
+            true,
+        ),
+        tool(
+            "boot_simulator",
+            "Boot an iOS simulator (and open the Simulator app) or start an Android virtual device \
+             in a tmux session. Needs the user's approval of the run plan. Wait until list_simulators \
+             says booted.",
+            json!({"id": {"type": "string", "description": "from list_simulators"}}),
+            &["id"],
+            false,
+        ),
+        tool(
+            "install_app",
+            "Install an app the project built into a booted simulator: a .app folder for iOS, an \
+             .apk for Android, as a path inside the project. Needs the user's approval of the run plan.",
+            json!({
+                "id": {"type": "string"},
+                "path": {"type": "string", "description": "relative to the project folder"}
+            }),
+            &["id", "path"],
+            false,
+        ),
+        tool(
+            "launch_app",
+            "Launch an installed app by its application id (for example com.example.app) in a \
+             booted simulator. Needs the user's approval of the run plan.",
+            json!({"id": {"type": "string"}, "app_id": {"type": "string"}}),
+            &["id", "app_id"],
+            false,
+        ),
+        tool(
+            "capture_simulator",
+            "Take a screenshot of a booted simulator and save it in the design project's media/ \
+             folder. The answer names the file; use it as an image node or as the capture of a 3D \
+             device (get_playbook 3d) for store screenshots.",
+            json!({"id": {"type": "string"}}),
+            &["id"],
+            false,
+        ),
     ]
 }
 
@@ -152,6 +204,26 @@ struct LogArgs {
     lines: Option<usize>,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SimArgs {
+    id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct InstallArgs {
+    id: String,
+    path: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LaunchArgs {
+    id: String,
+    app_id: String,
+}
+
 fn err(e: od_code::CodeError) -> ToolError {
     ToolError(e.0)
 }
@@ -162,18 +234,22 @@ pub fn call(ctx: &mut CallCtx, name: &str, args: Value) -> Result<Output, ToolEr
         .dir()
         .map(Path::to_path_buf)
         .ok_or_else(|| ToolError("the project has no folder".into()))?;
-    let env = Env::system(&memory::repo_of(&dir).unwrap_or(dir))?;
+    let repo = memory::repo_of(&dir).unwrap_or_else(|| dir.clone());
+    let env = Env::system(&repo, &dir)?;
     call_with(&env, name, args)
 }
 
 /// Everything a code tool touches, passed in so tests use a temporary folder and a fake tmux.
-pub struct Env<T: Tmux> {
+pub struct Env<T: Tmux, E: Exec> {
     pub repo: PathBuf,
+    /// The open design project (`media/` lives here); inside the repository.
+    pub project: PathBuf,
     pub config: PathBuf,
     pub runner: Runner<T>,
+    pub sims: Simulators<E>,
 }
 
-impl<T: Tmux> Env<T> {
+impl<T: Tmux, E: Exec> Env<T, E> {
     /// The plan in `code.json`, approved or not.
     pub fn saved_plan(&self) -> Result<RunPlan, String> {
         CodeProject::load(&self.repo)
@@ -189,19 +265,25 @@ impl<T: Tmux> Env<T> {
     }
 }
 
-impl Env<SystemTmux> {
+impl Env<SystemTmux, System> {
     /// The real thing: the user's config folder and the dedicated tmux server.
-    pub fn system(repo: &Path) -> Result<Env<SystemTmux>, ToolError> {
+    pub fn system(repo: &Path, project: &Path) -> Result<Env<SystemTmux, System>, ToolError> {
         let config = token::config_dir().map_err(|e| ToolError(e.to_string()))?;
         Ok(Env {
             repo: repo.to_path_buf(),
+            project: project.to_path_buf(),
             config,
             runner: Runner::new(SystemTmux::new(), repo, tmux::SOCKET),
+            sims: Simulators::new(System, Programs::locate()),
         })
     }
 }
 
-pub fn call_with<T: Tmux>(env: &Env<T>, name: &str, args: Value) -> Result<Output, ToolError> {
+pub fn call_with<T: Tmux, E: Exec>(
+    env: &Env<T, E>,
+    name: &str,
+    args: Value,
+) -> Result<Output, ToolError> {
     match name {
         "get_code_project" => get_code_project(env),
         "set_stack" => set_stack(env, parse(args)?),
@@ -210,11 +292,16 @@ pub fn call_with<T: Tmux>(env: &Env<T>, name: &str, args: Value) -> Result<Outpu
         "stop_services" => stop_services(env, parse(args)?),
         "restart_service" => restart_service(env, parse(args)?),
         "service_logs" => service_logs(env, parse(args)?),
+        "list_simulators" => list_simulators(env),
+        "boot_simulator" => boot_simulator(env, parse(args)?),
+        "install_app" => install_app(env, parse(args)?),
+        "launch_app" => launch_app(env, parse(args)?),
+        "capture_simulator" => capture_simulator(env, parse(args)?),
         other => Err(ToolError(format!("unknown tool {other:?}"))),
     }
 }
 
-fn load_code_mode<T: Tmux>(env: &Env<T>) -> Result<CodeProject, ToolError> {
+fn load_code_mode<T: Tmux, E: Exec>(env: &Env<T, E>) -> Result<CodeProject, ToolError> {
     let project = CodeProject::load(&env.repo).map_err(err)?;
     if project.mode == Mode::Code {
         Ok(project)
@@ -227,19 +314,19 @@ fn load_code_mode<T: Tmux>(env: &Env<T>) -> Result<CodeProject, ToolError> {
     }
 }
 
-fn approved_plan<'a, T: Tmux>(
-    env: &Env<T>,
+fn approved_plan<'a, T: Tmux, E: Exec>(
+    env: &Env<T, E>,
     project: &'a CodeProject,
 ) -> Result<&'a RunPlan, ToolError> {
     approval::require(&env.config, &env.repo, project.plan.as_ref()).map_err(err)
 }
 
-fn get_code_project<T: Tmux>(env: &Env<T>) -> Result<Output, ToolError> {
+fn get_code_project<T: Tmux, E: Exec>(env: &Env<T, E>) -> Result<Output, ToolError> {
     Ok(Output::json(&overview(env)?))
 }
 
 /// The code side of the project as JSON: what `get_code_project` answers and the Run panel shows.
-pub fn overview<T: Tmux>(env: &Env<T>) -> Result<Value, ToolError> {
+pub fn overview<T: Tmux, E: Exec>(env: &Env<T, E>) -> Result<Value, ToolError> {
     let project = CodeProject::load(&env.repo).map_err(err)?;
     let mut out = json!({
         "mode": project.mode,
@@ -301,6 +388,105 @@ pub fn guidance_hint(project_dir: Option<&Path>) -> Option<Value> {
     })
 }
 
+fn list_simulators<T: Tmux, E: Exec>(env: &Env<T, E>) -> Result<Output, ToolError> {
+    load_code_mode(env)?;
+    let found = env.sims.list().map_err(err)?;
+    let note = found
+        .is_empty()
+        .then_some("None found: iOS Simulators need Xcode, Android emulators need the Android SDK (ANDROID_HOME).");
+    Ok(Output::json(&json!({"simulators": found, "note": note})))
+}
+
+fn boot_simulator<T: Tmux, E: Exec>(env: &Env<T, E>, a: SimArgs) -> Result<Output, ToolError> {
+    let project = load_code_mode(env)?;
+    approved_plan(env, &project)?;
+    if a.id.starts_with("android-avd:") {
+        env.runner.available().map_err(err)?;
+        let command = env.sims.emulator_command(&a.id).map_err(err)?;
+        let avd = a.id.trim_start_matches("android-avd:");
+        env.runner
+            .start_emulator(avd, &command, &env.repo)
+            .map_err(err)?;
+    } else {
+        env.sims.boot_ios(&a.id).map_err(err)?;
+    }
+    Ok(Output::json(&json!({
+        "booting": a.id,
+        "next": "Poll list_simulators until it is booted (an emulator takes a minute or more).",
+    })))
+}
+
+/// A path the agent named, relative to the repository, resolved and kept inside it.
+fn inside_repo<T: Tmux, E: Exec>(env: &Env<T, E>, relative: &str) -> Result<PathBuf, ToolError> {
+    let root = env
+        .repo
+        .canonicalize()
+        .map_err(|e| ToolError(e.to_string()))?;
+    let path = root
+        .join(relative)
+        .canonicalize()
+        .map_err(|_| ToolError(format!("{relative:?} does not exist in the project")))?;
+    if path.starts_with(&root) && !Path::new(relative).is_absolute() {
+        Ok(path)
+    } else {
+        Err(ToolError(format!("{relative:?} is outside the project")))
+    }
+}
+
+fn install_app<T: Tmux, E: Exec>(env: &Env<T, E>, a: InstallArgs) -> Result<Output, ToolError> {
+    let project = load_code_mode(env)?;
+    approved_plan(env, &project)?;
+    let path = inside_repo(env, &a.path)?;
+    env.sims.install(&a.id, &path).map_err(err)?;
+    Ok(Output::json(
+        &json!({"installed": a.path, "next": "launch_app with the application id."}),
+    ))
+}
+
+fn launch_app<T: Tmux, E: Exec>(env: &Env<T, E>, a: LaunchArgs) -> Result<Output, ToolError> {
+    let project = load_code_mode(env)?;
+    approved_plan(env, &project)?;
+    env.sims.launch(&a.id, &a.app_id).map_err(err)?;
+    Ok(Output::json(
+        &json!({"launched": a.app_id, "next": "capture_simulator to look at it."}),
+    ))
+}
+
+fn capture_simulator<T: Tmux, E: Exec>(env: &Env<T, E>, a: SimArgs) -> Result<Output, ToolError> {
+    load_code_mode(env)?;
+    let png = env.sims.screenshot(&a.id).map_err(err)?;
+    let reference = save_capture(&env.project, &a.id, &png)?;
+    Ok(Output::json(
+        &json!({"image": reference, "bytes": png.len()}),
+    ))
+}
+
+/// Writes the screenshot to a private temporary folder and imports it like any picture the user
+/// adds, so the same checks and the same unused-name rule apply.
+pub fn save_capture(project: &Path, id: &str, png: &[u8]) -> Result<String, ToolError> {
+    let tag: String = id
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .take(40)
+        .collect();
+    let mut random = [0u8; 8];
+    getrandom::fill(&mut random).map_err(|e| ToolError(e.to_string()))?;
+    let folder = std::env::temp_dir().join(format!(
+        "od-capture-{}",
+        random
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>()
+    ));
+    std::fs::create_dir(&folder).map_err(|e| ToolError(e.to_string()))?;
+    let file = folder.join(format!("simulator-{tag}.png"));
+    let result = std::fs::write(&file, png)
+        .map_err(|e| ToolError(e.to_string()))
+        .and_then(|()| od_core::media::import(project, &file).map_err(ToolError::from));
+    let _ = std::fs::remove_dir_all(&folder);
+    result
+}
+
 /// The user's own choice of mode, from the start screen. Not a tool: an agent cannot call it.
 pub fn set_mode(repo: &Path, mode: Mode) -> Result<(), ToolError> {
     let mut project = CodeProject::load(repo).map_err(err)?;
@@ -308,7 +494,7 @@ pub fn set_mode(repo: &Path, mode: Mode) -> Result<(), ToolError> {
     project.save(repo).map_err(err)
 }
 
-fn set_stack<T: Tmux>(env: &Env<T>, a: StackArgs) -> Result<Output, ToolError> {
+fn set_stack<T: Tmux, E: Exec>(env: &Env<T, E>, a: StackArgs) -> Result<Output, ToolError> {
     let mut project = load_code_mode(env)?;
     let stack = Stack {
         name: a.name,
@@ -324,7 +510,7 @@ fn set_stack<T: Tmux>(env: &Env<T>, a: StackArgs) -> Result<Output, ToolError> {
     Ok(Output::json(&json!({"stack": project.stack})))
 }
 
-fn propose_run_plan<T: Tmux>(env: &Env<T>, a: PlanArgs) -> Result<Output, ToolError> {
+fn propose_run_plan<T: Tmux, E: Exec>(env: &Env<T, E>, a: PlanArgs) -> Result<Output, ToolError> {
     let mut project = load_code_mode(env)?;
     let plan = RunPlan {
         services: a.services,
@@ -349,7 +535,7 @@ fn propose_run_plan<T: Tmux>(env: &Env<T>, a: PlanArgs) -> Result<Output, ToolEr
     })))
 }
 
-fn start_services<T: Tmux>(env: &Env<T>, a: NameArgs) -> Result<Output, ToolError> {
+fn start_services<T: Tmux, E: Exec>(env: &Env<T, E>, a: NameArgs) -> Result<Output, ToolError> {
     let project = load_code_mode(env)?;
     let plan = approved_plan(env, &project)?;
     env.runner.available().map_err(err)?;
@@ -368,7 +554,7 @@ fn start_services<T: Tmux>(env: &Env<T>, a: NameArgs) -> Result<Output, ToolErro
     })))
 }
 
-fn stop_services<T: Tmux>(env: &Env<T>, a: NameArgs) -> Result<Output, ToolError> {
+fn stop_services<T: Tmux, E: Exec>(env: &Env<T, E>, a: NameArgs) -> Result<Output, ToolError> {
     let project = load_code_mode(env)?;
     let plan = approved_plan(env, &project)?;
     match &a.name {
@@ -380,7 +566,7 @@ fn stop_services<T: Tmux>(env: &Env<T>, a: NameArgs) -> Result<Output, ToolError
     ))
 }
 
-fn restart_service<T: Tmux>(env: &Env<T>, a: NameArgs) -> Result<Output, ToolError> {
+fn restart_service<T: Tmux, E: Exec>(env: &Env<T, E>, a: NameArgs) -> Result<Output, ToolError> {
     let project = load_code_mode(env)?;
     let plan = approved_plan(env, &project)?;
     let name = a
@@ -392,7 +578,7 @@ fn restart_service<T: Tmux>(env: &Env<T>, a: NameArgs) -> Result<Output, ToolErr
     ))
 }
 
-fn service_logs<T: Tmux>(env: &Env<T>, a: LogArgs) -> Result<Output, ToolError> {
+fn service_logs<T: Tmux, E: Exec>(env: &Env<T, E>, a: LogArgs) -> Result<Output, ToolError> {
     let project = load_code_mode(env)?;
     let plan = project
         .plan
@@ -431,10 +617,22 @@ mod tests {
         }
     }
 
+    struct NoPrograms;
+
+    impl Exec for NoPrograms {
+        fn run(
+            &self,
+            _program: &Path,
+            _args: &[&str],
+        ) -> Result<od_code::simulator::Output, od_code::CodeError> {
+            Err(od_code::CodeError("no programs in this test".into()))
+        }
+    }
+
     struct Fixture {
         _repo: tempfile::TempDir,
         _config: tempfile::TempDir,
-        env: Env<Fake>,
+        env: Env<Fake, NoPrograms>,
         fake: Fake,
     }
 
@@ -444,8 +642,10 @@ mod tests {
         let fake = Fake::default();
         let env = Env {
             repo: repo.path().to_path_buf(),
+            project: repo.path().to_path_buf(),
             config: config.path().to_path_buf(),
             runner: Runner::new(fake.clone(), repo.path(), tmux::SOCKET),
+            sims: Simulators::new(NoPrograms, Programs::default()),
         };
         CodeProject {
             mode,

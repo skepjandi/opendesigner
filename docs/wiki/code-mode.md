@@ -1,6 +1,6 @@
 # Code Mode
 
-> **Status: Partially implemented.** Built: the mode, the stack record, the run plan with the user's approval, the tmux runner, the agent tools, the Run panel and the mode choice on the start screen (`crates/code`, `crates/agent/src/code_tools.rs`, `crates/app/src/state/code.rs`, `crates/app/qml/RunPanel.qml`). Not built: the web view for running web apps, simulators, the CLI commands, Windows. See [What is not built](#what-is-not-built).
+> **Status: Implemented** for macOS and Linux with tmux (`crates/code`, `crates/agent/src/code_tools.rs`, `crates/app/src/state/code.rs`, `crates/app/qml/{RunPanel,WebPanel,WebFrame,DevicesPanel}.qml`, `crates/cli/src/codecmd.rs`). Not built: a runner for Windows. Verified by tests and an offscreen scripted session; the live web view, the simulators with real Xcode and Android SDK, and Linux and Windows were not run by hand `[INFERENCE]`.
 
 ## What it is
 
@@ -83,11 +83,27 @@ Every service runs in its own session named `od-<folder>-<4 hex of the path hash
 
 `od_code` unit tests (validation, fingerprints, approval binding and isolation, atomic writes and symlink refusal, detection) and `tests/tmux.rs`, which runs a real tmux on a private socket (skipped where tmux is absent): output and exit code of a crashing service stay readable, a running service is not started twice, stop works. `code_tools` tests: Assets mode refuses every code tool without touching tmux, nothing starts before approval and a changed plan needs a new one, a plan leaving the project is refused, a new project is told to ask before choosing a stack. App tests: the mode round-trips and nothing is open before a folder is.
 
+## Web view
+
+The Web panel shows a running `web` service of the approved plan in a Qt WebEngine view (Chromium, offered under the LGPLv3; `Qt::WebEngineQuick` is linked and `QtWebEngineQuick::initialize()` runs before the application object, `crates/app/cpp/web_engine.cpp`). It loads `http://localhost:<port>` only once the service is `ready`, at Phone (390), Tablet (820) or full width, with reload and an "Open in browser" button.
+
+- The view is off the record (no cookies or cache kept), cannot open windows, and any navigation to a host other than `localhost`, `127.0.0.1` or `[::1]` is cancelled and opened in the system browser instead.
+- Only `WebFrame.qml` imports QtWebEngine and it is loaded on demand, so a build or machine without it shows "Open in browser" instead of failing to start.
+- It adds roughly 150 MB to the app bundle `[INFERENCE: from the framework sizes, not measured]`; `scripts/package-macos.sh`'s banned-module check does not match any WebEngine file name `[INFERENCE: the script was not run]`.
+
+## Simulators
+
+`od_code::simulator` lists, boots, installs into, launches an app in, and takes screenshots of iOS Simulators (`xcrun simctl`, macOS with Xcode) and Android emulators (`adb`, `emulator`, found on `PATH` and in `ANDROID_HOME`, `ANDROID_SDK_ROOT`, `~/Library/Android/sdk`, `~/Android/Sdk`).
+
+- Ids are `ios:<udid>`, `android:emulator-<port>` (running) and `android-avd:<name>` (not running). An Android serial that is not `emulator-<digits>` is refused: a phone plugged into the computer is never listed or touched.
+- Programs run with fixed arguments and validated values, never through a shell, with a 20 s timeout and a 32 MB output cap. An Android virtual device keeps running, so it is started in its own tmux session (`od-<project>-emu-<name>`) and stays visible and stoppable like a service.
+- Agent tools: `list_simulators` and `capture_simulator` (Code mode only; the screenshot is imported into `media/` through the same checks as a user's picture); `boot_simulator`, `install_app` (a `.app` folder or `.apk` inside the project) and `launch_app` need the user's approval of the run plan. In the Devices panel the user boots a simulator with a click, watches its screen (a screenshot about once a second while Live is on, one at a time, off the UI thread) and saves the current screen to `media/` for a store screenshot or a 3D device capture.
+
+## Command line
+
+`opendesigner code status | mode <assets|code> | approve [--yes] | revoke | logs <service> | simulators [DIR]`. `approve` prints every command and starts nothing without `--yes`.
+
 ## What is not built
 
-Each is a separate change after this one.
-
-- **Web view.** Show a running web service in Qt WebEngine (Chromium, LGPLv3: bundle roughly 150 MB larger; a licensing check and the `build.rs` allowlist update come with it) as a frame beside the canvas.
-- **Simulators.** Detect and boot the iOS Simulator (`xcrun simctl`) and Android emulators (`adb`, `emulator`), show their screen on the canvas by streaming screenshots, and let the 3D device frames use them as captures.
-- **CLI.** `opendesigner code status | mode | approve`, so the same operations work headless.
 - **Windows.** A runner that does not need tmux.
+- **Selecting elements in the web view** to pin a note on or to send as context to the agent (the canvas does this for designs).

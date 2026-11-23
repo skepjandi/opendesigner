@@ -138,6 +138,7 @@ pub fn definitions() -> Vec<Value> {
     all.extend(crate::seeds::definitions());
     all.extend(crate::blocks::definitions());
     all.extend(crate::code_tools::definitions());
+    all.extend(crate::share_export::definitions());
     all.extend(crate::doctools::definitions());
     all.extend(crate::audio_tools::definitions());
     all.extend(crate::scene_spec::definitions());
@@ -752,6 +753,7 @@ fn dispatch(ctx: &mut CallCtx, name: &str, args: Value) -> Result<Output, ToolEr
         n if crate::seeds::NAMES.contains(&n) => crate::seeds::call(ctx, n, args),
         n if crate::blocks::NAMES.contains(&n) => crate::blocks::call(ctx, n, args),
         n if crate::code_tools::NAMES.contains(&n) => crate::code_tools::call(ctx, n, args),
+        n if crate::share_export::NAMES.contains(&n) => crate::share_export::call(ctx, n, args),
         n if crate::doctools::NAMES.contains(&n) => crate::doctools::call(ctx, n, args),
         n if crate::audio_tools::NAMES.contains(&n) => crate::audio_tools::call(ctx, n, args),
         n if crate::scene_spec::NAMES.contains(&n) => crate::scene_spec::call(ctx, n, args),

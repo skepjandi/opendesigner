@@ -58,6 +58,10 @@ Code mode ([Code Mode](./code-mode.md)) is the one place the app starts programs
 | Output floods the agent or the window | Logs: at most 500 lines and 64 KB per read. |
 | Secrets in a plan | The playbook tells the agent to keep them in the project's own environment files; the plan is shown to the user word for word and may be committed, so there is no place for them. |
 
+**Simulators.** Only simulators and emulators are touched: an Android serial must be `emulator-<digits>`, ids are validated before any program runs, programs get fixed arguments (no shell), a 20 s timeout and a 32 MB output cap, and an app to install must be a `.app` folder or `.apk` inside the project (symlinks out of it are refused). `boot_simulator`, `install_app` and `launch_app` need the approved run plan; listing and screenshots do not run the project's code.
+
+**Web view.** Qt WebEngine loads only `http://localhost:<port>` for a port in the approved plan, off the record, without popups; navigation to any other host is cancelled and handed to the system browser. A page the project serves is untrusted web content running in Chromium's sandbox.
+
 What this cannot do: make an approved command safe. The user reads each command before approving, and a command runs with the user's rights.
 
 ## Agent memory

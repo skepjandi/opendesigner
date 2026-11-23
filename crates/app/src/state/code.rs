@@ -7,14 +7,17 @@ use od_agent::code_tools::{self, Env};
 use od_code::approval;
 use od_code::project::{CodeProject, Mode};
 use od_code::runner;
+use od_code::simulator::System;
 use od_code::tmux::SystemTmux;
 
 use super::*;
+use std::path::PathBuf;
 
 impl EditorState {
-    fn code_env(&self) -> Res<Env<SystemTmux>> {
+    fn code_env(&self) -> Res<Env<SystemTmux, System>> {
         let repo = self.repo.as_deref().ok_or("no project is open")?;
-        Env::system(repo).map_err(|e| e.0)
+        let project = self.project_dir().unwrap_or_else(|| repo.to_path_buf());
+        Env::system(repo, &project).map_err(|e| e.0)
     }
 
     /// The code side of the open project as the Run panel shows it. `{"open": false}` when no
@@ -91,10 +94,77 @@ impl EditorState {
         .map_err(|e| e.0)
     }
 
+    pub fn code_paths(&self) -> Option<CodePaths> {
+        let repo = self.repo.clone()?;
+        let project = self.project_dir().unwrap_or_else(|| repo.clone());
+        Some(CodePaths { repo, project })
+    }
+
     pub fn service_log(&self, name: &str) -> Res<String> {
         let env = self.code_env()?;
         env.runner.logs(name, 200).map_err(|e| e.0)
     }
+}
+
+/// The simulator work runs off the UI thread, so it takes owned paths and builds its own `Env`.
+#[derive(Clone)]
+pub struct CodePaths {
+    repo: PathBuf,
+    project: PathBuf,
+}
+
+impl CodePaths {
+    fn env(&self) -> Res<Env<SystemTmux, System>> {
+        Env::system(&self.repo, &self.project).map_err(|e| e.0)
+    }
+
+    /// `{"simulators": [...]}` or `{"error": "..."}`; never blocks longer than the programs'
+    /// own timeouts.
+    pub fn list_simulators(&self) -> Value {
+        match self.env().and_then(|env| env.sims.list().map_err(|e| e.0)) {
+            Ok(found) => json!({"simulators": found}),
+            Err(e) => json!({"error": e}),
+        }
+    }
+
+    /// The user's click on Boot: no run-plan approval, because the user is the one asking.
+    pub fn boot_simulator(&self, id: &str) -> Res<()> {
+        let env = self.env()?;
+        if let Some(avd) = id.strip_prefix("android-avd:") {
+            env.runner.available().map_err(|e| e.0)?;
+            let command = env.sims.emulator_command(id).map_err(|e| e.0)?;
+            env.runner
+                .start_emulator(avd, &command, &env.repo)
+                .map_err(|e| e.0)
+        } else {
+            env.sims.boot_ios(id).map_err(|e| e.0)
+        }
+    }
+
+    /// The simulator's screen as (width, height, straight RGBA; a screenshot is opaque).
+    pub fn screen(&self, id: &str) -> Res<(u32, u32, Vec<u8>)> {
+        let png = self.env()?.sims.screenshot(id).map_err(|e| e.0)?;
+        decode_png(&png)
+    }
+
+    /// Saves the screen into the design project's `media/` and returns its reference.
+    pub fn save_screen(&self, id: &str) -> Res<String> {
+        let png = self.env()?.sims.screenshot(id).map_err(|e| e.0)?;
+        code_tools::save_capture(&self.project, id, &png).map_err(|e| e.0)
+    }
+}
+
+const MAX_SCREEN_PIXELS: u64 = 16_000_000;
+
+fn decode_png(png: &[u8]) -> Res<(u32, u32, Vec<u8>)> {
+    let mut random = [0u8; 8];
+    getrandom::fill(&mut random).map_err(|e| e.to_string())?;
+    let name: String = random.iter().map(|b| format!("{b:02x}")).collect();
+    let file = std::env::temp_dir().join(format!("od-screen-{name}.png"));
+    std::fs::write(&file, png).map_err(|e| e.to_string())?;
+    let decoded = od_render::decode_rgba(&file, MAX_SCREEN_PIXELS);
+    let _ = std::fs::remove_file(&file);
+    decoded
 }
 
 #[cfg(test)]

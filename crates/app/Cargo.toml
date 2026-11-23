@@ -24,6 +24,7 @@ opendesigner-store = { path = "../store" }
 opendesigner-agent = { path = "../agent" }
 opendesigner-media = { path = "../media" }
 opendesigner-code = { path = "../code" }
+getrandom.workspace = true
 cxx = "1"
 cxx-qt = "=0.10.0"
 cxx-qt-lib = { version = "=0.10.0", features = ["qt_full"] }

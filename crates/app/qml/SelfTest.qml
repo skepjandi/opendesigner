@@ -311,6 +311,14 @@ Item {
                    check(code.open === false, "no folder, no code overview: " + JSON.stringify(code))
         },
         function () {
+            const component = Qt.createComponent("qrc:/qt/qml/org/opendesigner/app/qml/WebFrame.qml")
+            if (!check(component.status === Component.Ready, "the web view should load: " + component.errorString())) return false
+            const view = component.createObject(window, { address: "about:blank" })
+            const made = check(view !== null, "the web view should be created")
+            if (view) view.destroy()
+            return made
+        },
+        function () {
             editor.layoutHide("memory")
             const hidden = dock.hidden.indexOf("memory") >= 0
             editor.layoutShow("memory")

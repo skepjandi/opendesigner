@@ -220,7 +220,11 @@ chooser instead of going to the agent.
 The agent's words are shown in text edits, so they can be selected and copied.
 ## Code mode tools
 
-`get_code_project`, `set_stack`, `propose_run_plan`, `start_services`, `stop_services`, `restart_service` and `service_logs`, the `code` playbook, and the `code_mode` note in `get_guidance`. Behavior, the approval rule and the tmux sessions are in [Code Mode](./code-mode.md); the threat model is in [Security](./security.md#running-processes).
+`get_code_project`, `set_stack`, `propose_run_plan`, `start_services`, `stop_services`, `restart_service` `service_logs`, `list_simulators`, `boot_simulator`, `install_app`, `launch_app` and `capture_simulator`, the `code` playbook, and the `code_mode` note in `get_guidance`. Behavior, the approval rule and the tmux sessions are in [Code Mode](./code-mode.md); the threat model is in [Security](./security.md#running-processes).
+
+## Sharing files: `export_share`
+
+`export_share` renders frames to a file made to be sent rather than uploaded to a store, in `exports/`: `.jpg` (one frame), `.pdf` (one page per frame, in the order given, pages at 96 pixels to the inch) or `.html` (one self-contained page: each frame as an embedded PNG with its text as alt text, no scripts, no external files). All are raster output at the frame's size times `scale`; transparency is flattened onto white in JPEG and PDF. Store files still go through `export`, which checks the store's rules and writes PNG. Code: `od_render::share` (`encode_jpeg`, `encode_pdf`), `crates/agent/src/share_export.rs`.
 
 ## Agent memory
 

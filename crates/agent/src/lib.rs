@@ -48,6 +48,7 @@ pub mod scene_tool;
 pub mod seeds;
 pub mod sequence;
 pub mod server;
+pub mod share_export;
 pub mod showcase;
 pub mod skill;
 pub mod sound_license;

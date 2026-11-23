@@ -190,11 +190,18 @@ impl<T: Tmux> Runner<T> {
             Some(_) => self.kill(&session)?,
             None => {}
         }
-        let shell_command = format!(
-            "exec \"${{SHELL:-/bin/sh}}\" -lc {}",
-            sh_quote(&service.command)
-        );
-        let dir = dir.display().to_string();
+        self.spawn_session(&session, &dir.display().to_string(), &service.command, name)
+    }
+
+    /// Runs `command` in a new session of its own; shared by services and emulators.
+    fn spawn_session(
+        &self,
+        session: &str,
+        dir: &str,
+        command: &str,
+        label: &str,
+    ) -> Result<(), CodeError> {
+        let shell_command = format!("exec \"${{SHELL:-/bin/sh}}\" -lc {}", sh_quote(command));
         let args = [
             "start-server",
             ";",
@@ -211,16 +218,44 @@ impl<T: Tmux> Runner<T> {
             "new-session",
             "-d",
             "-s",
-            &session,
+            session,
             "-c",
-            &dir,
+            dir,
             "-x",
             "200",
             "-y",
             "50",
             &shell_command,
         ];
-        expect_success(self.run(&args)?, &format!("starting {name}")).map(|_| ())
+        expect_success(self.run(&args)?, &format!("starting {label}")).map(|_| ())
+    }
+
+    /// Starts an Android emulator (`command` from `Simulators::emulator_command`) in its own
+    /// session; one that is already running is left alone.
+    pub fn start_emulator(&self, avd: &str, command: &str, dir: &Path) -> Result<(), CodeError> {
+        let label: String = avd
+            .chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() {
+                    c.to_ascii_lowercase()
+                } else {
+                    '-'
+                }
+            })
+            .take(20)
+            .collect();
+        let session = self.session(&format!("emu-{label}"));
+        if self
+            .sessions()?
+            .iter()
+            .any(|(n, s)| *n == session && *s == State::Running)
+        {
+            return Ok(());
+        }
+        let dir = dir
+            .canonicalize()
+            .map_err(|e| crate::io("the project folder", e))?;
+        self.spawn_session(&session, &dir.display().to_string(), command, avd)
     }
 
     pub fn start_all(&self, plan: &RunPlan, repo: &Path) -> Result<Vec<String>, CodeError> {

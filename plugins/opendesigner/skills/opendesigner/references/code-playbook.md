@@ -9,7 +9,8 @@ The user chose Code mode: this folder is a real codebase you build and run, and 
 3. **Scaffold** with the stack's own generator (the framework's create command, not hand-written boilerplate), then build the smallest thing that runs.
 4. **Run plan.** `propose_run_plan` with every process the work needs: the dev server (kind `web` with its port), an API, a database. Use the real command a developer would type, and a folder inside the project. Tell the user to read it in the Run panel and press Approve and start. Do not start anything yourself before they approve; `start_services` will refuse.
 5. **Run and look.** `start_services`, then `service_logs`. A service that exited has left its error on screen: read it, fix the cause, `restart_service`. Do not retry blindly. The user can watch the same sessions with tmux (`watch_with` in `get_code_project`).
-6. **Look at it.** For a web service the Preview shows the page at `http://localhost:<port>`. Judge the result as a user would, then iterate.
+6. **Look at it.** A web service appears in the user's Web panel at `http://localhost:<port>`; judge it as a user would, then iterate. For a mobile app: `list_simulators`, `boot_simulator` (poll until booted), `install_app` with the built `.app` folder or `.apk`, `launch_app`, then `capture_simulator` to see the screen. Only simulators and emulators are used, never a connected phone.
+7. **Assets from the running app.** A captured screen lands in `media/`; use it as an image node or as the capture of a 3D device for store screenshots (get_playbook `3d`, `growth`). To send a design to someone, `export_share` makes a JPEG, a PDF with a page per frame, or one HTML page.
 
 ## Rules
 

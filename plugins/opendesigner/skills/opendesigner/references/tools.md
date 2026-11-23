@@ -799,6 +799,60 @@ Arguments:
 - `lines` (integer) default 80, at most 500
 - `name` (string, required) 
 
+## `list_simulators`
+
+The iOS Simulators and Android emulators on this computer (a connected phone is never listed or touched): id, platform, name, OS and whether it is booted. The id goes into the other simulator tools. Code mode only.
+
+Read-only.
+
+No arguments.
+
+## `boot_simulator`
+
+Boot an iOS simulator (and open the Simulator app) or start an Android virtual device in a tmux session. Needs the user's approval of the run plan. Wait until list_simulators says booted.
+
+Arguments:
+
+- `id` (string, required) from list_simulators
+
+## `install_app`
+
+Install an app the project built into a booted simulator: a .app folder for iOS, an .apk for Android, as a path inside the project. Needs the user's approval of the run plan.
+
+Arguments:
+
+- `id` (string, required) 
+- `path` (string, required) relative to the project folder
+
+## `launch_app`
+
+Launch an installed app by its application id (for example com.example.app) in a booted simulator. Needs the user's approval of the run plan.
+
+Arguments:
+
+- `app_id` (string, required) 
+- `id` (string, required) 
+
+## `capture_simulator`
+
+Take a screenshot of a booted simulator and save it in the design project's media/ folder. The answer names the file; use it as an image node or as the capture of a 3D device (get_playbook 3d) for store screenshots.
+
+Arguments:
+
+- `id` (string, required) 
+
+## `export_share`
+
+Render frames to one file to send to someone, in exports/: .jpg (one frame), .pdf (one page per frame, in the order given) or .html (one self-contained page: the frames as pictures with their text as alt text, no external files). Raster output at the frame's size times `scale`. For App Store or Google Play files use export, which checks the store's rules.
+
+Arguments:
+
+- `file` (string, required) plain file name ending in .jpg, .jpeg, .pdf or .html
+- `frames` (array, required) ids of frame nodes
+- `locale` (string) a language from list_locales
+- `scale` (number) 
+- `title` (string) page title for .html and .pdf readers; default the project name
+
 ## `validate_document`
 
 Lint the whole document and its videos and get findings with stable rule codes (OD001 ...): nodes outside their frame, clipped or overflowing or tiny or empty text, low contrast, missing images or footage or sound, undefined tokens, hidden nodes a video animates, overlapping siblings, frames that match no export target, video timing problems, and broken template variable bindings. Each finding says what is wrong, where (node, frame or video) and how to fix it. Read-only. Call it before you finish a turn and fix every error and warning, or say why you left one.

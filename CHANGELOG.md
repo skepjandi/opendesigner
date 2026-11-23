@@ -16,10 +16,15 @@ All notable changes to OpenDesigner are documented here.
 - **Stack.** `get_code_project` reports what the folder already is and the questions to ask; the agent asks and proposes options, or the user names a stack; `set_stack` records it (`decided_by` user or agent).
 - **Run plan and approval.** `propose_run_plan` saves up to 8 validated services (command, folder inside the project, port). Nothing runs until the user presses Approve and start in the Run panel. The approval is bound to the plan's fingerprint and kept in the per-user config folder, so an edited plan or a cloned repository is never pre-approved.
 - **tmux.** Each service runs in its own session on a dedicated tmux server (`tmux -L opendesigner`), in a login shell, with `remain-on-exit` so a crash and its error stay readable. The Run panel shows state, the log and a copyable attach command; the agent has `start_services`, `stop_services`, `restart_service` and `service_logs`.
+- **Web panel.** Qt WebEngine shows a ready `web` service at phone, tablet or full width; localhost only, off the record, other hosts open in the system browser. New linked Qt module `WebEngineQuick` (LGPLv3).
+- **Devices panel and simulator tools.** `od_code::simulator` lists, boots, installs into, launches and screenshots iOS Simulators and Android emulators (never a connected phone). Tools `list_simulators`, `boot_simulator`, `install_app`, `launch_app`, `capture_simulator`; the panel streams the screen and saves it to `media/`.
+- **`export_share`.** JPEG, multi-page PDF or one self-contained HTML page of frames, next to the store-checked `export`.
+- **Tabs.** The header shows the workspaces of the repository as tabs.
+- **CLI.** `opendesigner code status | mode | approve | revoke | logs | simulators`.
 - **New crate `od_code`** (no Qt, no network, no new dependency), the `code` playbook, a `code_mode` note in `get_guidance`.
 - **Docs.** New wiki page Code Mode, a Running processes section in Security, decision-log entries.
 
-**Not built:** the web view (Qt WebEngine) for running web apps, simulators, CLI commands, Windows. **Not verified:** the Qt window by hand, Linux and Windows.
+**Not built:** a Windows runner. **Not verified:** the Qt window by hand, Linux and Windows.
 
 ### docs: remove references to external video editors
 
