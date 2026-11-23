@@ -146,7 +146,7 @@ jobs:
           |--------|----------|-------|
           | macOS (Apple silicon) | `OpenDesigner-*-macos-arm64.zip` | Unzip and move `OpenDesigner.app` to Applications. Signed ad hoc, not notarized: on first open, right-click the app and choose Open (or run `xattr -dr com.apple.quarantine OpenDesigner.app`). |
           | Windows (x64) | `OpenDesigner-*-windows-x64.zip` | Unzip and run `opendesigner-app.exe`. Not code-signed: SmartScreen warns on first run (More info, then Run anyway). |
-          | Linux (x86_64) | `OpenDesigner-*-linux-x86_64.AppImage` | `chmod +x` it and run it. Built on Ubuntu 24.04: needs glibc 2.39 or newer. Sound plays through the system's GStreamer: it needs `gstreamer1.0-plugins-base` and `-good` (installed on most desktops); without them the app crashed in our CI runner when the Video panel loaded. |
+          | Linux (x86_64) | `OpenDesigner-*-linux-x86_64.AppImage` | `chmod +x` it and run it. Built on Ubuntu 24.04: needs glibc 2.39 or newer. Sound plays through the GStreamer on your system (not bundled): it needs `gstreamer1.0-plugins-base` and `-good` (installed on most desktops); without them the app crashed in our CI runner when the Video panel loaded. |
 
           Video export needs `ffmpeg` on your PATH. Verify a download against `SHA256SUMS.txt`.
 
