@@ -62,7 +62,8 @@ jobs:
             qml6-module-qtquick-dialogs qml6-module-qtquick-window qml6-module-qtquick-templates \
             qml6-module-qtqml qml6-module-qtqml-workerscript qml6-module-qt-labs-folderlistmodel \
             qml6-module-qt-labs-platform qml6-module-qtcore qml6-module-qtmultimedia \
-            qml6-module-qtwebengine libqt6svg6 libgl1-mesa-dev libxkbcommon-dev libfontconfig1 fonts-dejavu-core
+            qml6-module-qtwebengine libqt6svg6 \
+            gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-alsa libgl1-mesa-dev libxkbcommon-dev libfontconfig1 fonts-dejavu-core
           mkdir -p "$HOME/tools"
           fetch() { # url sha256 file
             curl -fsSL -o "$HOME/tools/$3" "$1"
@@ -145,7 +146,7 @@ jobs:
           |--------|----------|-------|
           | macOS (Apple silicon) | `OpenDesigner-*-macos-arm64.zip` | Unzip and move `OpenDesigner.app` to Applications. Signed ad hoc, not notarized: on first open, right-click the app and choose Open (or run `xattr -dr com.apple.quarantine OpenDesigner.app`). |
           | Windows (x64) | `OpenDesigner-*-windows-x64.zip` | Unzip and run `opendesigner-app.exe`. Not code-signed: SmartScreen warns on first run (More info, then Run anyway). |
-          | Linux (x86_64) | `OpenDesigner-*-linux-x86_64.AppImage` | `chmod +x` it and run it. Built on Ubuntu 24.04: needs glibc 2.39 or newer. Qt Multimedia plays sound through the system's GStreamer. |
+          | Linux (x86_64) | `OpenDesigner-*-linux-x86_64.AppImage` | `chmod +x` it and run it. Built on Ubuntu 24.04: needs glibc 2.39 or newer. Sound plays through the system's GStreamer: it needs `gstreamer1.0-plugins-base` and `-good` (installed on most desktops); without them the app crashed in our CI runner when the Video panel loaded. |
 
           Video export needs `ffmpeg` on your PATH. Verify a download against `SHA256SUMS.txt`.
 
