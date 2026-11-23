@@ -137,7 +137,9 @@ pub(crate) fn draw_image(
     transform: Transform,
     opacity: f32,
     image: &Arc<Pixmap>,
+    pixel_art: bool,
 ) {
+    let nearest = pixel_art || node.image_smoothing == Some(od_core::ImageSmoothing::Nearest);
     let (w, h) = (node.width as f32, node.height as f32);
     let (iw, ih) = (image.width() as f32, image.height() as f32);
     if w <= 0.0 || h <= 0.0 {
@@ -167,7 +169,7 @@ pub(crate) fn draw_image(
     let device_scale = sx.max(sy) * transform.sx.abs();
     let mut source = Arc::clone(image);
     let mut shrink = 1.0;
-    while device_scale * shrink <= 0.5 && source.width() > 1 && source.height() > 1 {
+    while !nearest && device_scale * shrink <= 0.5 && source.width() > 1 && source.height() > 1 {
         match halve(&source) {
             Some(smaller) => source = Arc::new(smaller),
             None => break,
@@ -175,7 +177,7 @@ pub(crate) fn draw_image(
         shrink *= 2.0;
     }
     let pattern_transform = Transform::from_row(sx * shrink, 0.0, 0.0, sy * shrink, ox, oy);
-    let quality = if device_scale * shrink >= 0.99 && device_scale * shrink <= 1.01 {
+    let quality = if nearest || (device_scale * shrink >= 0.99 && device_scale * shrink <= 1.01) {
         FilterQuality::Nearest
     } else {
         FilterQuality::Bicubic
@@ -189,7 +191,7 @@ pub(crate) fn draw_image(
             opacity,
             pattern_transform,
         ),
-        anti_alias: true,
+        anti_alias: !nearest,
         ..SkPaint::default()
     };
     let path = if node.image_fit == Some(ImageFit::Contain) {

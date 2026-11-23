@@ -12,9 +12,9 @@ use crate::vector::{FillRule, LineCap, LineJoin, ViewBox};
 /// devices and keyframe animations; version 3 added sound tracks, captions, clip speed and grades,
 /// transitions and template variables; version 4 added vector paths, gradients, 2D transforms,
 /// effects, looping keyframes and the camera; version 5 added `Video.hold_frames`; version 6 added
-/// additive animation tracks (`Animation.additive`). Every older project is a valid version 6
-/// project, because each addition is an optional field.
-pub const FORMAT_VERSION: u32 = 6;
+/// additive animation tracks (`Animation.additive`); version 7 added `Node.image_smoothing`. Every
+/// older project is a valid version 7 project, because each addition is an optional field.
+pub const FORMAT_VERSION: u32 = 7;
 
 /// Stable identifier of a node or page. Never reused within a document.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
@@ -159,6 +159,16 @@ pub enum ImageFit {
     Fill,
 }
 
+/// How an image is resampled when it is drawn larger or smaller than it is stored.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ImageSmoothing {
+    /// Filtered scaling (the default; never written to a file).
+    Smooth,
+    /// Nearest-neighbour scaling, for pixel art.
+    Nearest,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Node {
@@ -226,6 +236,9 @@ pub struct Node {
     /// Unset means cover.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image_fit: Option<ImageFit>,
+    /// Unset means smooth (filtered scaling); `nearest` keeps hard pixel edges.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_smoothing: Option<ImageSmoothing>,
     /// The 3D device a `device3d` node draws (present exactly on those nodes).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub device3d: Option<crate::device3d::Device3d>,
@@ -300,6 +313,7 @@ impl Node {
             line_height: None,
             image: None,
             image_fit: None,
+            image_smoothing: None,
             device3d: (kind == NodeKind::Device3d).then(crate::device3d::Device3d::default),
             grade: None,
             path: None,

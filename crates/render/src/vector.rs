@@ -45,6 +45,7 @@ pub(crate) fn path_shape(node: &Node) -> Option<Path> {
 }
 
 /// Fills and strokes `shape` (in the node's box) as the node's fill and stroke say.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn paint_shape(
     pixmap: &mut Pixmap,
     mask: Option<&Mask>,
@@ -53,15 +54,16 @@ pub(crate) fn paint_shape(
     tokens: &BTreeMap<String, String>,
     transform: Transform,
     opacity: f32,
+    anti_alias: bool,
 ) -> Result<(), RenderError> {
     let size = (node.width as f32, node.height as f32);
     if let Some(fill) = &node.fill {
-        let paint = sk_paint(fill, tokens, size, opacity)?;
+        let paint = sk_paint(fill, tokens, size, opacity, anti_alias)?;
         pixmap.fill_path(shape, &paint, sk_fill_rule(node), transform, mask);
     }
     if let Some(stroke) = node.stroke.as_ref().filter(|s| s.width > 0.0) {
         stroke_shape(
-            pixmap, mask, shape, stroke, tokens, size, transform, opacity,
+            pixmap, mask, shape, stroke, tokens, size, transform, opacity, anti_alias,
         )?;
     }
     Ok(())
@@ -79,6 +81,7 @@ fn sk_paint(
     tokens: &BTreeMap<String, String>,
     size: (f32, f32),
     opacity: f32,
+    anti_alias: bool,
 ) -> Result<SkPaint<'static>, RenderError> {
     match gradient::shader(paint, tokens, size, opacity)? {
         Some(shader) => {
@@ -86,10 +89,10 @@ fn sk_paint(
                 shader,
                 ..SkPaint::default()
             };
-            sk.anti_alias = true;
+            sk.anti_alias = anti_alias;
             Ok(sk)
         }
-        None => Ok(solid(paint.resolve(tokens)?, opacity)),
+        None => Ok(solid(paint.resolve(tokens)?, opacity, anti_alias)),
     }
 }
 
@@ -103,8 +106,9 @@ fn stroke_shape(
     size: (f32, f32),
     transform: Transform,
     opacity: f32,
+    anti_alias: bool,
 ) -> Result<(), RenderError> {
-    let paint = sk_paint(&stroke.paint, tokens, size, opacity)?;
+    let paint = sk_paint(&stroke.paint, tokens, size, opacity, anti_alias)?;
     let (lo, hi) = (
         stroke.trim_start.min(stroke.trim_end),
         stroke.trim_start.max(stroke.trim_end),

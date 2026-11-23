@@ -198,6 +198,7 @@ fn draw_tiles(
             top,
             rows,
             od_core::Camera::default(),
+            false,
         )
         .map(|(bytes, _)| (top, bytes))
     };

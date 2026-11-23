@@ -117,6 +117,8 @@ struct Ctx<'a> {
     scale: f32,
     /// The video camera, when it is not at rest.
     camera: Option<place::CameraView>,
+    /// Draw shapes without anti-aliasing and images with nearest-neighbour sampling.
+    pixel_art: bool,
 }
 
 impl Ctx<'_> {
@@ -210,6 +212,7 @@ pub fn render_frame_with(
         media,
         None,
         Camera::default(),
+        false,
     )
 }
 
@@ -223,7 +226,28 @@ pub fn render_frame_camera(
     media: &mut Media,
     camera: Camera,
 ) -> Result<Rendered, RenderError> {
-    render_frame_in_bands(doc, frame, scale, project_dir, media, None, camera)
+    render_frame_in_bands(doc, frame, scale, project_dir, media, None, camera, false)
+}
+
+/// [`render_frame_with`] for pixel art: no anti-aliasing on shapes, and every image drawn with
+/// nearest-neighbour sampling, so an integer `scale` keeps hard pixel edges. Text is still smooth.
+pub fn render_frame_pixel_art(
+    doc: &Document,
+    frame: &NodeId,
+    scale: f32,
+    project_dir: Option<&FsPath>,
+    media: &mut Media,
+) -> Result<Rendered, RenderError> {
+    render_frame_in_bands(
+        doc,
+        frame,
+        scale,
+        project_dir,
+        media,
+        None,
+        Camera::default(),
+        true,
+    )
 }
 
 /// The frame node and its size in pixels at `scale`, or why it cannot be drawn.
@@ -256,6 +280,7 @@ fn frame_geometry<'a>(
 }
 
 /// [`render_frame_with`] with the number of bands chosen (`None`: by size and cores).
+#[allow(clippy::too_many_arguments)]
 fn render_frame_in_bands(
     doc: &Document,
     frame: &NodeId,
@@ -264,6 +289,7 @@ fn render_frame_in_bands(
     media: &mut Media,
     bands: Option<usize>,
     camera: Camera,
+    pixel_art: bool,
 ) -> Result<Rendered, RenderError> {
     let (node, (w, h)) = frame_geometry(doc, frame, scale)?;
     let bands = bands.unwrap_or_else(|| band_count(node, h));
@@ -278,6 +304,7 @@ fn render_frame_in_bands(
         &devices,
         bands,
         camera,
+        pixel_art,
     )?;
     for warning in warnings {
         if !rendered.warnings.contains(&warning) {
@@ -331,6 +358,7 @@ fn render_bands(
     devices: &HashMap<NodeId, Arc<Pixmap>>,
     bands: usize,
     camera: Camera,
+    pixel_art: bool,
 ) -> Result<Rendered, RenderError> {
     let too_large = || RenderError::TooLarge {
         width: u64::from(w),
@@ -349,6 +377,7 @@ fn render_bands(
             top,
             rows,
             camera,
+            pixel_art,
         )
     };
     let parts: Vec<Result<Band, RenderError>> = if starts.len() == 1 {
@@ -399,6 +428,7 @@ fn draw_rows(
     top: u32,
     rows: u32,
     camera: Camera,
+    pixel_art: bool,
 ) -> Result<Band, RenderError> {
     let too_large = || RenderError::TooLarge {
         width: u64::from(w),
@@ -420,6 +450,7 @@ fn draw_rows(
         devices,
         scale,
         camera: place::CameraView::new(camera, base, node.width, node.height),
+        pixel_art,
     };
     let start = Place {
         parent: base,
@@ -546,7 +577,15 @@ fn draw_node(
                 match load_image(ctx, node) {
                     Ok(image) => {
                         let image = grade::graded(image, node.grade.as_ref());
-                        images::draw_image(pixmap, mask, node, transform, opacity, &image);
+                        images::draw_image(
+                            pixmap,
+                            mask,
+                            node,
+                            transform,
+                            opacity,
+                            &image,
+                            ctx.pixel_art,
+                        );
                     }
                     Err(reason) => ctx.warnings.push(Warning::ImageNotRendered {
                         id: node.id.clone(),
@@ -565,7 +604,16 @@ fn draw_node(
     };
 
     if let Some(path) = &shape {
-        vector::paint_shape(pixmap, mask, path, node, ctx.tokens, transform, opacity)?;
+        vector::paint_shape(
+            pixmap,
+            mask,
+            path,
+            node,
+            ctx.tokens,
+            transform,
+            opacity,
+            !ctx.pixel_art,
+        )?;
     }
 
     if node.children.is_empty() {
@@ -665,7 +713,7 @@ fn clip_mask(
     }
 }
 
-fn solid(color: od_core::Rgba, opacity: f32) -> SkPaint<'static> {
+fn solid(color: od_core::Rgba, opacity: f32, anti_alias: bool) -> SkPaint<'static> {
     let alpha = (f32::from(color.a) / 255.0 * opacity).clamp(0.0, 1.0);
     let mut paint = SkPaint::default();
     paint.set_color(
@@ -677,7 +725,7 @@ fn solid(color: od_core::Rgba, opacity: f32) -> SkPaint<'static> {
         )
         .unwrap_or(Color::TRANSPARENT),
     );
-    paint.anti_alias = true;
+    paint.anti_alias = anti_alias;
     paint
 }
 
@@ -1502,6 +1550,7 @@ mod tests {
                 &mut Media::default(),
                 Some(1),
                 Camera::default(),
+                false,
             )
             .unwrap();
             for bands in [2, 3, 8] {
@@ -1513,6 +1562,7 @@ mod tests {
                     &mut Media::default(),
                     Some(bands),
                     Camera::default(),
+                    false,
                 )
                 .unwrap();
                 assert_eq!(one.pixmap.width(), many.pixmap.width());
