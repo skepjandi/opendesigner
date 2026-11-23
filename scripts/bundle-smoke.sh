@@ -28,6 +28,9 @@ run || status=$?
 if [ "$status" -ne 0 ]; then
   echo "the scripted session exited with status $status; its output:" >&2
   cat "$log" >&2
+  GST_DEBUG=2 run || true
+  echo "again with GStreamer warnings:" >&2
+  grep -E "ERROR|WARN" "$log" | head -40 >&2 || true
   exit 3
 fi
 if grep -q "implemented in both" "$log"; then
