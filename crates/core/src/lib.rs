@@ -50,7 +50,9 @@ pub use ease::{Bezier, Ease, Ring, Spring};
 pub use error::{OpError, ProjectError};
 pub use grade::{Grade, GradeParam, Look};
 pub use history::{Actor, Checkpoint, Session, Transaction, TransactionKind, TxReceipt};
-pub use model::{Document, ImageFit, Node, NodeId, NodeKind, Page, Stroke, TextAlign};
+pub use model::{
+    Document, ImageFit, ImageSmoothing, Node, NodeId, NodeKind, Page, Stroke, TextAlign,
+};
 pub use ops::{AppliedOp, NewNode, Operation, Property};
 pub use paint::{Paint, Rgba, Stop};
 pub use path::Path;

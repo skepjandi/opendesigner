@@ -11,7 +11,8 @@ use crate::device3d::{self, Device3d, DeviceModel};
 use crate::error::OpError;
 use crate::limits::{self, finite_in, text_within};
 use crate::model::{
-    Document, ImageFit, Node, NodeId, NodeKind, Stroke, TextAlign, validate_node_fields,
+    Document, ImageFit, ImageSmoothing, Node, NodeId, NodeKind, Stroke, TextAlign,
+    validate_node_fields,
 };
 use crate::paint::Paint;
 use crate::transform::Shadow;
@@ -63,6 +64,7 @@ pub enum Property {
     LineHeight(Option<f64>),
     Image(Option<String>),
     ImageFit(Option<ImageFit>),
+    ImageSmoothing(Option<ImageSmoothing>),
     /// Which generated 3D model a device3d node draws.
     Model(DeviceModel),
     RotateX(f64),
@@ -156,6 +158,7 @@ impl Property {
             Property::LineHeight(_) => "line_height",
             Property::Image(_) => "image",
             Property::ImageFit(_) => "image_fit",
+            Property::ImageSmoothing(_) => "image_smoothing",
             Property::Model(_) => "model",
             Property::RotateX(_) => "rotate_x",
             Property::RotateY(_) => "rotate_y",
@@ -220,6 +223,7 @@ impl Property {
             | Property::TextAlign(_)
             | Property::LineHeight(_) => kind == Text,
             Property::Image(_) | Property::ImageFit(_) => matches!(kind, Image | Device3d),
+            Property::ImageSmoothing(_) => kind == Image,
             Property::Grade(_) | Property::GradeParam { .. } => kind == Image,
             Property::Model(_)
             | Property::RotateX(_)
@@ -327,6 +331,10 @@ fn apply_property(
             Property::Image(replace(&mut node.image, v))
         }
         Property::ImageFit(v) => Property::ImageFit(replace(&mut node.image_fit, v)),
+        Property::ImageSmoothing(v) => {
+            let v = v.filter(|s| *s != ImageSmoothing::Smooth);
+            Property::ImageSmoothing(replace(&mut node.image_smoothing, v))
+        }
         Property::Grade(v) => {
             let v = v.as_ref().map(crate::grade::Grade::checked).transpose()?;
             Property::Grade(replace(&mut node.grade, v.filter(|g| !g.is_neutral())))
@@ -455,6 +463,8 @@ pub struct NewNode {
     pub image: Option<String>,
     #[serde(default)]
     pub image_fit: Option<ImageFit>,
+    #[serde(default)]
+    pub image_smoothing: Option<ImageSmoothing>,
     /// For a `device3d` node: the model and how it is turned and lit (defaults when omitted).
     #[serde(default)]
     pub device3d: Option<Device3d>,
@@ -501,6 +511,7 @@ impl NewNode {
             line_height: None,
             image: None,
             image_fit: None,
+            image_smoothing: None,
             device3d: None,
             path: None,
             view_box: None,
@@ -605,6 +616,9 @@ impl NewNode {
         }
         if self.image_fit.is_some() {
             set(Property::ImageFit(self.image_fit))?;
+        }
+        if self.image_smoothing.is_some() {
+            set(Property::ImageSmoothing(self.image_smoothing))?;
         }
         if let Some(d) = &self.device3d {
             for prop in device_properties(d) {
@@ -1187,6 +1201,7 @@ fn current_value(node: &Node, prop: &Property) -> Property {
         Property::LineHeight(_) => Property::LineHeight(node.line_height),
         Property::Image(_) => Property::Image(node.image.clone()),
         Property::ImageFit(_) => Property::ImageFit(node.image_fit),
+        Property::ImageSmoothing(_) => Property::ImageSmoothing(node.image_smoothing),
         Property::Grade(_) => Property::Grade(node.grade),
         Property::GradeParam { param, .. } => Property::GradeParam {
             param: *param,
