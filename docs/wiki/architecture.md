@@ -43,7 +43,7 @@ flowchart LR
 
 ## The central rule: the core is UI-agnostic
 
-OpenCut's rewrite states it as a principle: business logic lives in Rust, and each app is a UI shell that owns rendering and interaction but never logic. We adopt it, with Qt as the shell. The Qt app, the MCP server and the headless CLI are three front ends over one set of operations. Consequences:
+The principle: business logic lives in Rust, and each app is a UI shell that owns rendering and interaction but never logic. We adopt it, with Qt as the shell. The Qt app, the MCP server and the headless CLI are three front ends over one set of operations. Consequences:
 
 - Anything an agent can do, a person can do in the GUI, and the reverse for editing operations; the GUI has no private write path.
 - Batch and CI renders (`opendesigner export --preset app-store-iphone-6.9`) need no window and no browser.

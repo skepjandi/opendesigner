@@ -72,7 +72,7 @@ Details and commands: [Development Guide](./development-guide.md).
 
 ## Window layout
 
-One editor window; the same panel set OpenCut's desktop shell uses (browser, preview, inspector, timeline) plus ours:
+One editor window; the panel set of browser, preview, inspector and timeline, plus ours:
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
@@ -183,7 +183,7 @@ Layers with children show a disclosure chevron; the folded layers are remembered
 
 ## Theme and brand
 
-The app UI uses semantic tokens (surface, interactive, feedback, chart, sidebar groups, following OpenCut's `theme.rs` structure), defined in OKLCH in Rust and handed to QML as colors, with light and dark following the OS. The brand comes from `assets/logo.svg`, a mark of two pointers: gold (`#f2ca83`) is the user, blue (`#5ab0ff`) is the agent. `assets/app-icon.svg` is the same mark on a rounded `#161514` tile.
+The app UI uses semantic tokens (surface, interactive, feedback, chart, sidebar groups), defined in OKLCH in Rust and handed to QML as colors, with light and dark following the OS. The brand comes from `assets/logo.svg`, a mark of two pointers: gold (`#f2ca83`) is the user, blue (`#5ab0ff`) is the agent. `assets/app-icon.svg` is the same mark on a rounded `#161514` tile.
 
 | Role | Color |
 |------|-------|

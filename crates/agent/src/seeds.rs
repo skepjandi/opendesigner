@@ -614,7 +614,7 @@ fn apply(ctx: &mut CallCtx, a: ApplyArgsIn) -> Result<Output, ToolError> {
         {"gate": "you looked at it", "tool": "video_contact_sheet", "status": "todo",
          "detail": "one contact sheet, then record_review"},
         {"gate": "sound under the beats", "tool": "make_sound", "status": "todo",
-         "detail": "place each cue at its beat time below"},
+         "detail": "make each cue in sound_plan, look at what its beat shows and change the kind if it does not fit, then place it at its beat time"},
     ]);
     let beat_times = scene_spec::beats::beat_times(&scene);
     Ok(Output::json(&json!({
@@ -626,6 +626,7 @@ fn apply(ctx: &mut CallCtx, a: ApplyArgsIn) -> Result<Output, ToolError> {
         "spec": spec_name.as_ref().map(|n| format!("{}/{n}.json", scene_spec::FOLDER)),
         "spec_note": if spec_name.is_none() { "this workspace has no project folder, so the SceneSpec was not saved" } else { "saved" },
         "beat_times": beat_times,
+        "sound_plan": scene_spec::beats::sound_plan(&scene),
         "layouts": seed.layouts,
         "p0_gates": checklist,
         "status": status_json,

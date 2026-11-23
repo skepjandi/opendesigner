@@ -17,7 +17,7 @@
   <img src="https://img.shields.io/badge/status-design-lightgrey.svg" alt="Status: design">
 </p>
 
-OpenDesigner is an open-source desktop editor: a Rust core under a Qt 6 Quick (QML) shell. It is a vector design canvas in the spirit of Penpot and Figma plus a video timeline in the spirit of [Kino](https://kino.ai) and [OpenCut](https://github.com/opencut-app/opencut), made for one job: producing App Store, Google Play and web assets with an AI agent while you stay in control.
+OpenDesigner is an open-source desktop editor: a Rust core under a Qt 6 Quick (QML) shell. It is a vector design canvas in the spirit of Penpot and Figma plus a video timeline, made for one job: producing App Store, Google Play and web assets with an AI agent while you stay in control.
 
 Today that work happens in a terminal: you describe every pixel in text, the agent writes HTML and a render script, and you read the result and describe the next fix. OpenDesigner puts a GUI in that loop. You select, pin a note on the exact spot, nudge the result by hand, and the agent sees all of it.
 

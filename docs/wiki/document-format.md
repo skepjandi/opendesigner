@@ -90,7 +90,7 @@ A page is a tree. Every node has `id`, `kind`, `name`, a transform and size, and
 | `instance` | An instance of a component, with overrides |
 | `clip`, `track` | Video composition members ([Video Editing](./video-editing.md)) |
 
-Colors are stored in a perceptual space (OKLCH, as OpenCut's theme tokens do) and resolved to sRGB or Display P3 at export. Design tokens (colors, type scale, spacing) live in the manifest and nodes reference them by name, so an agent changes a brand color in one place.
+Colors are stored in a perceptual space (OKLCH) and resolved to sRGB or Display P3 at export. Design tokens (colors, type scale, spacing) live in the manifest and nodes reference them by name, so an agent changes a brand color in one place.
 
 ## Operations *(design; the implemented JSON is shown above)*
 

@@ -706,13 +706,18 @@ fn sound_drafts(v: &Video, scenes: &[Scene]) -> Vec<Draft> {
         .map(|t| t.file.as_str())
         .collect();
     let same = per_scene.windows(2).all(|w| w[0] == w[1]);
-    if scenes.len() >= 3 && same && files.len() <= 1 {
+    let mut uses: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    for t in v.tracks.iter().filter(|t| t.role != TrackRole::Music) {
+        *uses.entry(t.file.as_str()).or_default() += 1;
+    }
+    let reused = uses.values().any(|&n| n >= 3);
+    if scenes.len() >= 3 && ((same && files.len() <= 1) || reused) {
         out.push(Draft {
             code: "RV010",
             name: "same-sound-every-scene",
             scenes: Vec::new(),
-            message: "no sound effect or voice line is different from scene to scene".to_string(),
-            fix: "Design the sound per scene: a whoosh on each cut, a different hit, chime or pop on each reveal (make_sound kinds), the bed lower under the voice.",
+            message: "the same sound effect file plays three or more times, or none changes from scene to scene".to_string(),
+            fix: "Make each cue for what its moment shows: a different file per cue (another kind, or the same kind with its own seed and pitch_hz), a whoosh whose direction matches the move, a tick per counted number, a chime only on the final reveal, the bed lower under the voice.",
             weight: 5.0,
         });
     }
