@@ -8,6 +8,19 @@ All notable changes to OpenDesigner are documented here.
 
 ## Unreleased
 
+### feat(code,agent,app): Code mode: a stack, a run plan the user approves, services in tmux
+
+**Area:** `feat(code)`, `feat(agent)`, `feat(app)`, `docs(wiki)`, `feat(skill)`
+
+- **Mode.** The start screen asks what you are making: Assets (as before) or Code (a codebase the agent builds and runs; designs and assets stay available). Stored per repository in `.opendesigner/code.json`; changeable in the new Run panel.
+- **Stack.** `get_code_project` reports what the folder already is and the questions to ask; the agent asks and proposes options, or the user names a stack; `set_stack` records it (`decided_by` user or agent).
+- **Run plan and approval.** `propose_run_plan` saves up to 8 validated services (command, folder inside the project, port). Nothing runs until the user presses Approve and start in the Run panel. The approval is bound to the plan's fingerprint and kept in the per-user config folder, so an edited plan or a cloned repository is never pre-approved.
+- **tmux.** Each service runs in its own session on a dedicated tmux server (`tmux -L opendesigner`), in a login shell, with `remain-on-exit` so a crash and its error stay readable. The Run panel shows state, the log and a copyable attach command; the agent has `start_services`, `stop_services`, `restart_service` and `service_logs`.
+- **New crate `od_code`** (no Qt, no network, no new dependency), the `code` playbook, a `code_mode` note in `get_guidance`.
+- **Docs.** New wiki page Code Mode, a Running processes section in Security, decision-log entries.
+
+**Not built:** the web view (Qt WebEngine) for running web apps, simulators, CLI commands, Windows. **Not verified:** the Qt window by hand, Linux and Windows.
+
 ### docs: remove references to external video editors
 
 **Area:** `docs(wiki)`

@@ -137,6 +137,7 @@ pub fn definitions() -> Vec<Value> {
     all.extend(crate::text_split::definitions());
     all.extend(crate::seeds::definitions());
     all.extend(crate::blocks::definitions());
+    all.extend(crate::code_tools::definitions());
     all.extend(crate::doctools::definitions());
     all.extend(crate::audio_tools::definitions());
     all.extend(crate::scene_spec::definitions());
@@ -186,9 +187,9 @@ fn core_definitions() -> Vec<Value> {
              FIRST, a jpg backdrop with moving text is never an animated scene), review (look at your own video \
              harshly: strips, crops, grids, diffs, the checklist), packs (style packs: commit to one look \
              before you draw: choosing it from the brief, applying its palette, the 80/20 rule, the motion \
-             personality). Call it with no topic for the \
+             personality), code (a project in Code mode: the stack, the run plan, services in tmux). Call it with no topic for the \
              list; read the ones that apply before you build, not after.",
-            json!({"topic": {"type": "string", "enum": ["design", "style", "video", "motion", "3d", "formats", "logo", "blocks", "scenery", "characters", "sketch", "explainer", "review", "packs"]}}),
+            json!({"topic": {"type": "string", "enum": ["design", "style", "video", "motion", "3d", "formats", "logo", "blocks", "scenery", "characters", "sketch", "explainer", "review", "packs", "code"]}}),
             &[],
             true,
         ),
@@ -750,6 +751,7 @@ fn dispatch(ctx: &mut CallCtx, name: &str, args: Value) -> Result<Output, ToolEr
         n if crate::text_split::NAMES.contains(&n) => crate::text_split::call(ctx, n, args),
         n if crate::seeds::NAMES.contains(&n) => crate::seeds::call(ctx, n, args),
         n if crate::blocks::NAMES.contains(&n) => crate::blocks::call(ctx, n, args),
+        n if crate::code_tools::NAMES.contains(&n) => crate::code_tools::call(ctx, n, args),
         n if crate::doctools::NAMES.contains(&n) => crate::doctools::call(ctx, n, args),
         n if crate::audio_tools::NAMES.contains(&n) => crate::audio_tools::call(ctx, n, args),
         n if crate::scene_spec::NAMES.contains(&n) => crate::scene_spec::call(ctx, n, args),
@@ -1072,6 +1074,9 @@ fn get_guidance(ctx: &mut CallCtx) -> Result<Output, ToolError> {
          3d (devices in 3D with captures and moves), \
          formats (sizes). Review your work with review_frame and render_preview before you say it is done."
     );
+    if let Some(hint) = crate::code_tools::guidance_hint(ctx.ws.dir()) {
+        v["code_mode"] = hint;
+    }
     v["memory"] = memory_index(ctx);
     v["extra_mcp_servers"] = crate::mcp_servers::describe(ctx.extra_servers);
     v["sound"] = json!(crate::mcp_servers::SOUND_NOTE);

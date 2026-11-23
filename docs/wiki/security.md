@@ -43,6 +43,23 @@ The endpoint uses a fixed loopback port and the app stays open; what we add is t
 
 **Implemented** in `crates/agent/src/server.rs`: bind to `127.0.0.1` only; every request must pass `guard` before any handler: any `Origin` header is refused (`403`), `Host` must be `127.0.0.1:<port>` or `localhost:<port>` (`403`), `Authorization: Bearer <token>` is compared in constant time (`401` with `WWW-Authenticate: Bearer`), then the protocol version header is checked (`400`). Bodies over 4 MB are refused (`413`). The token is 32 random bytes from the OS (`getrandom`), stored in the per-user config directory with mode `0600` on Unix (on Windows the user profile's default permissions apply; not hardened further), never printed unless `--show-token` is given, and replaced with `--rotate-token`. Tests: `crates/agent/tests/server.rs` and `crates/cli/tests/serve.rs`.
 
+## Running processes
+
+Code mode ([Code Mode](./code-mode.md)) is the one place the app starts programs on an agent's proposal. Invariant 3 (no code execution from a project file or an agent) holds because this is the "separate, sandboxed, user-approved mechanism" it allows for, with these rules, each covered by a test:
+
+| Threat | Mitigation |
+|--------|------------|
+| An agent runs a command without the user knowing | `propose_run_plan` only writes a plan. `start_services` and the other run tools refuse unless the user approved exactly that plan (`approval::require`). No MCP tool approves, changes the mode, or runs a command that is not in the plan. |
+| A plan is changed after the user read it | The approval is bound to the SHA-256 of the plan's canonical JSON; any change to a command, folder or port withdraws it. |
+| A cloned repository arrives pre-approved | Approvals live only in the per-user config folder, keyed by the repository's canonical path. `code.json` in the repository holds a plan, never an approval. |
+| A service escapes the project folder | `cwd` is a relative path of plain names; at start it is canonicalized and must stay inside the canonical repository (a symlink out is refused). |
+| Option or shell injection through names | Service names are `[a-z0-9-]{1,24}`; session names are built from validated names; the command is passed to tmux as one argument, single-quoted into a login shell, and may not start with `-` or hold control characters. |
+| Interference with the user's tmux | A dedicated tmux server (`-L opendesigner`); the user's server and config are untouched. |
+| Output floods the agent or the window | Logs: at most 500 lines and 64 KB per read. |
+| Secrets in a plan | The playbook tells the agent to keep them in the project's own environment files; the plan is shown to the user word for word and may be committed, so there is no place for them. |
+
+What this cannot do: make an approved command safe. The user reads each command before approving, and a command runs with the user's rights.
+
 ## Agent memory
 
 `write_memory` is a write surface outside the project folder: `<repo>/.opendesigner/workspaces/<name>/memory/` for a named workspace (`<repo>/.opendesigner/memory/` for the legacy project), so a workspace can neither read nor write another's notes, where `<repo>` is the parent of the `opendesigner/` assets folder (a project that is not inside an `opendesigner/` folder keeps its notes in `<project>/.opendesigner/`) (`od_agent::memory`). Rules, each covered by a unit test:

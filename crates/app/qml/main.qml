@@ -354,6 +354,14 @@ ApplicationWindow {
     Component { id: notesPanel; NotesPanel { editor: backend } }
     Component { id: historyPanel; HistoryPanel { editor: backend } }
     Component { id: memoryPanel; MemoryPanel { editor: backend } }
+    Component {
+        id: runPanel
+        RunPanel {
+            editor: backend
+            onToast: text => win.toast(text, false)
+            onAskAgent: text => { win.showPanel("chat"); backend.chatSend(text) }
+        }
+    }
     Component { id: videoPanel; VideoPanel { editor: backend } }
     Component {
         id: variantsPanel
@@ -381,7 +389,7 @@ ApplicationWindow {
         mainWindow: win
         components: ({
             layers: layersPanel, canvas: canvasPanel, inspector: inspectorPanel, notes: notesPanel,
-            history: historyPanel, memory: memoryPanel, video: videoPanel, connect: connectPanel, chat: chatPanel,
+            history: historyPanel, memory: memoryPanel, run: runPanel, video: videoPanel, connect: connectPanel, chat: chatPanel,
             variants: variantsPanel, preview: previewPanel
         })
     }

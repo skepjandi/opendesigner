@@ -12,9 +12,9 @@ QtObject {
     property var components: ({})
     readonly property var panelTitles: ({
         layers: "Layers", canvas: "Canvas", inspector: "Inspector", notes: "Notes", history: "History",
-        memory: "Memory", video: "Video", connect: "Connect", chat: "Chat", variants: "Variants", preview: "Preview"
+        memory: "Memory", run: "Run", video: "Video", connect: "Connect", chat: "Chat", variants: "Variants", preview: "Preview"
     })
-    readonly property var panelOrder: ["layers", "canvas", "inspector", "notes", "history", "memory", "video", "connect", "chat", "variants", "preview"]
+    readonly property var panelOrder: ["layers", "canvas", "inspector", "notes", "history", "memory", "run", "video", "connect", "chat", "variants", "preview"]
 
     readonly property var layout: editor.layout !== "" ? JSON.parse(editor.layout) : null
     readonly property int mainRootId: layout ? layout.main.id : 0

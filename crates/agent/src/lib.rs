@@ -7,6 +7,7 @@ pub mod audio_reactive;
 pub mod audio_tools;
 pub mod batch;
 pub mod blocks;
+pub mod code_tools;
 pub mod connect;
 pub mod device;
 pub mod direction;

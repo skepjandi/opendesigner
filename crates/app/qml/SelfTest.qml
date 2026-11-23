@@ -306,6 +306,11 @@ Item {
                    check(missing.error !== undefined, "reading a note that is not there should say so: " + JSON.stringify(missing))
         },
         function () {
+            const code = JSON.parse(editor.codeOverview())
+            return check(editor.codeMode() === false, "a project opened without a folder is not in Code mode") &&
+                   check(code.open === false, "no folder, no code overview: " + JSON.stringify(code))
+        },
+        function () {
             editor.layoutHide("memory")
             const hidden = dock.hidden.indexOf("memory") >= 0
             editor.layoutShow("memory")

@@ -218,6 +218,10 @@ until the first message that is not a command. `/model`, `/effort` and `/mode` o
 chooser instead of going to the agent.
 
 The agent's words are shown in text edits, so they can be selected and copied.
+## Code mode tools
+
+`get_code_project`, `set_stack`, `propose_run_plan`, `start_services`, `stop_services`, `restart_service` and `service_logs`, the `code` playbook, and the `code_mode` note in `get_guidance`. Behavior, the approval rule and the tmux sessions are in [Code Mode](./code-mode.md); the threat model is in [Security](./security.md#running-processes).
+
 ## Agent memory
 
 Agents start every task blank. `.opendesigner/` next to the assets folder (the parent of `opendesigner/`, so `<repo>/.opendesigner/` for a repository of workspaces) holds small text notes that carry what was learned from one task to the next. **Notes belong to one workspace:** a named workspace keeps them in `<repo>/.opendesigner/workspaces/<name>/memory/` and never reads another workspace's notes or the legacy project's; the legacy project (`main`, directly in `opendesigner/`) keeps `<repo>/.opendesigner/memory/`. Two similar workspaces therefore do not share what was learned in either. The in-app chat starts the agent in the workspace's own folder, so anything the agent keeps per working directory stays with the workspace too. It is separate from `opendesigner/`, which holds the generated assets (media, exports, pages, videos) and may be gitignored; **track `.opendesigner/` in git**. It contains only Markdown or plain text, never binaries. A project that is not inside an `opendesigner/` folder keeps its notes in `<project>/.opendesigner/`, so nothing is written outside the folder the user picked.

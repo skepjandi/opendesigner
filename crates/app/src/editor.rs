@@ -243,6 +243,27 @@ pub mod qobject {
         #[cxx_name = "previewStop"]
         fn preview_stop(self: Pin<&mut Self>);
         #[qinvokable]
+        #[cxx_name = "codeOverview"]
+        fn code_overview(self: &Self) -> QString;
+        #[qinvokable]
+        #[cxx_name = "codeMode"]
+        fn code_mode(self: &Self) -> bool;
+        #[qinvokable]
+        #[cxx_name = "setCodeMode"]
+        fn set_code_mode(self: Pin<&mut Self>, on: bool) -> bool;
+        #[qinvokable]
+        #[cxx_name = "approveRunPlan"]
+        fn approve_run_plan(self: Pin<&mut Self>) -> bool;
+        #[qinvokable]
+        #[cxx_name = "revokeRunPlan"]
+        fn revoke_run_plan(self: Pin<&mut Self>) -> bool;
+        #[qinvokable]
+        #[cxx_name = "runService"]
+        fn run_service(self: Pin<&mut Self>, name: &QString, action: &QString) -> bool;
+        #[qinvokable]
+        #[cxx_name = "serviceLog"]
+        fn service_log(self: &Self, name: &QString) -> QString;
+        #[qinvokable]
         #[cxx_name = "memoryNotes"]
         fn memory_notes(self: &Self) -> QString;
         #[qinvokable]
@@ -1165,6 +1186,40 @@ impl qobject::Editor {
         self.as_mut().rust_mut().state.preview_stop();
         crate::frame_bridge::forget_all("stage-");
         crate::frame_bridge::forget_all("thumb-");
+    }
+
+    pub fn code_overview(&self) -> QString {
+        q(&self.state.code_overview().to_string())
+    }
+
+    pub fn code_mode(&self) -> bool {
+        self.state.code_mode()
+    }
+
+    pub fn set_code_mode(mut self: Pin<&mut Self>, on: bool) -> bool {
+        self.as_mut().act(|s| s.set_code_mode(on)).is_some()
+    }
+
+    pub fn approve_run_plan(mut self: Pin<&mut Self>) -> bool {
+        self.as_mut().act(|s| s.approve_run_plan()).is_some()
+    }
+
+    pub fn revoke_run_plan(mut self: Pin<&mut Self>) -> bool {
+        self.as_mut().act(|s| s.revoke_run_plan()).is_some()
+    }
+
+    pub fn run_service(mut self: Pin<&mut Self>, name: &QString, action: &QString) -> bool {
+        let (name, action) = (name.to_string(), action.to_string());
+        self.as_mut()
+            .act(|s| s.run_service(&name, &action))
+            .is_some()
+    }
+
+    pub fn service_log(&self, name: &QString) -> QString {
+        match self.state.service_log(&name.to_string()) {
+            Ok(text) => q(&text),
+            Err(e) => q(&format!("Cannot read the log: {e}")),
+        }
     }
 
     pub fn memory_notes(&self) -> QString {

@@ -17,6 +17,7 @@ opendesigner-core = { path = "../core" }
 opendesigner-render = { path = "../render" }
 opendesigner-media = { path = "../media" }
 opendesigner-store = { path = "../store" }
+opendesigner-code = { path = "../code" }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

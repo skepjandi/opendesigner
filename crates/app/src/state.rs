@@ -31,6 +31,7 @@ const LOG_ROWS: usize = 60;
 type Res<T> = Result<T, String>;
 
 mod arrange_ops;
+mod code;
 
 struct Server {
     // The runtime owns the server's tasks; it must outlive `running`.
@@ -269,6 +270,14 @@ impl EditorState {
             "name": name,
             "workspaces": workspaces,
             "exists": folder.is_dir(),
+            "code_mode": od_code::project::CodeProject::load(folder)
+                .is_ok_and(|p| p.mode == od_code::project::Mode::Code),
+            "detected": od_code::detect::detect(folder)
+                .markers
+                .iter()
+                .take(4)
+                .map(|m| m.meaning.clone())
+                .collect::<Vec<_>>(),
         })
     }
 

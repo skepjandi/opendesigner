@@ -34,6 +34,7 @@ fn main() {
             "qml/NotesPanel.qml",
             "qml/HistoryPanel.qml",
             "qml/MemoryPanel.qml",
+            "qml/RunPanel.qml",
             "qml/ConnectPanel.qml",
             "qml/AssetPacksSection.qml",
             "qml/DirectionPicker.qml",

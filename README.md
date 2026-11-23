@@ -36,6 +36,7 @@ Today that work happens in a terminal: you describe every pixel in text, the age
 - Store asset studio: panoramic screenshot sets sliced per store slot, localized variants, feature graphics, spec validation
 - Video timeline: tracks, trimming, text and motion, FFmpeg export
 - Agent bridge: Agent Skill installer for every detected agent, local MCP server, optional in-app chat over the Agent Client Protocol
+- Code mode: the agent builds and runs a real codebase with you. It asks about the stack or takes yours, proposes the processes to run, and starts them in tmux sessions only after you approve the commands; designs and assets stay available
 - Headless mode: the same operations from the command line for CI and batch renders
 - No telemetry
 
