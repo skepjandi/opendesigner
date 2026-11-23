@@ -89,7 +89,7 @@ fn style_pack_list_and_get_say_what_the_agent_needs() {
     let f = fixture();
     let packs = f.ok("list_style_packs", json!({}));
     let packs = packs.as_array().unwrap();
-    assert_eq!(packs.len(), 8);
+    assert_eq!(packs.len(), 9);
     for pack in packs {
         assert!(pack["id"].is_string(), "{pack}");
         assert!(pack["name"].is_string(), "{pack}");

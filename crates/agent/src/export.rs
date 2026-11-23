@@ -123,6 +123,20 @@ pub fn export_assets(
     alpha: bool,
     locale: Option<&str>,
 ) -> Result<ExportOutcome, ToolError> {
+    export_assets_with(ws, plan, preset_id, scale, alpha, locale, false)
+}
+
+/// [`export_assets`] with `pixel_art`: shapes are drawn without anti-aliasing and images with
+/// nearest-neighbour sampling, so an integer `scale` keeps hard pixel edges.
+pub fn export_assets_with(
+    ws: &Workspace,
+    plan: &Plan,
+    preset_id: Option<&str>,
+    scale: Option<f32>,
+    alpha: bool,
+    locale: Option<&str>,
+    pixel_art: bool,
+) -> Result<ExportOutcome, ToolError> {
     let dir = exports_dir(ws)?;
     let target = preset_id.map(preset).transpose()?;
     let scale = scale.unwrap_or(1.0);
@@ -145,7 +159,9 @@ pub fn export_assets(
         }
         None => ws.session.document(),
     };
-    let render = |frame: &NodeId| crate::video_export::render_still(doc, frame, scale, ws.dir());
+    let render = |frame: &NodeId| {
+        crate::video_export::render_still_with(doc, frame, scale, ws.dir(), pixel_art)
+    };
 
     let mut warnings = Vec::new();
     // a frame with no background is transparent; an export that flattens it is white there

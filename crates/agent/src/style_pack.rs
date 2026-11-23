@@ -1,7 +1,7 @@
 //! Style packs: a palette, a type scale, a shape posture and a motion personality that a piece of
 //! work commits to before it is drawn (`docs/wiki/agent-integration.md#style-packs`).
 //!
-//! A pack is data, not a file to load: the eight curated packs live in `packs.rs`, so there is
+//! A pack is data, not a file to load: the nine curated packs live in `packs.rs`, so there is
 //! nothing to find at run time and nothing to go missing. `apply_style_pack` writes the palette
 //! into the document as design tokens (one attributed, undoable transaction) and records the pack
 //! in the workspace brief, so the linter can hold the work to the palette it was given.
@@ -522,8 +522,8 @@ mod tests {
     }
 
     #[test]
-    fn there_are_eight_packs_with_unique_ids_and_names() {
-        assert_eq!(PACKS.len(), 8);
+    fn there_are_nine_packs_with_unique_ids_and_names() {
+        assert_eq!(PACKS.len(), 9);
         let mut ids: Vec<&str> = PACKS.iter().map(|p| p.id).collect();
         ids.sort_unstable();
         ids.dedup();

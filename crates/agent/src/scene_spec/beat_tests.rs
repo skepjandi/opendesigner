@@ -205,12 +205,21 @@ fn the_sound_plan_gives_every_cue_its_own_seed_name_and_a_kind_make_sound_knows(
     }
     let plan = sound_plan(&s);
     assert_eq!(plan.len(), 3);
-    let names: std::collections::HashSet<_> =
-        plan.iter().map(|p| p["make_sound"]["name"].as_str().unwrap()).collect();
+    let names: std::collections::HashSet<_> = plan
+        .iter()
+        .map(|p| p["make_sound"]["name"].as_str().unwrap())
+        .collect();
     assert_eq!(names.len(), 3);
-    assert!(plan.iter().all(|p| crate::synth::Kind::parse(p["make_sound"]["kind"].as_str().unwrap()).is_some()));
+    assert!(
+        plan.iter().all(
+            |p| crate::synth::Kind::parse(p["make_sound"]["kind"].as_str().unwrap()).is_some()
+        )
+    );
     s.beat_map[0].audio_cue = Some("chime".into());
     s.beat_map[1].audio_cue = Some("chime".into());
     let plan = sound_plan(&s);
-    assert_ne!(plan[0]["make_sound"]["pitch_hz"], plan[1]["make_sound"]["pitch_hz"]);
+    assert_ne!(
+        plan[0]["make_sound"]["pitch_hz"],
+        plan[1]["make_sound"]["pitch_hz"]
+    );
 }

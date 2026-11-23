@@ -3,6 +3,7 @@
 
 pub mod acp;
 pub mod assets;
+pub mod atlas;
 pub mod audio_reactive;
 pub mod audio_tools;
 pub mod batch;
@@ -32,6 +33,7 @@ pub mod motion;
 pub mod noise_tool;
 pub mod openverse;
 pub mod path_motion;
+pub mod pixel_tools;
 pub mod playbook;
 pub mod plugin;
 pub mod preview_audio;
@@ -39,6 +41,7 @@ pub mod preview_frames;
 mod preview_key;
 pub mod preview_tier;
 pub mod program;
+pub mod quantize;
 pub mod review;
 pub mod review_video;
 pub mod scene_checks;
