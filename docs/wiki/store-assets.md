@@ -202,6 +202,17 @@ An app preview is footage of the app; a promo or an explainer around it is built
 
 **Not done.** `[INFERENCE]` Targets that are rotated or scaled are drawn at their bounding box (a path node's shape is followed in its box, not through its turn). The `sketch` block does not hide the nodes it redraws. There is no hand-drawn text. `boil` does not boil a `sketch` that already exists; it draws its own variants.
 
+## Pixel-art game assets
+
+> **Status: Implemented** (`crates/core` format 7, `crates/render`, `crates/agent/src/{atlas,quantize,pixel_tools}.rs`, `crates/cli/src/pixel.rs`). Built so an agent can make top-down RPG assets headlessly for [AgentEngine](https://github.com/skepjandi/agentengine): 48 px character sheets (3 frames x 4 directions), 32 px icons, 48 px tiles.
+
+- **Crisp pixels.** `image_smoothing: nearest` per image node, and `pixel_art: true` on renders and exports (paths are drawn without anti-aliasing, images with nearest-neighbour scaling). Use an integer `scale`; a shape on a half pixel stays soft without the option.
+- **`export_atlas`.** Grid mode cuts one frame into `cols` x `rows` cells of `cell_w` x `cell_h` output pixels (the frame must be exactly that big at `scale`); pack mode lays a list of frames in a grid of `columns`, each cell as big as the biggest frame, with `padding`. The manifest `exports/<name>.json` is `{image, size:{w,h}, frames:[{name, x, y, w, h, pivot?, nine_slice?}], palette?, generator, created}`; `palette` lists every distinct colour unless there are more than 256. Limits: sides up to 16,384 px, 64 million pixels, 1,024 cells. Everything is rendered and validated before anything is written, and names are `[A-Za-z0-9._-]`, up to 64 characters.
+- **`quantize_image`.** Nearest colour in OKLab to a palette of up to 256 colours (token names, `#rrggbb`, or one style pack id); pixels with alpha under `alpha_threshold` (default 128) become fully transparent, the rest fully opaque. The original stays; the result is `media/<name>-q.png` (`-q-2` and so on when it exists). `dither` accepts only `none`.
+- **`pixel-16` style pack.** A sixteen-colour ground with hard edges, no shadows and no gradients, and the rules for whole-pixel grids, one pixel size per sheet and no emoji as icons.
+
+Not built: a tile seam check, a 47-blob/A2 autotile template block, an LPC-layer character sheet block, an image-model adapter for painted portraits.
+
 ## The studio (intended)
 
 A page type for listing art whose unit is a **set**, not a single frame:

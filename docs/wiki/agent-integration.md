@@ -555,6 +555,10 @@ The seeds use no picture backdrop on purpose: `aurora_backdrop`, `gradient_wash`
 
 What it does not do: it does not render or look at the scene, add sound, or import images (a `device3d` has no capture until you set one). `review_video` is not run inside the tool, because it renders a sample of frames; the tests run it on every seed and require no RV001 and no RV002. [INFERENCE] A seed's motion is calm and generic: it is a starting point, and a scene with a brief of its own should change its beats.
 
+### Pixel-art assets: `export_atlas`, `quantize_image`
+
+`export_atlas` writes a sprite sheet or atlas (PNG plus JSON manifest) from a grid frame or a list of frames; `quantize_image` snaps a `media/` picture to a palette. The tools `render_preview`, `export`, `export_set` and `export_panorama` also accept `pixel_art: true`. Schemas and limits: [Store assets](./store-assets.md#pixel-art-game-assets). CLI: `opendesigner export-atlas`, `opendesigner quantize-image`, `opendesigner export --pixel-art`.
+
 ### Agent plugin
 
 `plugins/opendesigner/` is the skill packaged for agents that install through a plugin marketplace: `.claude-plugin/plugin.json` (Claude Code), `.codex-plugin/plugin.json` (Codex) and `skills/opendesigner/` (the output of `skill::generate()`), with `.claude-plugin/marketplace.json` at the repository root pointing at it. `scripts/package-agent-plugin.sh` (or `opendesigner package-plugin [--check]`) regenerates every file from the tool schema; `plugin::tests::the_committed_plugin_is_exactly_what_the_generator_writes` fails while the committed files differ, so run the script and commit after changing a tool, a playbook or the version.
