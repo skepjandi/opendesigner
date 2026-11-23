@@ -30,7 +30,9 @@ cp "$root/packaging/THIRD_PARTY.txt" "$root/crates/render/fonts/OFL.txt" "$root/
 echo "==> bundling Qt"
 icon="$(mktemp -d)/opendesigner.png"
 convert "$root/assets/app-icon.png" -resize 512x512 "$icon"
-export QMAKE="$qmake" QML_SOURCES_PATHS="$root/crates/app/qml" NO_STRIP=1
+# the SVG image plug-in (the logo is an SVG) and Qt Multimedia's backend are loaded at run time,
+# so the deploy plug-in does not see them in the executable's imports
+export QMAKE="$qmake" QML_SOURCES_PATHS="$root/crates/app/qml" NO_STRIP=1 EXTRA_QT_PLUGINS="svg;multimedia;imageformats"
 linuxdeploy --appdir "$appdir" --plugin qt \
   --executable "$root/target/release/opendesigner-app" \
   --desktop-file "$root/packaging/linux/opendesigner.desktop" \
@@ -38,7 +40,7 @@ linuxdeploy --appdir "$appdir" --plugin qt \
 # The offscreen platform plug-in is only there so the smoke test below can run without a display.
 plugins="$("$qmake" -query QT_INSTALL_PLUGINS)"
 mkdir -p "$appdir/usr/plugins/platforms"
-cp -n "$plugins/platforms/libqoffscreen.so" "$appdir/usr/plugins/platforms/"
+cp --update=none "$plugins/platforms/libqoffscreen.so" "$appdir/usr/plugins/platforms/"
 
 echo "==> licensing check"
 "$root/scripts/bundle-licensing.sh" "$appdir" fail-on-ffmpeg

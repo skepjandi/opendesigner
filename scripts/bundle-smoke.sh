@@ -16,9 +16,18 @@ native() { if command -v cygpath >/dev/null; then cygpath -w "$1"; else printf '
 # a 1x1 PNG for the session's image import step
 printf 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==' | base64 -d > "$work/fixture.png"
 
-if ! HOME="$home" OPENDESIGNER_CONFIG_DIR="$(native "$work/cfg")" QT_QPA_PLATFORM=offscreen \
-     "$exe" "--selftest=$(native "$work")" >"$log" 2>&1; then
+run() {
+  HOME="$home" OPENDESIGNER_CONFIG_DIR="$(native "$work/cfg")" QT_QPA_PLATFORM=offscreen \
+    "$exe" "--selftest=$(native "$work")" >"$log" 2>&1
+}
+status=0
+run || status=$?
+if [ "$status" -ne 0 ]; then
+  echo "the scripted session exited with status $status; its output:" >&2
   cat "$log" >&2
+  echo "again with plug-in loading traced:" >&2
+  QT_DEBUG_PLUGINS=1 run || true
+  tail -60 "$log" >&2
   exit 3
 fi
 if grep -q "implemented in both" "$log"; then
