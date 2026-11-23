@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=OpenDesigner
+Comment=Vector design canvas and video timeline for app store assets
+Exec=opendesigner-app
+Icon=opendesigner
+Categories=Graphics;2DGraphics;VectorGraphics;
+Terminal=false
