@@ -8,6 +8,16 @@ All notable changes to OpenDesigner are documented here.
 
 ## Unreleased
 
+### feat(build): release packages for macOS, Windows and Linux
+
+**Area:** `feat(build)`, `docs(wiki)`
+
+- **`release.yml`.** Pushing `vX.Y.Z` builds an Apple-silicon macOS zip, a Windows x64 zip and a Linux x86_64 AppImage, runs the bundled program's offscreen scripted session on each, and publishes a GitHub release with `SHA256SUMS.txt`. A pull request touching the packaging runs the builds without publishing.
+- **Scripts.** New `scripts/package-windows.sh` and `scripts/package-linux.sh`; the GPL-only-module gate and the smoke test are shared (`scripts/bundle-licensing.sh`, `scripts/bundle-smoke.sh`) and `package-macos.sh` uses them. Windows deletes Qt's FFmpeg backend; the Linux build uses the distribution's Qt (GStreamer backend).
+- **CI.** The Linux and Windows editor jobs install Qt Multimedia and Qt WebEngine, which `build.rs` links; they failed without them.
+
+**Not verified:** the Windows and Linux packages on a real desktop; no package is signed or notarized.
+
 ### feat(render,agent,cli): pixel-art game assets: crisp rendering, atlas export, palette quantize
 
 **Area:** `feat(core)`, `feat(render)`, `feat(agent)`, `feat(cli)`, `docs(wiki)`
