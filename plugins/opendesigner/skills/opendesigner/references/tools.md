@@ -12,7 +12,7 @@ No arguments.
 
 ## `get_playbook`
 
-Craft guidance for making work that is not mediocre. Topics: design (images), style (named looks with rules), video (start with the inventory of media, footage, sounds and assets), motion (timings, easing, recipes), 3d (devices in 3D, captures from a simulator, moves), formats (sizes and safe zones), logo (identity design), blocks (the catalog of ready-made titles, overlays, backgrounds, charts and motion, and when to use one), scenery (layered flat-vector scenes: scenery blocks, parallax, idle loops, scene moves and the camera), characters (flat-vector characters, bubbles and animated props), sketch (hand-made looks: pen sketches and hatching, line boil, watercolor washes, film grain, grass and wind strokes, hand-drawn emphasis), explainer (anything animated: animation, scenes, explainers, motion graphics, cartoons, 2D illustration, Kurzgesagt or In a Nutshell style; read it FIRST, a jpg backdrop with moving text is never an animated scene), review (look at your own video harshly: strips, crops, grids, diffs, the checklist), packs (style packs: commit to one look before you draw: choosing it from the brief, applying its palette, the 80/20 rule, the motion personality). Call it with no topic for the list; read the ones that apply before you build, not after.
+Craft guidance for making work that is not mediocre. Topics: design (images), style (named looks with rules), video (start with the inventory of media, footage, sounds and assets), motion (timings, easing, recipes), 3d (devices in 3D, captures from a simulator, moves), formats (sizes and safe zones), logo (identity design), blocks (the catalog of ready-made titles, overlays, backgrounds, charts and motion, and when to use one), scenery (layered flat-vector scenes: scenery blocks, parallax, idle loops, scene moves and the camera), characters (flat-vector characters, bubbles and animated props), sketch (hand-made looks: pen sketches and hatching, line boil, watercolor washes, film grain, grass and wind strokes, hand-drawn emphasis), explainer (anything animated: animation, scenes, explainers, motion graphics, cartoons, 2D illustration, Kurzgesagt or In a Nutshell style; read it FIRST, a jpg backdrop with moving text is never an animated scene), review (look at your own video harshly: strips, crops, grids, diffs, the checklist), packs (style packs: commit to one look before you draw: choosing it from the brief, applying its palette, the 80/20 rule, the motion personality), code (a project in Code mode: the stack, the run plan, services in tmux). Call it with no topic for the list; read the ones that apply before you build, not after.
 
 Read-only.
 
@@ -734,6 +734,124 @@ Arguments:
 - `summary` (string) One line, in the user's terms, naming what this turn does.
 - `turn` (string) Groups related calls into one turn; omit and each call is its own turn.
 - `video` (string) Id of a video from list_videos to keyframe in (optional when there is one video; without one the block is static).
+
+## `get_code_project`
+
+The code side of this project: its mode (assets or code), the recorded stack, what the folder already is (detected files, package scripts, frameworks), the questions to ask before choosing a stack, the run plan, whether the user approved it, and the status of each service. Call it first in code mode; read get_playbook `code` before you build.
+
+Read-only.
+
+No arguments.
+
+## `set_stack`
+
+Record the technology the project is built with. Ask the user the questions from get_code_project first and propose two or three options with their trade-offs; call this once they chose (decided_by agent) or when they simply told you what to use (decided_by user). Code mode only.
+
+Arguments:
+
+- `decided_by` (string, required) 
+- `framework` (string) 
+- `language` (string, required) 
+- `name` (string, required) how the user would say it, for example Next.js with Postgres
+- `notes` (string) why this stack, what the user answered, what was ruled out
+- `target` (string, required) 
+
+## `propose_run_plan`
+
+Write down the processes the project needs while you build it (a dev server, an API, a database), with the exact command, folder and port of each. Nothing runs yet: the user reads the plan in the Run panel and approves it there. Changing the plan withdraws the approval. Code mode only.
+
+Arguments:
+
+- `services` (array, required) 
+
+## `start_services`
+
+Start the services of the approved run plan, each in its own tmux session so the user can watch it. Omit `name` to start all. A service that is already running is left alone. Fails until the user approves the plan. Code mode only.
+
+Arguments:
+
+- `name` (string) 
+
+## `stop_services`
+
+Stop services of the approved run plan. Omit `name` to stop all.
+
+Arguments:
+
+- `name` (string) 
+
+## `restart_service`
+
+Stop and start one service of the approved run plan, for example after you changed its configuration.
+
+Arguments:
+
+- `name` (string, required) 
+
+## `service_logs`
+
+The last lines on a service's tmux screen, plain text: startup output, errors and the message a crashed process left behind. Read it after you start a service and whenever the page does not load.
+
+Read-only.
+
+Arguments:
+
+- `lines` (integer) default 80, at most 500
+- `name` (string, required) 
+
+## `list_simulators`
+
+The iOS Simulators and Android emulators on this computer (a connected phone is never listed or touched): id, platform, name, OS and whether it is booted. The id goes into the other simulator tools. Code mode only.
+
+Read-only.
+
+No arguments.
+
+## `boot_simulator`
+
+Boot an iOS simulator (and open the Simulator app) or start an Android virtual device in a tmux session. Needs the user's approval of the run plan. Wait until list_simulators says booted.
+
+Arguments:
+
+- `id` (string, required) from list_simulators
+
+## `install_app`
+
+Install an app the project built into a booted simulator: a .app folder for iOS, an .apk for Android, as a path inside the project. Needs the user's approval of the run plan.
+
+Arguments:
+
+- `id` (string, required) 
+- `path` (string, required) relative to the project folder
+
+## `launch_app`
+
+Launch an installed app by its application id (for example com.example.app) in a booted simulator. Needs the user's approval of the run plan.
+
+Arguments:
+
+- `app_id` (string, required) 
+- `id` (string, required) 
+
+## `capture_simulator`
+
+Take a screenshot of a booted simulator and save it in the design project's media/ folder. The answer names the file; use it as an image node or as the capture of a 3D device (get_playbook 3d) for store screenshots.
+
+Arguments:
+
+- `id` (string, required) 
+
+## `export_share`
+
+Render frames to one file to send to someone, in exports/: .jpg (one frame), .pdf (one page per frame, in the order given) or .html (one self-contained page: the frames as pictures with their text as alt text, no external files). Raster output at the frame's size times `scale`. For App Store or Google Play files use export, which checks the store's rules.
+
+Arguments:
+
+- `file` (string, required) plain file name ending in .jpg, .jpeg, .pdf or .html
+- `frames` (array, required) ids of frame nodes
+- `locale` (string) a language from list_locales
+- `scale` (number) 
+- `title` (string) page title for .html and .pdf readers; default the project name
 
 ## `validate_document`
 

@@ -2,8 +2,8 @@ use cxx_qt_build::{CxxQtBuilder, QmlFile, QmlModule};
 
 /// The Qt modules the editor links. This list is the licensing allowlist from AGENTS.md invariant
 /// 12: every entry is offered under the LGPLv3 (Quick and Multimedia: the SPDX header of their
-/// headers reads `LGPL-3.0-only`). Adding one needs a licensing check in the PR.
-const QT_MODULES: &[&str] = &["Network", "Quick", "Multimedia"];
+/// headers reads `LGPL-3.0-only`; WebEngineQuick: `LicenseRef-Qt-Commercial OR LGPL-3.0-only OR ...`). Adding one needs a licensing check in the PR.
+const QT_MODULES: &[&str] = &["Network", "Quick", "Multimedia", "WebEngineQuick"];
 
 fn main() {
     // The logo has one source of truth: assets/logo.svg. It is copied next to the QML so it can be
@@ -34,6 +34,10 @@ fn main() {
             "qml/NotesPanel.qml",
             "qml/HistoryPanel.qml",
             "qml/MemoryPanel.qml",
+            "qml/RunPanel.qml",
+            "qml/WebPanel.qml",
+            "qml/DevicesPanel.qml",
+            "qml/WebFrame.qml",
             "qml/ConnectPanel.qml",
             "qml/AssetPacksSection.qml",
             "qml/DirectionPicker.qml",
@@ -55,6 +59,7 @@ fn main() {
     builder
         .qrc_resources(["qml/logo.svg", "qml/icons/LICENSE"])
         .cpp_file("cpp/picture_provider.cpp")
+        .cpp_file("cpp/web_engine.cpp")
         .files(["src/editor.rs"])
         .build();
 }

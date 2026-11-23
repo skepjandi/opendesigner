@@ -19,6 +19,9 @@ pub const PANELS: &[(&str, &str)] = &[
     ("notes", "Notes"),
     ("history", "History"),
     ("memory", "Memory"),
+    ("run", "Run"),
+    ("web", "Web"),
+    ("devices", "Devices"),
     ("video", "Video"),
     ("connect", "Connect"),
     ("chat", "Chat"),
@@ -28,7 +31,7 @@ pub const PANELS: &[(&str, &str)] = &[
 
 /// Panels added after the first release. A saved layout written before they existed keeps its
 /// arrangement and gets them as hidden panels.
-const ADDED_LATER: &[&str] = &["variants", "preview"];
+const ADDED_LATER: &[&str] = &["variants", "preview", "run", "web", "devices"];
 
 pub const FORMAT_VERSION: u32 = 1;
 const MIN_WINDOW: f64 = 240.0;
@@ -136,7 +139,11 @@ impl Default for Layout {
                 weights: vec![0.17, 0.6, 0.23],
                 children: vec![
                     group(2, &["layers"], "layers"),
-                    group(3, &["canvas", "preview", "variants"], "canvas"),
+                    group(
+                        3,
+                        &["canvas", "web", "devices", "preview", "variants"],
+                        "canvas",
+                    ),
                     Node::Split {
                         id: 4,
                         dir: Dir::Column,
@@ -145,7 +152,9 @@ impl Default for Layout {
                             group(5, &["inspector"], "inspector"),
                             group(
                                 6,
-                                &["notes", "history", "memory", "video", "connect", "chat"],
+                                &[
+                                    "notes", "history", "memory", "run", "video", "connect", "chat",
+                                ],
                                 "notes",
                             ),
                         ],
@@ -920,6 +929,9 @@ mod tests {
             "notes",
             "history",
             "memory",
+            "run",
+            "web",
+            "devices",
             "video",
             "connect",
             "variants",

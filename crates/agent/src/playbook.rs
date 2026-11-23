@@ -126,6 +126,11 @@ pub const TOPICS: &[(&str, &str, &str)] = &[
         include_str!("../skill/style-packs.md"),
     ),
     (
+        "code",
+        "code mode: record the stack after asking, scaffold, propose a run plan the user approves, run services in tmux, read their logs",
+        include_str!("../skill/code-playbook.md"),
+    ),
+    (
         "seeds",
         "scene seeds and the beat map: six starter scenes built from blocks (explainer opener, product reveal, kinetic quote, stats callout, before/after, logo sting), and the time -> takeaway -> focal object -> transformation -> copy -> exit beat plan",
         include_str!("../skill/scene-seeds.md"),

@@ -11,6 +11,7 @@ use od_core::{
     project,
 };
 mod blocks;
+mod codecmd;
 mod doccmd;
 mod external;
 mod inspect;
@@ -367,6 +368,11 @@ enum Command {
     Captions {
         #[command(subcommand)]
         action: sound::CaptionsAction,
+    },
+    /// Code mode: the run plan, its approval, tmux services and simulators (docs/wiki/code-mode.md).
+    Code {
+        #[command(subcommand)]
+        action: codecmd::CodeAction,
     },
     /// Install, inspect or remove the Agent Skill that teaches coding agents to use OpenDesigner.
     Skill {
@@ -1064,6 +1070,7 @@ fn run(cli: Cli) -> Result<(), CliError> {
         Command::Sound { action } => sound::sound(action)?,
         Command::Captions { action } => sound::captions(action)?,
         Command::Skill { action } => skillcmd::run(action)?,
+        Command::Code { action } => codecmd::run(action)?,
         Command::Lint {
             dir,
             json,

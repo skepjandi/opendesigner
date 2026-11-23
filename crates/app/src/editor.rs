@@ -36,6 +36,8 @@ pub mod qobject {
         #[qproperty(QString, showcase)]
         #[qproperty(QString, showcase_notice, cxx_name = "showcaseNotice")]
         #[qproperty(QString, layout)]
+        #[qproperty(QString, simulators)]
+        #[qproperty(QString, simulator_picture, cxx_name = "simulatorPicture")]
         #[qproperty(QString, agent_probe, cxx_name = "agentProbe")]
         #[qproperty(QString, checkerboard)]
         #[qproperty(QString, tokens)]
@@ -242,6 +244,39 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "previewStop"]
         fn preview_stop(self: Pin<&mut Self>);
+        #[qinvokable]
+        #[cxx_name = "refreshSimulators"]
+        fn refresh_simulators(self: Pin<&mut Self>);
+        #[qinvokable]
+        #[cxx_name = "bootSimulator"]
+        fn boot_simulator(self: Pin<&mut Self>, id: &QString);
+        #[qinvokable]
+        #[cxx_name = "captureSimulator"]
+        fn capture_simulator(self: Pin<&mut Self>, id: &QString);
+        #[qinvokable]
+        #[cxx_name = "saveSimulatorScreen"]
+        fn save_simulator_screen(self: Pin<&mut Self>, id: &QString);
+        #[qinvokable]
+        #[cxx_name = "codeOverview"]
+        fn code_overview(self: &Self) -> QString;
+        #[qinvokable]
+        #[cxx_name = "codeMode"]
+        fn code_mode(self: &Self) -> bool;
+        #[qinvokable]
+        #[cxx_name = "setCodeMode"]
+        fn set_code_mode(self: Pin<&mut Self>, on: bool) -> bool;
+        #[qinvokable]
+        #[cxx_name = "approveRunPlan"]
+        fn approve_run_plan(self: Pin<&mut Self>) -> bool;
+        #[qinvokable]
+        #[cxx_name = "revokeRunPlan"]
+        fn revoke_run_plan(self: Pin<&mut Self>) -> bool;
+        #[qinvokable]
+        #[cxx_name = "runService"]
+        fn run_service(self: Pin<&mut Self>, name: &QString, action: &QString) -> bool;
+        #[qinvokable]
+        #[cxx_name = "serviceLog"]
+        fn service_log(self: &Self, name: &QString) -> QString;
         #[qinvokable]
         #[cxx_name = "memoryNotes"]
         fn memory_notes(self: &Self) -> QString;
@@ -550,6 +585,8 @@ pub struct EditorRust {
     showcase_notice: QString,
     showcase_notices: i32,
     layout: QString,
+    simulators: QString,
+    simulator_picture: QString,
     agent_probe: QString,
     checkerboard: QString,
     tokens: QString,
@@ -1165,6 +1202,119 @@ impl qobject::Editor {
         self.as_mut().rust_mut().state.preview_stop();
         crate::frame_bridge::forget_all("stage-");
         crate::frame_bridge::forget_all("thumb-");
+    }
+
+    /// Reads the simulators off the UI thread; the answer arrives in `simulators`.
+    pub fn refresh_simulators(self: Pin<&mut Self>) {
+        let Some(paths) = self.state.code_paths() else {
+            return;
+        };
+        let qt = self.qt_thread();
+        std::thread::spawn(move || {
+            let text = paths.list_simulators().to_string();
+            let _ = qt.queue(move |editor| editor.set_simulators(q(&text)));
+        });
+    }
+
+    pub fn boot_simulator(mut self: Pin<&mut Self>, id: &QString) {
+        let Some(paths) = self.state.code_paths() else {
+            return;
+        };
+        let id = id.to_string();
+        self.as_mut().show("Starting the simulator…", false);
+        let qt = self.qt_thread();
+        std::thread::spawn(move || {
+            let result = paths.boot_simulator(&id);
+            let _ = qt.queue(move |mut editor| match result {
+                Ok(()) => editor.as_mut().show(
+                    "Simulator starting; it appears in the list when it is up",
+                    false,
+                ),
+                Err(e) => editor.as_mut().show(&e, true),
+            });
+        });
+    }
+
+    /// One picture of the simulator's screen, taken off the UI thread; at most one at a time.
+    /// The address arrives in `simulatorPicture`.
+    pub fn capture_simulator(self: Pin<&mut Self>, id: &QString) {
+        static BUSY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        let Some(paths) = self.state.code_paths() else {
+            return;
+        };
+        if BUSY.swap(true, std::sync::atomic::Ordering::AcqRel) {
+            return;
+        }
+        let id = id.to_string();
+        let qt = self.qt_thread();
+        std::thread::spawn(move || {
+            let screen = paths.screen(&id);
+            let _ = qt.queue(move |mut editor| {
+                BUSY.store(false, std::sync::atomic::Ordering::Release);
+                match screen {
+                    Ok((w, h, pixels)) => {
+                        if let Some(url) = crate::frame_bridge::publish("sim-", w, h, &pixels) {
+                            editor.as_mut().set_simulator_picture(q(&url));
+                        }
+                    }
+                    Err(e) => editor.as_mut().show(&e, true),
+                }
+            });
+        });
+    }
+
+    pub fn save_simulator_screen(self: Pin<&mut Self>, id: &QString) {
+        let Some(paths) = self.state.code_paths() else {
+            return;
+        };
+        let id = id.to_string();
+        let qt = self.qt_thread();
+        std::thread::spawn(move || {
+            let result = paths.save_screen(&id);
+            let _ = qt.queue(move |mut editor| match result {
+                Ok(reference) => {
+                    editor
+                        .as_mut()
+                        .show(&format!("Saved {reference} to the project's media"), false);
+                    editor.as_mut().refresh();
+                }
+                Err(e) => editor.as_mut().show(&e, true),
+            });
+        });
+    }
+
+    pub fn code_overview(&self) -> QString {
+        q(&self.state.code_overview().to_string())
+    }
+
+    pub fn code_mode(&self) -> bool {
+        self.state.code_mode()
+    }
+
+    pub fn set_code_mode(mut self: Pin<&mut Self>, on: bool) -> bool {
+        self.as_mut().act(|s| s.set_code_mode(on)).is_some()
+    }
+
+    pub fn approve_run_plan(mut self: Pin<&mut Self>) -> bool {
+        self.as_mut().act(|s| s.approve_run_plan()).is_some()
+    }
+
+    pub fn revoke_run_plan(mut self: Pin<&mut Self>) -> bool {
+        self.as_mut().act(|s| s.revoke_run_plan()).is_some()
+    }
+
+    pub fn run_service(mut self: Pin<&mut Self>, name: &QString, action: &QString) -> bool {
+        let (name, action) = (name.to_string(), action.to_string());
+        self.as_mut()
+            .act(|s| s.run_service(&name, &action))
+            .is_some()
+    }
+
+    pub fn service_log(&self, name: &QString) -> QString {
+        match self.state.service_log(&name.to_string()) {
+            Ok(text) => q(&text),
+            Err(e) => q(&format!("Cannot read the log: {e}")),
+        }
     }
 
     pub fn memory_notes(&self) -> QString {

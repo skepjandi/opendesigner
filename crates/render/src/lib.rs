@@ -11,6 +11,7 @@ mod images;
 mod incremental;
 mod layers;
 mod place;
+pub mod share;
 mod text;
 pub use text::{PlacedGlyph, PlacedLine, PlacedRun};
 pub mod three_d;
@@ -22,6 +23,7 @@ pub mod video;
 pub use device::Media;
 pub use images::{decode_rgba, dimensions as image_dimensions};
 pub use incremental::{Refresh, Retained};
+pub use share::{encode_jpeg, encode_pdf};
 pub use tiny_skia::Pixmap;
 
 use std::collections::{BTreeMap, HashMap};

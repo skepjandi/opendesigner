@@ -100,7 +100,7 @@ fn is_named_workspace(project_dir: &Path) -> bool {
 /// The assets folder is the `opendesigner/` folder above the workspaces; its parent is the
 /// repository root, where the notes live. A project that is not inside an `opendesigner/`
 /// folder keeps its notes inside itself, so nothing is written outside the picked folder.
-fn repo_of(project_dir: &Path) -> Option<PathBuf> {
+pub fn repo_of(project_dir: &Path) -> Option<PathBuf> {
     let root = crate::workspaces::root_of(project_dir);
     let assets = root.parent()?;
     if assets.file_name().and_then(|n| n.to_str()) == Some(ASSETS_DIR) {

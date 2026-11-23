@@ -57,6 +57,7 @@ The principle: business logic lives in Rust, and each app is a UI shell that own
 | `render` | CPU rasterizer and PNG export: frames, groups, rectangles, ellipses, text (shaped, wrapped, aligned; one style per node), images (PNG, JPEG, WebP from `media/`; cover, contain, fill; rounded corners; cached decode) and 3D devices (a generated phone, tablet, laptop or monitor drawn in perspective with a capture on its screen); an image it cannot read is reported, not dropped silently | no | partial |
 | `store` | Export presets and validation ([Store Assets](./store-assets.md)); device frames and panoramas are not built | no | partial |
 | `agent` | MCP server and tools, token, skill generator and installer ([Agent Integration](./agent-integration.md)); ACP client for the in-app chat | no | built (MCP, skill, chat) |
+| `code` | Code mode: the mode, the stack, the run plan, the user's approval, tmux sessions ([Code Mode](./code-mode.md)) | no | built (web view, simulators not) |
 | `cli` | Headless commands over the same operations | no | built |
 | `app` | The Qt Quick editor: the `Editor` QObject, the Qt-free `EditorState`, the QML ([Qt Desktop](./qt-desktop.md#layers)) | **yes** | built |
 | `media` | Decode/encode, FFmpeg ([Video Editing](./video-editing.md)) | no | not started |

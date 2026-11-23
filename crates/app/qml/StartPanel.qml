@@ -33,9 +33,13 @@ ScrollView {
     Timer { id: probeTimer; interval: 500; onTriggered: root.readOptions() }
     onCommandChanged: probeTimer.restart()
 
+    // what the work is: designs and assets, or a codebase the agent builds and runs (which still
+    // makes designs and assets); remembered per folder
+    property bool codeMode: false
     function choose(url) {
         folderUrl = url
         info = JSON.parse(editor.inspectFolder(url))
+        codeMode = info.code_mode === true
     }
 
     Component.onCompleted: {
@@ -75,6 +79,9 @@ ScrollView {
         }
         return "Custom " + format.width + "×" + format.height + (format.fps ? " · " + format.fps + " fps" : "")
     }
+    // a code project the user gave no brief for starts with the stack conversation
+    readonly property string firstPrompt: prompt.text.trim() !== "" || !codeMode ? prompt.text
+        : "This is a Code mode project. Call get_code_project and read get_playbook code. If no stack is recorded, ask me your questions a few at a time and propose options before you build anything."
     clip: true
     implicitWidth: 540
     contentWidth: availableWidth
@@ -86,6 +93,57 @@ ScrollView {
         id: column
         width: root.availableWidth
         spacing: 12
+
+        Label { text: "What are you making?"; color: Theme.text; font.pixelSize: 15; font.bold: true }
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 8
+            Repeater {
+                model: [
+                    { code: false, title: "Assets", text: "Designs, store screenshots, icons and videos. The agent makes them and starts no programs." },
+                    { code: true, title: "Code", text: "An app or site the agent builds and runs with you, with its own tmux sessions. Designs and assets too." }
+                ]
+                delegate: Rectangle {
+                    id: card
+                    required property var modelData
+                    readonly property bool chosen: root.codeMode === modelData.code
+                    Layout.fillWidth: true
+                    Layout.preferredWidth: 1
+                    implicitHeight: cardBody.implicitHeight + 20
+                    radius: Theme.radius
+                    color: chosen ? Theme.panelRaised : "transparent"
+                    border.width: chosen ? 2 : 1
+                    border.color: chosen ? Theme.accent : Theme.border
+                    Accessible.role: Accessible.RadioButton
+                    Accessible.name: modelData.title
+                    Accessible.checked: chosen
+                    ColumnLayout {
+                        id: cardBody
+                        anchors { left: parent.left; right: parent.right; top: parent.top; margins: 10 }
+                        spacing: 4
+                        Label { text: card.modelData.title; color: Theme.text; font.bold: true }
+                        Label { Layout.fillWidth: true; text: card.modelData.text; color: Theme.muted; font.pixelSize: 11; wrapMode: Text.WordWrap }
+                    }
+                    MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.codeMode = card.modelData.code }
+                }
+            }
+        }
+        Label {
+            Layout.fillWidth: true
+            visible: root.codeMode && !!root.info && root.info.detected.length > 0
+            wrapMode: Text.WordWrap
+            color: Theme.muted
+            font.pixelSize: 11
+            text: root.info && root.codeMode ? "Found in this folder: " + root.info.detected.join(", ") + "." : ""
+        }
+        Label {
+            Layout.fillWidth: true
+            visible: root.codeMode && !!root.info && root.info.detected.length === 0
+            wrapMode: Text.WordWrap
+            color: Theme.muted
+            font.pixelSize: 11
+            text: "Nothing built here yet. The agent asks you a few questions and proposes a stack, or you tell it what to use."
+        }
 
         Label { text: "Where are you working?"; color: Theme.text; font.pixelSize: 15; font.bold: true }
         Label {
@@ -284,7 +342,7 @@ ScrollView {
                 wrapMode: TextEdit.Wrap
                 color: Theme.text
                 font.pixelSize: Theme.fontSize
-                placeholderText: "For example: start the app, take screenshots of its main screens and make the App Store set. Or: cut the footage I imported into a 30 second teaser with titles."
+                placeholderText: root.codeMode ? "For example: build a habit tracker as a web app. Or: add a settings screen to this app and run it so I can see it." : "For example: start the app, take screenshots of its main screens and make the App Store set. Or: cut the footage I imported into a 30 second teaser with titles."
                 placeholderTextColor: Theme.muted
                 enabled: root.agentChosen
                 background: Rectangle { radius: 4; color: Theme.field; border.width: 1; border.color: prompt.activeFocus ? Theme.accent : Theme.border }
@@ -301,8 +359,9 @@ ScrollView {
                 onClicked: {
                     const name = root.direct ? "" : (root.makeNew ? newName.text.trim() : root.existing[workspaceBox.currentIndex])
                     if (!root.editor.openWorkspace(root.folderUrl, name, true)) return
+                    if (!root.editor.setCodeMode(root.codeMode)) return
                     if (root.format) root.editor.setFormat(root.format.id || "", root.format.kind || "", root.format.width || 0, root.format.height || 0, root.format.fps || 0)
-                    if (root.agentChosen) root.editor.chatStartWith(root.command, prompt.text, root.modelValue, root.effortValue)
+                    if (root.agentChosen) root.editor.chatStartWith(root.command, root.firstPrompt, root.modelValue, root.effortValue)
                     root.started()
                 }
             }

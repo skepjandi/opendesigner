@@ -17,6 +17,10 @@ use cxx_qt_lib::{QGuiApplication, QQmlApplicationEngine, QQuickStyle, QString, Q
 
 const MAIN_QML: &str = "qrc:/qt/qml/org/opendesigner/app/qml/main.qml";
 
+unsafe extern "C" {
+    fn od_init_web_engine();
+}
+
 /// Opens the editor window and runs the event loop. Returns the process exit code.
 pub fn run() -> i32 {
     // The Qt glue of each crate registers itself through an initializer. Linux links those in
@@ -25,6 +29,9 @@ pub fn run() -> i32 {
     cxx_qt::init_crate!(cxx_qt_lib);
     cxx_qt::init_crate!(opendesigner_app);
     cxx_qt::init_qml_module!("org.opendesigner.app");
+    // SAFETY: a plain C function with no arguments, defined in `cpp/web_engine.cpp`; Qt requires
+    // it to run once, on the main thread, before the QGuiApplication is constructed.
+    unsafe { od_init_web_engine() };
     let mut app = QGuiApplication::new();
     // The native macOS/Windows styles cannot be restyled; the basic style takes our theme.
     QQuickStyle::set_style(&QString::from("Basic"));
