@@ -1,5 +1,5 @@
 //! The transitions that cut a mask out of the arriving clip instead of moving or fading it
-//! (`docs/wiki/video-editing.md#transitions`): wipes, an iris and a glitch of slices. Each is a
+//! (`docs/wiki/video-editing.md#transitions`): wipes, an iris, a clock wipe and a glitch of slices. Each is a
 //! pure function of the transition's progress, the picture's size and a seed, so a frame is the
 //! same every time it is drawn.
 
@@ -26,6 +26,7 @@ impl Reveal {
                 | TransitionKind::WipeDown
                 | TransitionKind::Iris
                 | TransitionKind::GlitchSlice
+                | TransitionKind::ClockWipe
         )
         .then_some(Reveal {
             kind,
@@ -51,6 +52,7 @@ pub fn reveal(layer: &mut Pixmap, r: Reveal) {
         TransitionKind::WipeDown => keep_rows(layer, 0, ((h as f32) * r.progress).round() as usize),
         TransitionKind::Iris => iris(layer, r.progress),
         TransitionKind::GlitchSlice => glitch(layer, r),
+        TransitionKind::ClockWipe => clock_wipe(layer, r.progress),
         _ => {}
     }
 }
@@ -83,6 +85,35 @@ fn iris(layer: &mut Pixmap, progress: f32) {
     for (i, px) in layer.data_mut().chunks_exact_mut(4).enumerate() {
         let (x, y) = ((i % w) as f32 + 0.5 - cx, (i / w) as f32 + 0.5 - cy);
         let cover = (radius - (x * x + y * y).sqrt() + 0.5).clamp(0.0, 1.0);
+        if cover < 1.0 {
+            for c in px {
+                *c = (f32::from(*c) * cover).round() as u8;
+            }
+        }
+    }
+}
+
+/// A radius from twelve o'clock sweeping clockwise: a pixel shows once the sweep has passed its
+/// angle. The edge is about one pixel soft; 0 shows nothing and 1 everything.
+fn clock_wipe(layer: &mut Pixmap, progress: f32) {
+    let (w, h) = (layer.width() as usize, layer.height() as usize);
+    if progress >= 1.0 {
+        return;
+    }
+    let (cx, cy) = (w as f32 / 2.0, h as f32 / 2.0);
+    let limit = progress * std::f32::consts::TAU;
+    for (i, px) in layer.data_mut().chunks_exact_mut(4).enumerate() {
+        let (x, y) = ((i % w) as f32 + 0.5 - cx, (i / w) as f32 + 0.5 - cy);
+        let mut angle = x.atan2(-y);
+        if angle < 0.0 {
+            angle += std::f32::consts::TAU;
+        }
+        let distance = (x * x + y * y).sqrt().max(1.0);
+        let cover = if progress <= 0.0 {
+            0.0
+        } else {
+            ((limit - angle) * distance + 0.5).clamp(0.0, 1.0)
+        };
         if cover < 1.0 {
             for c in px {
                 *c = (f32::from(*c) * cover).round() as u8;
@@ -209,6 +240,31 @@ mod tests {
         assert!(mid > 0 && mid < 40 * 20, "{mid}");
     }
 
+    #[test]
+    fn a_clock_wipe_sweeps_clockwise_from_twelve_and_ends_complete() {
+        let quarter = masked(TransitionKind::ClockWipe, 0.25);
+        assert!(visible(&quarter, 30, 3), "top right shows first");
+        assert!(!visible(&quarter, 30, 17), "bottom right waits");
+        assert!(!visible(&quarter, 10, 17) && !visible(&quarter, 10, 3));
+        let half = masked(TransitionKind::ClockWipe, 0.5);
+        assert!(visible(&half, 30, 17) && visible(&half, 30, 3));
+        assert!(!visible(&half, 10, 17) && !visible(&half, 10, 3));
+        let three = masked(TransitionKind::ClockWipe, 0.75);
+        assert!(visible(&three, 10, 17) && !visible(&three, 10, 3));
+        assert!(
+            masked(TransitionKind::ClockWipe, 0.0)
+                .data()
+                .iter()
+                .all(|&b| b == 0)
+        );
+        let all = masked(TransitionKind::ClockWipe, 1.0);
+        assert!(all.data().chunks_exact(4).all(|p| p == [200, 100, 50, 255]));
+        let shown = |p: &Pixmap| p.data().chunks_exact(4).filter(|c| c[3] > 0).count();
+        assert!(
+            shown(&masked(TransitionKind::ClockWipe, 0.3))
+                < shown(&masked(TransitionKind::ClockWipe, 0.6))
+        );
+    }
     #[test]
     fn only_masking_kinds_make_a_reveal() {
         assert!(Reveal::of(TransitionKind::Fade, 0.5, 0).is_none());

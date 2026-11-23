@@ -16,13 +16,16 @@ use std::thread::JoinHandle;
 use thiserror::Error;
 
 pub mod analysis;
+pub mod container;
 pub mod cutout;
 pub mod external;
+pub mod footage;
 pub mod loudness;
 pub mod mix;
 pub mod speech;
 
 pub use analysis::Pause;
+pub use container::Container;
 pub use loudness::{Loudness, Measured};
 pub use mix::{AudioPiece, DuckSettings, PieceRole};
 
@@ -168,9 +171,36 @@ pub struct EncodeSettings {
     pub width: u32,
     pub height: u32,
     pub fps: u32,
-    /// Where the MP4 goes. It is written in full or not at all: encoding goes to a `.part` file
+    /// Where the file goes. It is written in full or not at all: encoding goes to a `.part` file
     /// next to it, renamed when `ffmpeg` finishes cleanly.
     pub output: PathBuf,
+    /// What kind of file.
+    pub container: Container,
+    /// Every Nth frame of the video is what is written, so the file plays at `fps / every_nth`.
+    pub every_nth: u32,
+    /// The frames carry transparency, straight (not premultiplied) RGBA, which a GIF, WebM or
+    /// MOV keeps.
+    pub alpha: bool,
+    /// Scale the picture to this width (the height follows) while encoding. Not for MP4.
+    pub scale_width: Option<u32>,
+    /// Times a GIF plays again after the first: none is for ever, 0 plays once.
+    pub gif_loops: Option<u32>,
+}
+
+impl Default for EncodeSettings {
+    fn default() -> EncodeSettings {
+        EncodeSettings {
+            width: 0,
+            height: 0,
+            fps: 30,
+            output: PathBuf::new(),
+            container: Container::Mp4,
+            every_nth: 1,
+            alpha: false,
+            scale_width: None,
+            gif_loops: None,
+        }
+    }
 }
 
 /// Bits per second for a picture of `width` x `height` at `fps`: about a tenth of a bit per pixel
@@ -192,7 +222,7 @@ pub struct VideoWriter {
 
 impl VideoWriter {
     pub fn start(ffmpeg: &Ffmpeg, settings: &EncodeSettings) -> Result<VideoWriter, MediaError> {
-        let encoder = ffmpeg.h264_encoder()?;
+        let (output_args, encoder) = container::output_args(ffmpeg, settings)?;
         let part = {
             let mut name = settings
                 .output
@@ -207,20 +237,14 @@ impl VideoWriter {
             .args(["-hide_banner", "-loglevel", "error", "-y"])
             .args(["-f", "rawvideo", "-pix_fmt", "rgba"])
             .args(["-s", &format!("{}x{}", settings.width, settings.height)])
-            .args(["-r", &settings.fps.to_string(), "-i", "-", "-an"])
-            .args(["-c:v", encoder])
             .args([
-                "-b:v",
-                &bitrate(settings.width, settings.height, settings.fps).to_string(),
+                "-r",
+                &format!("{}/{}", settings.fps, settings.every_nth.max(1)),
+                "-i",
+                "-",
+                "-an",
             ])
-            .args([
-                "-pix_fmt",
-                "yuv420p",
-                "-movflags",
-                "+faststart",
-                "-f",
-                "mp4",
-            ])
+            .args(&output_args)
             .arg(&part)
             .stdin(Stdio::piped())
             .stdout(Stdio::null())

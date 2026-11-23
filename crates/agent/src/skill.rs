@@ -138,6 +138,10 @@ pub fn generate() -> Vec<SkillFile> {
             contents: playbook::topic("formats").unwrap_or_default().to_string(),
         },
         SkillFile {
+            path: "references/growth-playbook.md",
+            contents: playbook::topic("growth").unwrap_or_default().to_string(),
+        },
+        SkillFile {
             path: "references/blocks-playbook.md",
             contents: playbook::topic("blocks").unwrap_or_default().to_string(),
         },
@@ -229,8 +233,7 @@ project files directly: that bypasses validation, checkpoints and the user's vie
 4. **Check your work.** `render_preview` again. For store assets, run `export` with the right
    `preset`. A listing is a set: `export_set` for several frames, or lay the slides edge to edge
    on one wide frame (a background or device can cross the seams) and use `export_panorama`; its
-   width must divide by the slide count. Sets are validated as a whole and nothing is written unless
-   everything passes. A failed export names the rule that broke; fix that, do not argue with it. For a phone or tablet around a
+   width must divide by the slide count. A set is validated as a whole. A failed export names the rule that broke; fix that, do not argue with it. For a phone or tablet around a
    screenshot, call `device_template`, put its node in `apply_ops`, and ask the user to drop the
    capture on the `Screen` (or use an image from `list_media` as the template's `image`).
 5. **Close the loop.** Call `validate_document` and fix every error and warning it reports (stable
@@ -452,7 +455,7 @@ for motion, use several overlays or `set_overlay` over time. Match the video's s
 The ids of a created video and clips come back in `created` (`v_...`, `c_...`). Width and height
 are even numbers; a frame of another shape is scaled to cover the video and cropped in the middle,
 so use frames of the video's shape. A transition (`cut`, `fade`, `slide_left`, `slide_right`, `slide_up`, `slide_down`, `dip`, `zoom_in`,
-`wipe_left`, `wipe_right`, `wipe_up`, `wipe_down`, `iris`, `flash`, `blur_dissolve`, `glitch_slice`)
+`wipe_left`, `wipe_right`, `wipe_up`, `wipe_down`, `iris`, `flash`, `blur_dissolve`, `glitch_slice`, `flip`, `clock_wipe`)
 overlaps the end of the clip before it, so it makes the video shorter by its length; the first
 clip's transition is not shown. `motion` zooms slowly from `scale_from` to `scale_to` (1 to 3) over
 the clip. Change a clip with `set_clip` (`duration_ms`, `frame`, `source`, `transition`, `motion`, and for footage

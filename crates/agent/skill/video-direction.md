@@ -97,6 +97,26 @@ tighten pauses over 0.7 s; use a cut for energy and a short fade only to mark a 
 titles only where they help. Do not add effects for their own sake. Say in your reply which parts
 you cut and why, so the user can overrule.
 
+### Know the footage before you cut it
+
+When the user gives you recordings, do not cut blind and do not re-watch a file every time you need
+a moment from it. Build a memory once:
+
+1. `index_footage {file}` cuts the file into shots by where the picture changes (lower `threshold`,
+   0.15 to 0.2, for soft cuts; higher, 0.4 to 0.5, when it finds hundreds). With speech in it, call
+   `get_capabilities` and, if a speech program is there, add `transcribe: true`.
+2. `watch_footage {file, from_ms, to_ms, question}` on each shot (its `from_ms` and `to_ms` are in the
+   row) or on the whole file with 8 pictures. Look, then write what you saw.
+3. `index_footage {file, notes: [{shot, note, tags}]}`. A note is one plain sentence naming who or
+   what, doing what, where and how it is shot ("Founder at the desk laughing, medium shot, window
+   light"); tags are the words you would search for. Write the words a person would use, not
+   "good shot".
+4. Later, `search_footage {query}` returns shots with a ready `clip` for `add_clip`, so a request
+   like "the part where she explains pricing" is a search and then one transaction.
+
+A file the user replaced is `stale`: index it again; notes move to shots that start where they did.
+Tell the user which shots you used and which you did not.
+
 ## Sound
 
 Plan the sound with the script, not after it. Unless the user asked for silence, the video has a
@@ -111,19 +131,36 @@ audio for the one older track); `list_sounds` shows what `media/` holds. A voice
 track and the bed a `music` track with `duck`, so the bed lowers while the voice speaks. The `motion`
 playbook has the details.
 
-Sound must be about what is on screen. Before any `make_sound`, write a cue sheet: one row per
-visible event (the time, what appears or moves, the sound that event would make). Cut and slide:
-a whoosh (`swoosh_up` for upward or rightward motion, `swoosh_down` for downward) timed to the
-motion's peak speed. An object or card landing: `hit`, or `impact` only for the one big moment.
-Text or a UI element appearing: `pop` or `blip`; typing: `key` with a different seed per press. A
-number counting: `tick` per step. A tension build before a reveal: `riser`, ending on the reveal
-with silence for a beat before it. Success or the final title: `chime` or `stinger`, once. Never
-the same file for different events: another kind, or the same kind with its own `seed` and
-`pitch_hz`, and a file name that says what it is for (`reveal-chime`, `cut-2-whoosh`). A beat
-without an event gets no sound. Match the bed to the subject and mood (calm product film: soft
-`pad`; energetic: `beat` at the cut rhythm; or a `search_sounds` piece whose tags fit), not to
-whatever came first. Then check: play each cue against `render_video_frame` at its start time and
-drop any cue whose frame shows nothing happening.
+Motion can follow a sound. `audio_reactive {video, node, prop, file, band, min, max}` measures a
+file (`level`, or `low` for the kick and bass, `mid` for a voice, `high` for hats) and writes keys
+between `min` (silence) and `max` (the loudest moment) on one property of one node, as one undoable
+step. Recipes: a bar's `scale_y` 0.2 to 1 on `low`; a glow's `opacity` 0.3 to 1 on `level`; a pulse
+on the kick is `scale` 0 to 0.12 with `additive: true` so the node keeps its own travel; a lip flap
+is a mouth node's `scale_y` 0.1 to 1 on the `mid` band of the voice file with `attack` 1 (look at
+it with `video_strip`: a mouth that moves on every word reads as speech, one that never closes
+does not). It needs ffmpeg, replaces the node's track for that property unless `additive`, and a
+long sound needs fewer `keys_per_second` (a track holds 500 keys).
+
+To continue in another editor, `export_timeline {video, format: edl}` writes the cuts (footage, speed,
+dissolves, sound tracks) and `format: srt` or `vtt` the captions. Read its `warnings` to the user:
+an EDL cannot hold design-frame clips, overlays, keyframes or grades, so export the finished video
+with `export_video` for those.
+
+Other files and parts. `export_video` writes by the ending of `file`: `.mp4` (the default), `.gif`
+(loops for ever, 480 px wide unless `width`, no sound), `.webm` and `.mov` (ProRes, for other editors;
+no sound here). `transparent: true` keeps what no clip covers clear in a gif, webm or mov, so a
+lower third or a sticker is a design frame with no fill exported on its own. `from_ms` and `to_ms`
+write a part (with its sound in an mp4), which is the cheap way to check one scene or make a teaser;
+`every_nth_frame` 2 turns a 30 fps video into a 15 fps GIF. A long full-size GIF is refused: shorten
+it, thin the frames or narrow it. A store preset is for the whole mp4 only.
+
+Length and wobble. `fit_clip_to_media {video, clip, file}` makes a clip as long as a voice-over or a
+recording (a title card held for the whole narration; `pad_ms` adds a beat after it); with no `file`
+a footage clip plays the rest of its own file. Everything after it moves, so check overlays and
+captions. `animate_noise {video, node, props: ["x", "y"], amplitude, frequency}` gives a shake, a
+drift or a breathing glow that never repeats (`loop: true` for one that does, seamlessly); a shake is
+amplitude 6 at frequency 6, a drifting cloud amplitude 40 at 0.2; keep amplitudes small enough that
+nothing leaves the frame, and look at a second of it with `video_strip`.
 
 ## Captions
 

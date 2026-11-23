@@ -30,6 +30,7 @@ fn settings(dir: &std::path::Path) -> EncodeSettings {
         height: 2,
         fps: 10,
         output: dir.join("out.mp4"),
+        ..EncodeSettings::default()
     }
 }
 
@@ -112,6 +113,7 @@ fn a_real_ffmpeg_makes_an_mp4_with_every_frame() {
         height: 48,
         fps: 10,
         output: tmp.path().join("real.mp4"),
+        ..EncodeSettings::default()
     };
     let mut w = VideoWriter::start(&ff, &s).unwrap();
     for i in 0..10u8 {

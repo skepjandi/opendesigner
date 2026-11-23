@@ -14,6 +14,42 @@ All notable changes to OpenDesigner are documented here.
 
 - Removed the named references to two external video editors from the README, the wiki (including their Prior Art and Video Editing sections) and an older changelog note. Design decisions that cited them now stand on their own reasons.
 
+### feat(core,render,media,agent): more from Remotion: formats, parts, noise, fit to media, two transitions
+
+**Area:** `feat(render)`, `feat(media)`, `feat(core)`, `feat(agent)`, `docs(wiki)`, `feat(skill)`
+
+From Remotion's docs on noise, transition presentations, transparent videos, GIFs and `calculateMetadata()`, read 2026-11-22 ([Prior Art](docs/wiki/prior-art.md#video-agent-sources-2026-11-22)).
+
+- **`export_video` formats.** `.gif`, `.webm` (VP9) and `.mov` (ProRes) by the file's ending, with `transparent` (a clear ground, `VideoRenderer::with_transparent`; premultiplied pixels turned straight at the writer), `width`, `gif_loops`. New `od_media::Container` and `container.rs` (encoder, pixel format and filter graph per kind); `EncodeSettings` gains `container`, `every_nth`, `alpha`, `scale_width`, `gif_loops`.
+- **Parts and steps.** `from_ms`, `to_ms` and `every_nth_frame`: `od_render::export::export_frames_with` draws only the selected frames (the same pixels as in a full export, tested), an `.mp4` keeps the cut sound of the part, a GIF of a long video no longer draws all of it. A store preset checks whole `.mp4` files only.
+- **`animate_noise`.** Seeded value noise (`od_core::noise`, integer hashing, 1 to 4 octaves, seamless loop) written as keys, up to 4 properties with their own streams, additive by default.
+- **`fit_clip_to_media`.** A clip as long as an audio or footage file, or the rest of its own footage, plus `pad_ms`.
+- **Transitions `flip` and `clock_wipe`.** A flat card flip (`Pose::sx`) and a clockwise radius mask; no change to existing files.
+- **Docs.** Wiki: video-editing (formats and parts, noise motion, fit to media, transitions), agent-integration, security (what reaches ffmpeg), prior-art, roadmap decision log. Playbooks: video-direction and motion.
+
+**Not verified:** colour grades and blur on partly transparent edges, playing the WebM and the MOV in a browser or in Final Cut Pro, Premiere Pro or DaVinci Resolve (only decoded back with ffmpeg), Windows and Linux, and whether agents prefer these tools to what they did before.
+
+### feat(agent,media,core): footage memory, timeline export and audio-driven motion
+
+**Area:** `feat(agent)`, `feat(media)`, `feat(core)`, `docs(wiki)`, `feat(skill)`
+
+Ideas from Remotion, FrameScript, OpenFilm, ELLMPEG, Shotstack's agent guide, Dataiku's Watch Video tool and invideo's editing agent, read 2026-11-22 (table and what was not taken: [Prior Art](docs/wiki/prior-art.md#video-agent-sources-2026-11-22)).
+
+- **`watch_footage`.** Up to 10 pictures from the middle of equal slices of a `media/` recording, labeled with their time, in one grid, with the agent's `question` repeated beside it. Read-only.
+- **`index_footage` and `search_footage`.** Shots by ffmpeg scene score (`od_media::footage`: `detect_cuts`, `shots_from_cuts`), an optional word-timed transcript from the user's own whisper (the `transcribe` path, now `recognize`), and the agent's notes and tags per shot, kept in `footage-index/<name>.json`. Search matches words against notes, tags and transcript and answers with a ready `add_clip` object. A changed file is marked `stale`; a rescan carries notes to the shots that start where they did.
+- **`export_timeline`.** A CMX 3600 EDL (`od_core::interchange::edl`: footage source and record times, speed, dissolves, sound tracks), SRT or WebVTT in `exports/`; what an EDL cannot hold is returned as `warnings`. A hand-over like `export_video` for the unseen-changes warning.
+- **`audio_reactive`.** A property follows the loudness, or the bass, mid or treble, of a sound: ffmpeg measures it, `normalize` gates, scales and smooths it, and it is written as ordinary keys through `apply_ops` (one undoable step). Also the lip flap: a mouth's `scale_y` on a voice file.
+- **Silence.** A band the sound does not have (about 0.0002 rms, measured for a 100 Hz tone through the treble filter) is not stretched to full scale: anything under -50 dBFS is silence; the first 60 ms of band-filtered sound, where the filter settles and reads twice as loud, are replaced by what follows; a curve with no movement is refused instead of written as two equal keys.
+- **Docs.** Wiki: video-editing (footage memory, timeline export, audio-reactive motion), agent-integration, security (new files written, what reaches ffmpeg), prior-art, roadmap decision log. Playbooks: video-direction (footage workflow, export, lip flap) and review (why three rounds; do not resend a failing call).
+
+**Not verified:** a real whisper (the transcript path is covered by the existing fake-program tests for `transcribe` only), importing the EDL into Final Cut Pro, Premiere Pro or DaVinci Resolve (written to the CMX 3600 layout, never opened in them), Windows and Linux, and whether agents prefer these tools to what they did before.
+
+### feat(skill): a growth playbook for store assets
+
+**Area:** `feat(skill)`
+
+New `growth` playbook (`get_playbook growth`, `references/growth-playbook.md`): how people decide on a store page, what published tests do and do not show (Apple's three PPO tests, custom product page averages, vendor bundles flagged as such), the icon, the screenshot sequence, preview video, Play specifics, custom product pages, policy rails, localization, off-store cards, and the one-change-per-test plan the agent hands over. Evidence read 2026-11-22; conventions with no controlled data are labelled as such.
+
 ### feat(agent): a picture as depth layers
 
 **Area:** `feat(agent)`, `feat(render)`, `docs(wiki)`

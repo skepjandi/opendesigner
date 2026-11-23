@@ -147,6 +147,11 @@ pub fn definitions() -> Vec<Value> {
     all.extend(crate::scene_checks::definitions());
     all.extend(crate::external_tools::definitions());
     all.extend(crate::inspect::definitions());
+    all.extend(crate::footage::definitions());
+    all.extend(crate::audio_reactive::definitions());
+    all.extend(crate::noise_tool::definitions());
+    all.extend(crate::fit_media::definitions());
+    all.extend(crate::timeline_export::definitions());
     all.extend(crate::style_pack::definitions());
     all.extend(showcase_definitions());
     all
@@ -346,7 +351,7 @@ fn core_definitions() -> Vec<Value> {
              {op:'add_clip', video, frame | footage:{file:'media/x.mp4', in_ms}, duration_ms, index?, transition?, motion?} (a clip shows a design frame or plays footage from list_footage), \
              {op:'remove_clip', video, clip}, {op:'move_clip', video, clip, index}, \
              {op:'set_clip', video, clip, prop:{name, value}} with name one of duration_ms, frame, \
-             source (value {frame} or {footage:{file,in_ms}}), transition (value {kind: cut|fade|slide_left|slide_right|slide_up|slide_down|dip|zoom_in|wipe_left|wipe_right|wipe_up|wipe_down|iris|flash|blur_dissolve|glitch_slice, duration_ms, ease?}), motion (value {scale_from, scale_to, ease?}, 1 to 3), \
+             source (value {frame} or {footage:{file,in_ms}}), transition (value {kind: cut|fade|slide_left|slide_right|slide_up|slide_down|dip|zoom_in|wipe_left|wipe_right|wipe_up|wipe_down|iris|flash|blur_dissolve|glitch_slice|flip|clock_wipe, duration_ms, ease?}), motion (value {scale_from, scale_to, ease?}, 1 to 3), \
              speed (footage only, 0.25 to 4; duration_ms is the length on the timeline, the clip plays duration_ms*speed of the file), \
              speed_ramp (footage only, value [{at_ms, rate 0.25 to 4, ease?}] in clip time, needs speed 1; [] removes it), \
              grade (value {exposure?(-3..3 stops), contrast?, saturation?, temperature?, tint? (all -1..1), vignette? (0..1), blur? (0..50), look?: warm|cool|mono|faded|punchy}, or null; a look fills the numbers and the numbers you give override it; also set on an image node with {op:'set', id, prop:{name:'grade', value}}). \
@@ -679,15 +684,27 @@ fn core_definitions() -> Vec<Value> {
         ),
         tool(
             "export_video",
-            "Draw every frame of a video and write it as an H.264 MP4 to exports/<file>. Needs ffmpeg \
+            "Draw every frame of a video (or a part of it) and write it to exports/<file>: an H.264 MP4 \
+             (default), or by the file's ending an animated GIF (.gif), a VP9 WebM (.webm) or an Apple \
+             ProRes MOV (.mov). `transparent: true` keeps what no clip covers clear (a design frame with no \
+             fill, a fade) in a .gif (one bit), .webm or .mov (full alpha, for other editors); an .mp4 cannot. \
+             `from_ms` and `to_ms` write only that part (and its sound, in an .mp4), `every_nth_frame` writes \
+             every Nth frame (a 30 fps video as a 15 fps GIF is 2; the sound is left out). A GIF is scaled \
+             to `width` (default 480) and has no sound; .webm and .mov carry no sound here. Needs ffmpeg \
              on the user's computer (the error says what to install). This can take a while. For an animated \
              or illustrated video, run review_video first and fix its findings.",
             json!({
                 "video": id("Id of a video from list_videos."),
-                "file": id("File name ending in .mp4, for example preview.mp4."),
+                "file": id("File name ending in .mp4, .gif, .webm or .mov, for example preview.mp4."),
                 "preset": id("A preset id from list_video_presets: the video is checked against the store's rules and nothing is written if it breaks one."),
                 "locale": id("A language from list_locales: text nodes show that language."),
-                "loudness": {"type": "integer", "enum": [-14, -16, -23], "description": "Bring the final mix to this integrated loudness in LUFS: -14 social, -16 podcast, -23 broadcast. Default: leave the level as mixed. Measured first, then applied as a gain (ffmpeg loudnorm); a video with no sound is unaffected."}
+                "loudness": {"type": "integer", "enum": [-14, -16, -23], "description": "Bring the final mix to this integrated loudness in LUFS: -14 social, -16 podcast, -23 broadcast. Default: leave the level as mixed. Measured first, then applied as a gain (ffmpeg loudnorm); a video with no sound is unaffected."},
+                "from_ms": {"type": "integer", "minimum": 0, "description": "Start of the part written (default 0)."},
+                "to_ms": {"type": "integer", "minimum": 1, "description": "End of the part written (default: the end of the video)."},
+                "every_nth_frame": {"type": "integer", "minimum": 1, "maximum": 60, "description": "Write every Nth frame (default 1)."},
+                "transparent": {"type": "boolean", "description": "Keep uncovered ground transparent (.gif, .webm, .mov)."},
+                "width": {"type": "integer", "minimum": 16, "description": "Scale to this width (.gif, .webm, .mov); a GIF defaults to 480."},
+                "gif_loops": {"type": "integer", "minimum": 0, "description": "A GIF plays again this many times after the first; 0 plays once. Default: for ever."},
             }),
             &["video", "file"],
             false,
@@ -745,6 +762,13 @@ fn dispatch(ctx: &mut CallCtx, name: &str, args: Value) -> Result<Output, ToolEr
         n if crate::scene_checks::NAMES.contains(&n) => crate::scene_checks::call(ctx, n, args),
         n if crate::external_tools::NAMES.contains(&n) => crate::external_tools::call(ctx, n, args),
         n if crate::inspect::NAMES.contains(&n) => crate::inspect::call(ctx, n, args),
+        n if crate::footage::NAMES.contains(&n) => crate::footage::call(ctx, n, args),
+        n if crate::audio_reactive::NAMES.contains(&n) => crate::audio_reactive::call(ctx, n, args),
+        n if crate::noise_tool::NAMES.contains(&n) => crate::noise_tool::call(ctx, n, args),
+        n if crate::fit_media::NAMES.contains(&n) => crate::fit_media::call(ctx, n, args),
+        n if crate::timeline_export::NAMES.contains(&n) => {
+            crate::timeline_export::call(ctx, n, args)
+        }
         n if crate::style_pack::NAMES.contains(&n) => crate::style_pack::call(ctx, n, args),
         n if crate::assets::tools::handles(n) => {
             let dir = ctx.ws.dir().map(std::path::Path::to_path_buf);
@@ -1732,6 +1756,18 @@ struct ExportVideoArgs {
     locale: Option<String>,
     #[serde(default)]
     loudness: Option<f64>,
+    #[serde(default)]
+    from_ms: Option<u64>,
+    #[serde(default)]
+    to_ms: Option<u64>,
+    #[serde(default)]
+    every_nth_frame: Option<u32>,
+    #[serde(default)]
+    transparent: bool,
+    #[serde(default)]
+    width: Option<u32>,
+    #[serde(default)]
+    gif_loops: Option<u32>,
 }
 
 fn export_video_tool(ctx: &mut CallCtx, a: ExportVideoArgs) -> Result<Output, ToolError> {
@@ -1759,7 +1795,15 @@ fn run_export_video(
     crate::video_export::check_export(src, &id, &a.file, a.locale.as_deref(), a.preset.as_deref())?;
     let ffmpeg = od_media::Ffmpeg::locate().map_err(|e| ToolError(e.to_string()))?;
     let loudness = a.loudness.map(loudness_target).transpose()?;
-    let out = crate::video_export::export_video_mastered(
+    let options = crate::video_export::VideoOptions {
+        from_ms: a.from_ms,
+        to_ms: a.to_ms,
+        every_nth_frame: a.every_nth_frame,
+        transparent: a.transparent,
+        width: a.width,
+        gif_loops: a.gif_loops,
+    };
+    let out = crate::video_export::export_video_custom(
         src,
         &id,
         &a.file,
@@ -1768,6 +1812,7 @@ fn run_export_video(
         &ffmpeg,
         od_render::export::default_workers(),
         loudness,
+        &options,
         progress,
     )?;
     Ok(Output::json(&video_outcome_json(&out)))
@@ -1788,6 +1833,11 @@ pub fn video_outcome_json(out: &crate::video_export::VideoOutcome) -> Value {
         "path": out.path,
         "width": out.width,
         "height": out.height,
+        "format": out.format,
+        "transparent": out.transparent,
+        "from_ms": out.from_ms,
+        "to_ms": out.to_ms,
+        "every_nth_frame": out.every_nth_frame,
         "fps": out.fps,
         "frames": out.frames,
         "duration_ms": out.duration_ms,
