@@ -10,6 +10,8 @@ set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 out="${1:-$root/dist}"
+mkdir -p "$out"
+out="$(cd "$out" && pwd)"
 qmake="${QMAKE:-$(command -v qmake || true)}"
 [ -n "$qmake" ] || { echo "set QMAKE to Qt 6's qmake.exe" >&2; exit 1; }
 qt_bin="$(dirname "$qmake")"
