@@ -78,7 +78,11 @@ jobs:
             ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0 appimagetool
           echo "$HOME/tools" >> "$GITHUB_PATH"
       - name: Package
-        run: scripts/package-linux.sh dist
+        run: |
+          # the runner has no sound card: give ALSA a null device so Qt Multimedia can open one
+          printf 'pcm.!default { type null }\nctl.!default { type null }\n' > "$RUNNER_TEMP/asound.conf"
+          export ALSA_CONFIG_PATH="$RUNNER_TEMP/asound.conf"
+          scripts/package-linux.sh dist
       - uses: actions/upload-artifact@v4
         with:
           name: linux
