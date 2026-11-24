@@ -33,12 +33,13 @@ convert "$root/assets/app-icon.png" -resize 512x512 "$icon"
 # the SVG image plug-in (the logo is an SVG) and Qt Multimedia's backend are loaded at run time,
 # so the deploy plug-in does not see them in the executable's imports
 export QMAKE="$qmake" QML_SOURCES_PATHS="$root/crates/app/qml" NO_STRIP=1 EXTRA_QT_PLUGINS="svg;multimedia;imageformats"
-# GStreamer stays the system's: a bundled libgstreamer cannot find the system's plug-ins (the
-# queue, decodebin and sink elements Qt Multimedia needs), and the program then crashes.
-linuxdeploy --appdir "$appdir" --plugin qt --exclude-library "libgst*" \
+linuxdeploy --appdir "$appdir" --plugin qt \
   --executable "$root/target/release/opendesigner-app" \
   --desktop-file "$root/packaging/linux/opendesigner.desktop" \
   --icon-file "$icon" --icon-filename opendesigner
+# GStreamer stays the system's: a bundled libgstreamer looks for its plug-ins (queue, decodebin,
+# the sinks) relative to itself, finds none, and the program crashes when Qt Multimedia starts.
+find "$appdir/usr/lib" -name 'libgst*-1.0.so*' -print -delete
 # The offscreen platform plug-in is only there so the smoke test below can run without a display.
 plugins="$("$qmake" -query QT_INSTALL_PLUGINS)"
 mkdir -p "$appdir/usr/plugins/platforms"
