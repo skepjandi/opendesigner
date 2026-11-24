@@ -60,7 +60,8 @@ jobs:
           host: linux
           target: desktop
           arch: linux_gcc_64
-          modules: qtwebengine qtwebchannel qtpositioning qtmultimedia
+          # qtserialport: the position plug-in that Qt WebEngine pulls in links it
+          modules: qtwebengine qtwebchannel qtpositioning qtmultimedia qtserialport
           cache: true
       - name: Install build dependencies and the AppImage tools
         run: |
