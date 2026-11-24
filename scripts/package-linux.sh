@@ -40,7 +40,7 @@ linuxdeploy --appdir "$appdir" --plugin qt \
 # The offscreen platform plug-in is only there so the smoke test below can run without a display.
 plugins="$("$qmake" -query QT_INSTALL_PLUGINS)"
 mkdir -p "$appdir/usr/plugins/platforms"
-cp --update=none "$plugins/platforms/libqoffscreen.so" "$appdir/usr/plugins/platforms/"
+[ -e "$appdir/usr/plugins/platforms/libqoffscreen.so" ] || cp "$plugins/platforms/libqoffscreen.so" "$appdir/usr/plugins/platforms/"
 
 echo "==> licensing check"
 "$root/scripts/bundle-licensing.sh" "$appdir" allow-qt-ffmpeg
