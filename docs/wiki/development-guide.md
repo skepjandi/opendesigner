@@ -43,9 +43,14 @@ cargo run -p opendesigner-cli -- export demo.od --frame n_3 --preset apple-iphon
 
 Run the editor offscreen, the way the test does: `QT_QPA_PLATFORM=offscreen target/debug/opendesigner-app --selftest=/some/empty/folder` prints `SELFTEST OK` and leaves `window.png` (a grab of the window) next to the project it built. Use a throwaway `HOME` and `OPENDESIGNER_CONFIG_DIR` so the session does not touch your real agent folders or token.
 
-### Packaging (macOS)
+### Packaging
 
-`QMAKE="$(brew --prefix qt)/bin/qmake" scripts/package-macos.sh` builds the release binary, assembles `dist/OpenDesigner.app` (Info.plist, an icon made from `assets/app-icon.png`, `THIRD_PARTY.txt`, the font and project licenses), runs `macdeployqt` with the QML folder so only the Qt modules the app imports are bundled, **fails if any GPL-only Qt module is in the bundle** (the list in the script mirrors [Qt Desktop](./qt-desktop.md#licensing)), signs it ad hoc, and starts the bundled binary offscreen to run the scripted session (`SELFTEST OK`). The build takes about 5 minutes the first time. The bundle is signed ad hoc, so it runs on the machine that built it; distributing it needs a Developer ID signature and notarization, which the script does not do. There are no Windows or Linux packaging scripts.
+Each platform has a script that builds the release binary, bundles Qt, runs `scripts/bundle-licensing.sh` (removes and then fails on any GPL-only Qt module in the bundle; the list mirrors [Qt Desktop](./qt-desktop.md#licensing)), and `scripts/bundle-smoke.sh` (starts the bundled program offscreen and runs the scripted session, `SELFTEST OK`). None signs for distribution.
+
+- **macOS:** `QMAKE="$(brew --prefix qt)/bin/qmake" scripts/package-macos.sh` writes `dist/OpenDesigner.app` (Info.plist, an icon made from `assets/app-icon.png`, `THIRD_PARTY.txt`, the font and project licenses) with `macdeployqt`, refuses a bundle that carries Qt's FFmpeg, and signs ad hoc, so it runs on the machine that built it; other Macs need a right-click Open or `xattr -dr com.apple.quarantine`, until a Developer ID signature and notarization exist. About 375 MB with Qt WebEngine.
+- **Windows:** from Git Bash with MSVC and Qt 6 (WebEngine, Multimedia) installed, `QMAKE=.../qmake.exe scripts/package-windows.sh` writes `dist/OpenDesigner/` and `dist/OpenDesigner-<version>-windows-x64.zip` with `windeployqt`, copies the Visual C++ runtime when it finds one, and deletes Qt's FFmpeg backend.
+- **Linux:** with Qt 6.8 (official build, WebEngine and Multimedia), ImageMagick, and `linuxdeploy`, `linuxdeploy-plugin-qt` and `appimagetool` on `PATH`, `QMAKE=$QT_ROOT_DIR/bin/qmake scripts/package-linux.sh` writes `dist/OpenDesigner-<version>-linux-x86_64.AppImage`. It needs the glibc of the machine that built it or newer (Ubuntu 22.04 in the release workflow) and keeps Qt's FFmpeg backend.
+- **Release:** bump `version` in `Cargo.toml`, merge, push the tag `v<version>`; `.github/workflows/release.yml` builds the three packages and publishes the GitHub release with `SHA256SUMS.txt`. A pull request that touches the packaging files runs the same builds without publishing.
 
 ## Testing
 

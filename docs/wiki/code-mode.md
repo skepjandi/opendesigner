@@ -89,7 +89,7 @@ The Web panel shows a running `web` service of the approved plan in a Qt WebEngi
 
 - The view is off the record (no cookies or cache kept), cannot open windows, and any navigation to a host other than `localhost`, `127.0.0.1` or `[::1]` is cancelled and opened in the system browser instead.
 - Only `WebFrame.qml` imports QtWebEngine and it is loaded on demand, so a build or machine without it shows "Open in browser" instead of failing to start.
-- It adds roughly 150 MB to the app bundle `[INFERENCE: from the framework sizes, not measured]`; `scripts/package-macos.sh`'s banned-module check does not match any WebEngine file name `[INFERENCE: the script was not run]`.
+- It adds roughly 150 MB to the app bundle `[INFERENCE: from the framework sizes, not measured]`; the bundle is 375 MB on macOS (measured with Qt 6.12), and `scripts/bundle-licensing.sh`'s banned-module check matches no WebEngine file name (the macOS package ran with it, 2026-11-23).
 
 ## Simulators
 

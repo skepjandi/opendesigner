@@ -44,7 +44,7 @@ Item {
     readonly property var steps: [
         function () {
             editor.newProject(folder + "/p.od", "Selftest", 1320, 2868)
-            return check(editor.hasProject, "project did not open") &&
+            return check(editor.hasProject, "project did not open: " + editor.message) &&
                    check(JSON.parse(editor.frames).length === 1, "expected one frame")
         },
         function () {
