@@ -13,7 +13,7 @@ All notable changes to OpenDesigner are documented here.
 **Area:** `feat(build)`, `docs(wiki)`
 
 - **`release.yml`.** Pushing `vX.Y.Z` builds an Apple-silicon macOS zip, a Windows x64 zip and a Linux x86_64 AppImage, runs the bundled program's offscreen scripted session on each, and publishes a GitHub release with `SHA256SUMS.txt`. A pull request touching the packaging runs the builds without publishing.
-- **Scripts.** New `scripts/package-windows.sh` and `scripts/package-linux.sh`; the GPL-only-module gate and the smoke test are shared (`scripts/bundle-licensing.sh`, `scripts/bundle-smoke.sh`) and `package-macos.sh` uses them. Windows and Linux delete Qt's FFmpeg backend (Linux uses the distribution's Qt, Multimedia then plays through GStreamer).
+- **Scripts.** New `scripts/package-windows.sh` and `scripts/package-linux.sh`; the GPL-only-module gate and the smoke test are shared (`scripts/bundle-licensing.sh`, `scripts/bundle-smoke.sh`) and `package-macos.sh` uses them. Windows deletes Qt's FFmpeg backend; the Linux AppImage is built with Qt 6.8.3 (Ubuntu's 6.4 cannot run the editor) and keeps Qt's FFmpeg, its only Linux backend (decision log).
 - **CI.** The Linux and Windows editor jobs install Qt Multimedia and Qt WebEngine, which `build.rs` links; they failed without them.
 
 **Not verified:** the Windows and Linux packages on a real desktop; no package is signed or notarized.

@@ -41,10 +41,9 @@ jobs:
 
   linux:
     name: Linux (x86_64)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-22.04
     timeout-minutes: 90
     env:
-      QMAKE: /usr/lib/qt6/bin/qmake6
       RUSTFLAGS: -C link-arg=-fuse-ld=lld
       # AppImages run without FUSE: the tools below are unpacked and run in place.
       APPIMAGE_EXTRACT_AND_RUN: "1"
@@ -52,18 +51,24 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: swatinem/rust-cache@v2
-      - name: Install Qt 6 and the AppImage tools
+      # Qt 6.8 from the official installers, as on Windows: the editor's QML needs a Qt newer than
+      # the 6.4 of Ubuntu's packages (its singletons do not resolve there).
+      - name: Install Qt 6
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: 6.8.3
+          host: linux
+          target: desktop
+          arch: linux_gcc_64
+          modules: qtwebengine qtwebchannel qtpositioning qtmultimedia
+          cache: true
+      - name: Install build dependencies and the AppImage tools
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential pkg-config lld imagemagick file \
-            qt6-base-dev qt6-base-dev-tools qt6-declarative-dev qt6-multimedia-dev qt6-webengine-dev \
-            qml6-module-qtquick qml6-module-qtquick-controls qml6-module-qtquick-layouts \
-            qml6-module-qtquick-dialogs qml6-module-qtquick-window qml6-module-qtquick-templates \
-            qml6-module-qtqml qml6-module-qtqml-workerscript qml6-module-qt-labs-folderlistmodel \
-            qml6-module-qt-labs-platform qml6-module-qtcore qml6-module-qtmultimedia \
-            qml6-module-qtwebengine libqt6svg6 \
-            gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-alsa libgl1-mesa-dev libxkbcommon-dev libfontconfig1 fonts-dejavu-core
+            libgl1-mesa-dev libxkbcommon-dev libxkbcommon-x11-0 libxcb-cursor0 libfontconfig1 \
+            libnss3 libasound2 libxcomposite1 libxdamage1 libxrandr2 libxtst6 fonts-dejavu-core
           mkdir -p "$HOME/tools"
           fetch() { # url sha256 file
             curl -fsSL -o "$HOME/tools/$3" "$1"
@@ -79,9 +84,7 @@ jobs:
           echo "$HOME/tools" >> "$GITHUB_PATH"
       - name: Package
         run: |
-          # the runner has no sound card: give ALSA a null device so Qt Multimedia can open one
-          printf 'pcm.!default { type null }\nctl.!default { type null }\n' > "$RUNNER_TEMP/asound.conf"
-          export ALSA_CONFIG_PATH="$RUNNER_TEMP/asound.conf"
+          export QMAKE="$QT_ROOT_DIR/bin/qmake"
           scripts/package-linux.sh dist
       - uses: actions/upload-artifact@v4
         with:
@@ -150,7 +153,7 @@ jobs:
           |--------|----------|-------|
           | macOS (Apple silicon) | `OpenDesigner-*-macos-arm64.zip` | Unzip and move `OpenDesigner.app` to Applications. Signed ad hoc, not notarized: on first open, right-click the app and choose Open (or run `xattr -dr com.apple.quarantine OpenDesigner.app`). |
           | Windows (x64) | `OpenDesigner-*-windows-x64.zip` | Unzip and run `opendesigner-app.exe`. Not code-signed: SmartScreen warns on first run (More info, then Run anyway). |
-          | Linux (x86_64) | `OpenDesigner-*-linux-x86_64.AppImage` | `chmod +x` it and run it. Built on Ubuntu 24.04: needs glibc 2.39 or newer. Sound plays through the GStreamer on your system (not bundled): it needs `gstreamer1.0-plugins-base` and `-good` (installed on most desktops); without them the app crashed in our CI runner when the Video panel loaded. |
+          | Linux (x86_64) | `OpenDesigner-*-linux-x86_64.AppImage` | `chmod +x` it and run it. Built on Ubuntu 22.04: needs glibc 2.35 or newer, and the system's NSS and ALSA libraries (present on desktop distributions). |
 
           Video export needs `ffmpeg` on your PATH. Verify a download against `SHA256SUMS.txt`.
 

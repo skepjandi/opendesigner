@@ -2,9 +2,9 @@
 # Builds OpenDesigner for Linux (release) as an AppImage with Qt bundled, checks the licensing
 # rules, and proves the bundle runs offscreen.
 #
-#   QMAKE=/usr/lib/qt6/bin/qmake6 scripts/package-linux.sh [output-dir]
+#   QMAKE=$QT_ROOT_DIR/bin/qmake scripts/package-linux.sh [output-dir]
 #
-# Linux x86_64 with Qt 6 (the distribution's packages: base, declarative, multimedia, WebEngine),
+# Linux x86_64 with Qt 6.8 (base, declarative, multimedia, WebEngine; official build),
 # ImageMagick, and `linuxdeploy`, `linuxdeploy-plugin-qt` and `appimagetool` on PATH (the release
 # workflow installs pinned copies). The AppImage runs on distributions with the glibc of the system
 # that built it or newer.
@@ -37,16 +37,13 @@ linuxdeploy --appdir "$appdir" --plugin qt \
   --executable "$root/target/release/opendesigner-app" \
   --desktop-file "$root/packaging/linux/opendesigner.desktop" \
   --icon-file "$icon" --icon-filename opendesigner
-# GStreamer stays the system's: a bundled libgstreamer looks for its plug-ins (queue, decodebin,
-# the sinks) relative to itself, finds none, and the program crashes when Qt Multimedia starts.
-find "$appdir/usr/lib" -name 'libgst*-1.0.so*' -print -delete
 # The offscreen platform plug-in is only there so the smoke test below can run without a display.
 plugins="$("$qmake" -query QT_INSTALL_PLUGINS)"
 mkdir -p "$appdir/usr/plugins/platforms"
 cp --update=none "$plugins/platforms/libqoffscreen.so" "$appdir/usr/plugins/platforms/"
 
 echo "==> licensing check"
-"$root/scripts/bundle-licensing.sh" "$appdir" strip-ffmpeg
+"$root/scripts/bundle-licensing.sh" "$appdir" allow-qt-ffmpeg
 
 echo "==> smoke test: the bundled app runs its scripted session offscreen"
 "$root/scripts/bundle-smoke.sh" "$appdir/AppRun"
