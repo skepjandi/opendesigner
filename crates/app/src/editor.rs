@@ -39,6 +39,7 @@ pub mod qobject {
         #[qproperty(QString, simulators)]
         #[qproperty(QString, simulator_picture, cxx_name = "simulatorPicture")]
         #[qproperty(QString, agent_probe, cxx_name = "agentProbe")]
+        #[qproperty(QString, update_status, cxx_name = "updateStatus")]
         #[qproperty(QString, checkerboard)]
         #[qproperty(QString, tokens)]
         #[qproperty(QString, languages)]
@@ -213,6 +214,15 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "clearFreesoundToken"]
         fn clear_freesound_token(self: Pin<&mut Self>);
+        #[qinvokable]
+        #[cxx_name = "updatesOnStart"]
+        fn updates_on_start(self: &Self) -> bool;
+        #[qinvokable]
+        #[cxx_name = "setUpdatesOnStart"]
+        fn set_updates_on_start(self: Pin<&mut Self>, on: bool);
+        #[qinvokable]
+        #[cxx_name = "checkForUpdates"]
+        fn check_for_updates(self: Pin<&mut Self>);
         #[qinvokable]
         #[cxx_name = "removeVideoAudio"]
         fn remove_video_audio(self: Pin<&mut Self>, video: &QString);
@@ -588,6 +598,7 @@ pub struct EditorRust {
     simulators: QString,
     simulator_picture: QString,
     agent_probe: QString,
+    update_status: QString,
     checkerboard: QString,
     tokens: QString,
     languages: QString,
@@ -1068,6 +1079,40 @@ impl qobject::Editor {
             return;
         }
         self.as_mut().show("Freesound token removed", false);
+    }
+
+    pub fn updates_on_start(&self) -> bool {
+        EditorState::updates_on_start()
+    }
+
+    pub fn set_updates_on_start(mut self: Pin<&mut Self>, on: bool) {
+        if let Err(e) = EditorState::set_updates_on_start(on) {
+            self.as_mut().show(&e, true);
+        }
+    }
+
+    /// Asks GitHub for the latest release on a worker thread and publishes the outcome as
+    /// `updateStatus`: `{state: "checking"}`, then `{state: "current" | "available" | "error", ...}`.
+    pub fn check_for_updates(mut self: Pin<&mut Self>) {
+        self.as_mut()
+            .set_update_status(q(&serde_json::json!({"state": "checking"}).to_string()));
+        let qt = self.qt_thread();
+        std::thread::spawn(move || {
+            let status = EditorState::check_for_updates();
+            let announce = (status["state"] == "available").then(|| {
+                format!(
+                    "OpenDesigner {} is available",
+                    status["version"].as_str().unwrap_or("")
+                )
+            });
+            let text = status.to_string();
+            let _ = qt.queue(move |mut editor| {
+                editor.as_mut().set_update_status(q(&text));
+                if let Some(message) = announce {
+                    editor.show(&message, false);
+                }
+            });
+        });
     }
 
     pub fn remove_video_audio(mut self: Pin<&mut Self>, video: &QString) {

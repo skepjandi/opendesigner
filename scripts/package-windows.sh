@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Builds OpenDesigner for Windows (release) with Qt bundled, checks the licensing rules, proves the
-# bundle runs offscreen, and zips it.
+# bundle runs offscreen, and writes a zip and an installer (dist/OpenDesigner-<version>-windows-x64-setup.exe).
 #
 #   QMAKE=C:/Qt/6.8.3/msvc2022_64/bin/qmake.exe scripts/package-windows.sh [output-dir]
 #
-# Run from Git Bash on Windows with the MSVC toolchain and Qt 6 (with Qt WebEngine and Qt
-# Multimedia) installed. The executable is not code-signed: Windows SmartScreen warns on first run.
+# Run from Git Bash on Windows with the MSVC toolchain, Qt 6 (with Qt WebEngine and Qt
+# Multimedia) and Inno Setup 6 installed. The executable is not code-signed: Windows SmartScreen warns on first run.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -52,7 +52,24 @@ echo "==> licensing check"
 echo "==> smoke test: the bundled app runs its scripted session offscreen"
 "$root/scripts/bundle-smoke.sh" "$dir/opendesigner-app.exe"
 
+echo "==> installer"
+iscc="$(command -v ISCC.exe || true)"
+for candidate in "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" "/c/Program Files/Inno Setup 6/ISCC.exe"; do
+  [ -n "$iscc" ] || { [ -x "$candidate" ] && iscc="$candidate"; }
+done
+[ -n "$iscc" ] || { echo "Inno Setup 6 (ISCC.exe) is needed for the installer" >&2; exit 1; }
+icon_args=()
+if command -v magick >/dev/null; then
+  magick "$root/assets/app-icon.png" -define icon:auto-resize=256,128,64,48,32,16 "$out/app.ico"
+  icon_args=("/DIconFile=$(cygpath -w "$out/app.ico")")
+else
+  echo "warning: ImageMagick not found; the installer has no icon" >&2
+fi
+MSYS2_ARG_CONV_EXCL='*' "$iscc" "/DAppVersion=$version" "/DSourceDir=$(cygpath -w "$dir")" \
+  "/DOutputDir=$(cygpath -w "$out")" "${icon_args[@]}" "$(cygpath -w "$root/packaging/windows/opendesigner.iss")"
+rm -f "$out/app.ico"
+
 echo "==> $out/$name.zip"
 rm -f "$out/$name.zip"
 (cd "$out" && 7z a -tzip -mx=6 "$name.zip" OpenDesigner >/dev/null)
-du -sh "$dir" "$out/$name.zip"
+du -sh "$dir" "$out/$name.zip" "$out/OpenDesigner-$version-windows-x64-setup.exe"

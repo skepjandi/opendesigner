@@ -63,6 +63,7 @@ pub mod text_split;
 pub mod timeline_export;
 pub mod token;
 pub mod tools;
+pub mod update;
 pub mod vector_tools;
 pub mod video_export;
 pub mod video_preview;

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Builds OpenDesigner.app (release) with Qt bundled, checks that no GPL-only Qt module went in,
-# ad-hoc signs it, and starts it offscreen to prove the bundle runs.
+# ad-hoc signs it, starts it offscreen to prove the bundle runs, and wraps it in a .dmg.
 #
 #   QMAKE="$(brew --prefix qt)/bin/qmake" scripts/package-macos.sh [output-dir]
 #
@@ -58,5 +58,14 @@ codesign --force --deep --sign - "$app"
 echo "==> smoke test: the bundled app runs its scripted session offscreen"
 "$root/scripts/bundle-smoke.sh" "$app/Contents/MacOS/opendesigner-app"
 
+echo "==> disk image"
+dmg="$out/OpenDesigner-$version-macos-$(uname -m).dmg"
+stage="$(mktemp -d)"
+ditto "$app" "$stage/OpenDesigner.app"
+ln -s /Applications "$stage/Applications"
+rm -f "$dmg"
+hdiutil create -quiet -volname "OpenDesigner $version" -srcfolder "$stage" -format UDZO -ov "$dmg"
+rm -rf "$stage"
+
 echo "==> $app"
-du -sh "$app"
+du -sh "$app" "$dmg"

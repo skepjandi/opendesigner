@@ -106,6 +106,9 @@ Item {
             return check(window.panels.layers.shownCount === 5, "selecting a layer on the canvas unfolds the ones above it: " + window.panels.layers.shownCount)
         },
         function () {
+            return check(!editor.updatesOnStart(), "checking for updates is off until the user turns it on")
+        },
+        function () {
             window.overlaysHidden = true
             const hidden = !canvas.overlays
             window.overlaysHidden = false

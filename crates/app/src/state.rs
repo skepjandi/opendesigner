@@ -1991,6 +1991,31 @@ impl EditorState {
         od_agent::freesound::clear_token().map_err(|e| e.to_string())
     }
 
+    /// Whether the user chose to check for a newer release when the editor starts. Off until
+    /// they turn it on (AGENTS.md invariant 1).
+    pub fn updates_on_start() -> bool {
+        od_agent::update::settings().check_on_start
+    }
+
+    pub fn set_updates_on_start(on: bool) -> Res<()> {
+        od_agent::update::save_settings(&od_agent::update::Settings { check_on_start: on })
+            .map_err(|e| e.to_string())
+    }
+
+    /// Asks GitHub for the latest release and compares it with this build. Blocks on the
+    /// network: the editor calls it from a worker thread.
+    pub fn check_for_updates() -> Value {
+        let current = env!("CARGO_PKG_VERSION");
+        match od_agent::update::latest() {
+            Ok(release) if od_agent::update::is_newer(&release.version, current) => json!({
+                "state": "available", "current": current, "version": release.version,
+                "url": release.url, "notes": release.notes,
+            }),
+            Ok(_) => json!({"state": "current", "current": current}),
+            Err(e) => json!({"state": "error", "current": current, "error": e.to_string()}),
+        }
+    }
+
     /// Takes the sound track off a video (the user does this from the Video tab). It is an
     /// operation, so it is attributed, undoable and checkpointed like any other edit.
     pub fn remove_video_audio(&mut self, video: &str) -> Res<()> {

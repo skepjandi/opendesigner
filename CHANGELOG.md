@@ -8,6 +8,15 @@ All notable changes to OpenDesigner are documented here.
 
 ## Unreleased
 
+### feat(build,app): Windows installer, macOS disk image and an update check
+
+**Area:** `feat(build)`, `feat(app)`, `feat(agent)`, `docs(wiki)`
+
+- **Packages.** The release adds `OpenDesigner-<version>-windows-x64-setup.exe` (Inno Setup, per user, no administrator prompt, installs over an older version) and `OpenDesigner-<version>-macos-arm64.dmg`; the zips stay.
+- **Update check.** Connect tab, Updates: "Check now" and an off-by-default "check when OpenDesigner starts" ask `api.github.com` for the latest release (`od_agent::update`; the answer is validated and size-capped) and show the new version with a link to its release page. Nothing is downloaded or installed by the app; in-place updating waits for signed packages (decision log).
+
+**Not verified:** the installer and the disk image on a clean machine; the check against the real API (the parser is tested on a recorded answer, and the first real answer will come when a release newer than the one installed exists).
+
 ### feat(build): release packages for macOS, Windows and Linux
 
 **Area:** `feat(build)`, `docs(wiki)`
