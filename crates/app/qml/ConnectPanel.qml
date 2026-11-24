@@ -15,6 +15,7 @@ Rectangle {
     readonly property var recipes: editor.mcpRunning ? JSON.parse(editor.connectRecipes()) : []
     readonly property var recipe: recipes.length > recipeBox.currentIndex ? recipes[recipeBox.currentIndex] : null
     property string skillResult: ""
+    readonly property var update: editor.updateStatus ? JSON.parse(editor.updateStatus) : ({})
     property var servers: []
     property string serverError: ""
     // the name of the server being changed, empty when a new one is added
@@ -284,6 +285,58 @@ Rectangle {
                     color: Theme.muted
                     font.pixelSize: 11
                     text: "Sounds come with their author's license. Whoever publishes the video must show the attribution the agent is given (title, author, license, link)."
+                }
+
+                Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: Theme.border }
+
+                Label { text: "Updates"; color: Theme.text; font.pixelSize: Theme.fontSize; font.bold: true }
+                Label {
+                    Layout.fillWidth: true
+                    wrapMode: Text.WordWrap
+                    color: Theme.muted
+                    font.pixelSize: 11
+                    text: "OpenDesigner can ask github.com whether a newer release exists. It sends nothing about you or your projects, and it downloads and installs nothing: you get a link to the release page. It checks only when you press the button, or at start if you turn that on."
+                }
+                CheckBox {
+                    Layout.fillWidth: true
+                    checked: root.editor.updatesOnStart()
+                    text: "Check for a new release when OpenDesigner starts"
+                    font.pixelSize: 12
+                    onToggled: root.editor.setUpdatesOnStart(checked)
+                    contentItem: Text { text: parent.text; font: parent.font; color: Theme.text; leftPadding: parent.indicator.width + 6; verticalAlignment: Text.AlignVCenter; wrapMode: Text.WordWrap }
+                }
+                RowLayout {
+                    Layout.fillWidth: true
+                    Btn {
+                        text: "Check now"
+                        enabled: root.update.state !== "checking"
+                        onClicked: root.editor.checkForUpdates()
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        wrapMode: Text.WordWrap
+                        font.pixelSize: 11
+                        color: root.update.state === "error" ? Theme.danger
+                             : root.update.state === "available" ? Theme.success : Theme.muted
+                        text: root.update.state === "checking" ? "Checking…"
+                            : root.update.state === "current" ? "You have the latest version (" + root.update.current + ")."
+                            : root.update.state === "available" ? "Version " + root.update.version + " is available (you have " + root.update.current + ")."
+                            : root.update.state === "error" ? "Could not check: " + root.update.error : ""
+                    }
+                    Btn {
+                        visible: root.update.state === "available"
+                        text: "Open release page"
+                        onClicked: Qt.openUrlExternally(root.update.url)
+                    }
+                }
+                Label {
+                    visible: root.update.state === "available" && !!root.update.notes
+                    Layout.fillWidth: true
+                    wrapMode: Text.WordWrap
+                    color: Theme.muted
+                    font.pixelSize: 11
+                    text: root.update.notes || ""
+                    textFormat: Text.PlainText
                 }
 
                 AssetPacksSection {

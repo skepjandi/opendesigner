@@ -36,7 +36,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: macos
-          path: dist/*.zip
+          path: |
+            dist/*.zip
+            dist/*.dmg
           if-no-files-found: error
 
   linux:
@@ -113,13 +115,16 @@ jobs:
       - name: Package
         shell: bash
         run: |
+          [ -x "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" ] || choco install innosetup -y --no-progress
           export QMAKE="$QT_ROOT_DIR/bin/qmake.exe"
           export PATH="$QT_ROOT_DIR/bin:$PATH"
           scripts/package-windows.sh dist
       - uses: actions/upload-artifact@v4
         with:
           name: windows
-          path: dist/*.zip
+          path: |
+            dist/*.zip
+            dist/*-setup.exe
           if-no-files-found: error
 
   publish:
@@ -152,9 +157,11 @@ jobs:
 
           | System | Download | Notes |
           |--------|----------|-------|
-          | macOS (Apple silicon) | `OpenDesigner-*-macos-arm64.zip` | Unzip and move `OpenDesigner.app` to Applications. Signed ad hoc, not notarized: on first open, right-click the app and choose Open (or run `xattr -dr com.apple.quarantine OpenDesigner.app`). |
-          | Windows (x64) | `OpenDesigner-*-windows-x64.zip` | Unzip and run `opendesigner-app.exe`. Not code-signed: SmartScreen warns on first run (More info, then Run anyway). |
+          | macOS (Apple silicon) | `OpenDesigner-*-macos-arm64.dmg` (or the `.zip`) | Open the disk image and drag `OpenDesigner` to Applications. Signed ad hoc, not notarized: on first open, right-click the app and choose Open (or run `xattr -dr com.apple.quarantine /Applications/OpenDesigner.app`). |
+          | Windows (x64) | `OpenDesigner-*-windows-x64-setup.exe` (or the `.zip`) | The installer is per user and needs no administrator rights. Not code-signed: SmartScreen warns on first run (More info, then Run anyway). Run a newer installer over an older install to update. |
           | Linux (x86_64) | `OpenDesigner-*-linux-x86_64.AppImage` | `chmod +x` it and run it. Built on Ubuntu 22.04: needs glibc 2.35 or newer, and the system's NSS and ALSA libraries (present on desktop distributions). |
+
+          **Updates.** Connect tab, Updates: a button asks github.com whether a newer release exists, and a checkbox does it when OpenDesigner starts (off by default). It only shows the new version and a link to its release page; installing is done by you with the new download.
 
           Video export needs `ffmpeg` on your PATH. Verify a download against `SHA256SUMS.txt`.
 
@@ -162,6 +169,14 @@ jobs:
 
           OpenDesigner is MPL-2.0. It links Qt 6 dynamically under the LGPLv3; the Qt libraries ship next to the program and can be replaced. License notices are inside each download.
           NOTES
-          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag \
-            --title "OpenDesigner ${GITHUB_REF_NAME#v}" --notes-file notes.md \
-            *.zip *.AppImage SHA256SUMS.txt
+          title="OpenDesigner ${GITHUB_REF_NAME#v}"
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            # the tag was moved to rebuild the release: replace its files and text
+            gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber \
+              *.zip *.dmg *.exe *.AppImage SHA256SUMS.txt
+            gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "$title" --notes-file notes.md
+          else
+            gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag \
+              --title "$title" --notes-file notes.md \
+              *.zip *.dmg *.exe *.AppImage SHA256SUMS.txt
+          fi

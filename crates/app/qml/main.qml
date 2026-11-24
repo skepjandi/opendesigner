@@ -1021,6 +1021,7 @@ ApplicationWindow {
 
     Component.onCompleted: {
         backend.layoutLoad(selfTest.folder === "")
+        if (selfTest.folder === "" && backend.updatesOnStart()) backend.checkForUpdates()
         if (selfTest.folder !== "" || !backend.skillOfferPending()) return
         offer.rows = JSON.parse(backend.skillStatus()).filter(r => r.detected && r.state === "not installed")
         offer.open()
