@@ -153,7 +153,7 @@ jobs:
           sha256sum * > SHA256SUMS.txt
           cat SHA256SUMS.txt
           cat > notes.md <<'NOTES'
-          First public build of OpenDesigner: a vector design canvas and video timeline that AI agents on your machine can drive. See the [README](https://github.com/skepjandi/opendesigner#readme) for what it does and [the wiki](https://github.com/skepjandi/opendesigner/wiki) for how it works.
+          OpenDesigner: a vector design canvas and video timeline that AI agents on your machine can drive. See the [README](https://github.com/skepjandi/opendesigner#readme) for what it does and [the wiki](https://github.com/skepjandi/opendesigner/wiki) for how it works.
 
           | System | Download | Notes |
           |--------|----------|-------|
@@ -165,7 +165,7 @@ jobs:
 
           Video export needs `ffmpeg` on your PATH. Verify a download against `SHA256SUMS.txt`.
 
-          **This is an early build.** The macOS bundle was run by its builder; the Windows and Linux builds are checked only by an offscreen scripted session on the CI runner, not by hand on real desktops.
+          **This is an early build.** See [the changelog](https://github.com/skepjandi/opendesigner/blob/main/CHANGELOG.md) for what changed. The macOS bundle was run by its builder; the Windows and Linux builds are checked only by an offscreen scripted session on the CI runner, not by hand on real desktops.
 
           OpenDesigner is MPL-2.0. It links Qt 6 dynamically under the LGPLv3; the Qt libraries ship next to the program and can be replaced. License notices are inside each download.
           NOTES
