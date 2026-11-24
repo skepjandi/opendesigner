@@ -7,6 +7,7 @@ pub mod chat;
 pub mod editor;
 mod frame_bridge;
 pub mod layout;
+pub mod path_env;
 pub mod preview;
 pub mod servers;
 pub mod showcase;
@@ -23,6 +24,7 @@ unsafe extern "C" {
 
 /// Opens the editor window and runs the event loop. Returns the process exit code.
 pub fn run() -> i32 {
+    path_env::inherit_login_path();
     // The Qt glue of each crate registers itself through an initializer. Linux links those in
     // whole, so the program must say which ones it uses; macOS only keeps what is referenced.
     cxx_qt::init_crate!(cxx_qt);

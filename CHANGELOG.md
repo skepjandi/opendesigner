@@ -8,6 +8,15 @@ All notable changes to OpenDesigner are documented here.
 
 ## Unreleased
 
+### fix(app): programs installed outside the system path are found from the Dock and the Finder
+
+**Area:** `fix(app)`
+
+- **Bug:** an app started from the Finder gets `PATH=/usr/bin:/bin:/usr/sbin:/sbin`, so the agent (`omp`, `claude`, `codex`) and `ffmpeg` were "not installed": "cannot start "omp": No such file or directory".
+- **Fix:** at startup (`crates/app/src/path_env.rs`) the editor appends to `PATH` the folders its login shell reports (only when `PATH` is the bare system one, bounded to 3 seconds) and the usual install folders that exist (Homebrew, `~/.local/bin`, `~/.bun/bin`, `~/.cargo/bin`, npm, Volta). Folders already on `PATH` keep their place. Unix only; Windows is unchanged.
+
+**Not verified:** a launch from the Finder with the fixed build (the shell query and the merge are unit-tested, and `omp` sits in `~/.bun/bin`, which both routes cover).
+
 ### feat(build,app): Windows installer, macOS disk image and an update check
 
 **Area:** `feat(build)`, `feat(app)`, `feat(agent)`, `docs(wiki)`
